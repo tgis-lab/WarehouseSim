@@ -1,0 +1,1991 @@
+{
+    "CellSpaces": [
+        {
+            "id": "c1",
+            "node": "POINT(0.5 0.5)",
+            "space": "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c2",
+            "node": "POINT(1.5 0.5)",
+            "space": "POLYGON((1 0, 2 0, 2 1, 1 1, 1 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c3",
+            "node": "POINT(2.5 0.5)",
+            "space": "POLYGON((2 0, 3 0, 3 1, 2 1, 2 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c4",
+            "node": "POINT(3.5 0.5)",
+            "space": "POLYGON((3 0, 4 0, 4 1, 3 1, 3 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }, 
+                    {
+                        "type": "picking point", 
+                        "features": {
+                            "boundShelves": ["c11", "c12", "c13"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c5",
+            "node": "POINT(4.5 0.5)",
+            "space": "POLYGON((4 0, 5 0, 5 1, 4 1, 4 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c6",
+            "node": "POINT(5.5 0.5)",
+            "space": "POLYGON((5 0, 6 0, 6 1, 5 1, 5 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c7",
+            "node": "POINT(6.5 0.5)",
+            "space": "POLYGON((6 0, 7 0, 7 1, 6 1, 6 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c8",
+            "node": "POINT(7.5 0.5)",
+            "space": "POLYGON((7 0, 8 0, 8 1, 7 1, 7 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }, 
+                    {
+                        "type": "picking point", 
+                        "features": {
+                            "boundShelves": ["c15", "c16", "c17"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c9",
+            "node": "POINT(8.5 0.5)",
+            "space": "POLYGON((8 0, 9 0, 9 1, 8 1, 8 0))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c10",
+            "node": "POINT(0.5 1.5)",
+            "space": "POLYGON((0 1, 1 1, 1 2, 0 2, 0 1))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c11",
+            "node": "POINT(1.5 1.5)",
+            "space": "POLYGON((1 1, 2 1, 2 2, 1 2, 1 1))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s1",
+                            "product_id": "ipad"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c12",
+            "node": "POINT(2.5 1.5)",
+            "space": "POLYGON((2 1, 3 1, 3 2, 2 2, 2 1))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s2",
+                            "product_id": "ipad"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c13",
+            "node": "POINT(3.5 1.5)",
+            "space": "POLYGON((3 1, 4 1, 4 2, 3 2, 3 1))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s3",
+                            "product_id": "ipad"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c14",
+            "node": "POINT(4.5 1.5)",
+            "space": "POLYGON((4 1, 5 1, 5 2, 4 2, 4 1))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c15",
+            "node": "POINT(5.5 1.5)",
+            "space": "POLYGON((5 1, 6 1, 6 2, 5 2, 5 1))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s4",
+                            "product_id": "iphone"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c16",
+            "node": "POINT(6.5 1.5)",
+            "space": "POLYGON((6 1, 7 1, 7 2, 6 2, 6 1))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s5",
+                            "product_id": "iphone"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c17",
+            "node": "POINT(7.5 1.5)",
+            "space": "POLYGON((7 1, 8 1, 8 2, 7 2, 7 1))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s6",
+                            "product_id": "iphone"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c18",
+            "node": "POINT(8.5 1.5)",
+            "space": "POLYGON((8 1, 9 1, 9 2, 8 2, 8 1))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c19",
+            "node": "POINT(0.5 2.5)",
+            "space": "POLYGON((0 2, 1 2, 1 3, 0 3, 0 2))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c20",
+            "node": "POINT(1.5 2.5)",
+            "space": "POLYGON((1 2, 2 2, 2 3, 1 3, 1 2))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s7",
+                            "product_id": "ipad"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c21",
+            "node": "POINT(2.5 2.5)",
+            "space": "POLYGON((2 2, 3 2, 3 3, 2 3, 2 2))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s8",
+                            "product_id": "ipad"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c22",
+            "node": "POINT(3.5 2.5)",
+            "space": "POLYGON((3 2, 4 2, 4 3, 3 3, 3 2))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s9",
+                            "product_id": "ipad"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c23",
+            "node": "POINT(4.5 2.5)",
+            "space": "POLYGON((4 2, 5 2, 5 3, 4 3, 4 2))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c24",
+            "node": "POINT(5.5 2.5)",
+            "space": "POLYGON((5 2, 6 2, 6 3, 5 3, 5 2))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s10",
+                            "product_id": "iphone"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c25",
+            "node": "POINT(6.5 2.5)",
+            "space": "POLYGON((6 2, 7 2, 7 3, 6 3, 6 2))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s11",
+                            "product_id": "iphone"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c26",
+            "node": "POINT(7.5 2.5)",
+            "space": "POLYGON((7 2, 8 2, 8 3, 7 3, 7 2))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s12",
+                            "product_id": "iphone"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c27",
+            "node": "POINT(8.5 2.5)",
+            "space": "POLYGON((8 2, 9 2, 9 3, 8 3, 8 2))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c28",
+            "node": "POINT(0.5 3.5)",
+            "space": "POLYGON((0 3, 1 3, 1 4, 0 4, 0 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c29",
+            "node": "POINT(1.5 3.5)",
+            "space": "POLYGON((1 3, 2 3, 2 4, 1 4, 1 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }, 
+                    {
+                        "type": "picking point", 
+                        "features": {
+                            "boundShelves": ["c20", "c21", "c22"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c30",
+            "node": "POINT(2.5 3.5)",
+            "space": "POLYGON((2 3, 3 3, 3 4, 2 4, 2 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c31",
+            "node": "POINT(3.5 3.5)",
+            "space": "POLYGON((3 3, 4 3, 4 4, 3 4, 3 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c32",
+            "node": "POINT(4.5 3.5)",
+            "space": "POLYGON((4 3, 5 3, 5 4, 4 4, 4 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 1,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c33",
+            "node": "POINT(5.5 3.5)",
+            "space": "POLYGON((5 3, 6 3, 6 4, 5 4, 5 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }, 
+                    {
+                        "type": "picking point", 
+                        "features": {
+                            "boundShelves": ["c24", "c25", "c26"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c34",
+            "node": "POINT(6.5 3.5)",
+            "space": "POLYGON((6 3, 7 3, 7 4, 6 4, 6 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c35",
+            "node": "POINT(7.5 3.5)",
+            "space": "POLYGON((7 3, 8 3, 8 4, 7 4, 7 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c36",
+            "node": "POINT(8.5 3.5)",
+            "space": "POLYGON((8 3, 9 3, 9 4, 8 4, 8 3))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c37",
+            "node": "POINT(0.5 4.5)",
+            "space": "POLYGON((0 4, 1 4, 1 5, 0 5, 0 4))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c38",
+            "node": "POINT(1.5 4.5)",
+            "space": "POLYGON((1 4, 2 4, 2 5, 1 5, 1 4))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s13",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c39",
+            "node": "POINT(2.5 4.5)",
+            "space": "POLYGON((2 4, 3 4, 3 5, 2 5, 2 4))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s14",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c40",
+            "node": "POINT(3.5 4.5)",
+            "space": "POLYGON((3 4, 4 4, 4 5, 3 5, 3 4))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s15",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c41",
+            "node": "POINT(4.5 4.5)",
+            "space": "POLYGON((4 4, 5 4, 5 5, 4 5, 4 4))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c42",
+            "node": "POINT(5.5 4.5)",
+            "space": "POLYGON((5 4, 6 4, 6 5, 5 5, 5 4))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s16",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c43",
+            "node": "POINT(6.5 4.5)",
+            "space": "POLYGON((6 4, 7 4, 7 5, 6 5, 6 4))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s17",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c44",
+            "node": "POINT(7.5 4.5)",
+            "space": "POLYGON((7 4, 8 4, 8 5, 7 5, 7 4))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s18",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c45",
+            "node": "POINT(8.5 4.5)",
+            "space": "POLYGON((8 4, 9 4, 9 5, 8 5, 8 4))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c46",
+            "node": "POINT(0.5 5.5)",
+            "space": "POLYGON((0 5, 1 5, 1 6, 0 6, 0 5))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c47",
+            "node": "POINT(1.5 5.5)",
+            "space": "POLYGON((1 5, 2 5, 2 6, 1 6, 1 5))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s19",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c48",
+            "node": "POINT(2.5 5.5)",
+            "space": "POLYGON((2 5, 3 5, 3 6, 2 6, 2 5))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s20",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c49",
+            "node": "POINT(3.5 5.5)",
+            "space": "POLYGON((3 5, 4 5, 4 6, 3 6, 3 5))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s21",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c50",
+            "node": "POINT(4.5 5.5)",
+            "space": "POLYGON((4 5, 5 5, 5 6, 4 6, 4 5))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c51",
+            "node": "POINT(5.5 5.5)",
+            "space": "POLYGON((5 5, 6 5, 6 6, 5 6, 5 5))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s22",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c52",
+            "node": "POINT(6.5 5.5)",
+            "space": "POLYGON((6 5, 7 5, 7 6, 6 6, 6 5))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s23",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c53",
+            "node": "POINT(7.5 5.5)",
+            "space": "POLYGON((7 5, 8 5, 8 6, 7 6, 7 5))",
+            "properties": {
+                "navigable": false,
+                "functions": [
+                    {
+                        "type": "shelf", 
+                        "features": {
+                            "shelf_id": "s24",
+                            "product_id": "imac"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c54",
+            "node": "POINT(8.5 5.5)",
+            "space": "POLYGON((8 5, 9 5, 9 6, 8 6, 8 5))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c55",
+            "node": "POINT(0.5 6.5)",
+            "space": "POLYGON((0 6, 1 6, 1 7, 0 7, 0 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": false, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c56",
+            "node": "POINT(1.5 6.5)",
+            "space": "POLYGON((1 6, 2 6, 2 7, 1 7, 1 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": false, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c57",
+            "node": "POINT(2.5 6.5)",
+            "space": "POLYGON((2 6, 3 6, 3 7, 2 7, 2 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": false, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c58",
+            "node": "POINT(3.5 6.5)",
+            "space": "POLYGON((3 6, 4 6, 4 7, 3 7, 3 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": false, 
+                            "isIntersection": false
+                        }
+                    }, 
+                    {
+                        "type": "picking point", 
+                        "features": {
+                            "boundShelves": ["c47", "c48", "c49"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c59",
+            "node": "POINT(4.5 6.5)",
+            "space": "POLYGON((4 6, 5 6, 5 7, 4 7, 4 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": false, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c60",
+            "node": "POINT(5.5 6.5)",
+            "space": "POLYGON((5 6, 6 6, 6 7, 5 7, 5 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c61",
+            "node": "POINT(6.5 6.5)",
+            "space": "POLYGON((6 6, 7 6, 7 7, 6 7, 6 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c62",
+            "node": "POINT(7.5 6.5)",
+            "space": "POLYGON((7 6, 8 6, 8 7, 7 7, 7 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": false
+                        }
+                    }, 
+                    {
+                        "type": "picking point", 
+                        "features": {
+                            "boundShelves": ["c51", "c52", "c53"]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "id": "c63",
+            "node": "POINT(8.5 6.5)",
+            "space": "POLYGON((8 6, 9 6, 9 7, 8 7, 8 6))",
+            "properties": {
+                "navigable": true,
+                "functions": [
+                    {
+                        "type": "aisle", 
+                        "features": {
+                            "aisleLevel": 0,
+                            "isEven": true, 
+                            "isIntersection": true
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "CellBoundaries": [
+        {
+            "id": "c1-c2",
+            "edge": "LINESTRING(0.5 0.5, 1.5 0.5)",
+            "boundary": "LINESTRING(1 0, 1 1)",
+            "source": "c1",
+            "target": "c2",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c2-c3",
+            "edge": "LINESTRING(1.5 0.5, 2.5 0.5)",
+            "boundary": "LINESTRING(2 0, 2 1)",
+            "source": "c2",
+            "target": "c3",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c3-c4",
+            "edge": "LINESTRING(2.5 0.5, 3.5 0.5)",
+            "boundary": "LINESTRING(3 0, 3 1)",
+            "source": "c3",
+            "target": "c4",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c4-c5",
+            "edge": "LINESTRING(3.5 0.5, 4.5 0.5)",
+            "boundary": "LINESTRING(4 0, 4 1)",
+            "source": "c4",
+            "target": "c5",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c5-c6",
+            "edge": "LINESTRING(4.5 0.5, 5.5 0.5)",
+            "boundary": "LINESTRING(5 0, 5 1)",
+            "source": "c5",
+            "target": "c6",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c6-c7",
+            "edge": "LINESTRING(5.5 0.5, 6.5 0.5)",
+            "boundary": "LINESTRING(6 0, 6 1)",
+            "source": "c6",
+            "target": "c7",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c7-c8",
+            "edge": "LINESTRING(6.5 0.5, 7.5 0.5)",
+            "boundary": "LINESTRING(7 0, 7 1)",
+            "source": "c7",
+            "target": "c8",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c8-c9",
+            "edge": "LINESTRING(7.5 0.5, 8.5 0.5)",
+            "boundary": "LINESTRING(8 0, 8 1)",
+            "source": "c8",
+            "target": "c9",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c10-c1",
+            "edge": "LINESTRING(0.5 1.5, 0.5 0.5)",
+            "boundary": "LINESTRING(0 1, 1 1)",
+            "source": "c10",
+            "target": "c1",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c5-c14",
+            "edge": "LINESTRING(4.5 0.5, 4.5 1.5)",
+            "boundary": "LINESTRING(4 1, 5 1)",
+            "source": "c5",
+            "target": "c14",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c9-c18",
+            "edge": "LINESTRING(8.5 0.5, 8.5 1.5)",
+            "boundary": "LINESTRING(8 1, 9 1)",
+            "source": "c9",
+            "target": "c18",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c19-c10",
+            "edge": "LINESTRING(0.5 2.5, 0.5 1.5)",
+            "boundary": "LINESTRING(0 2, 1 2)",
+            "source": "c19",
+            "target": "c10",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c14-c23",
+            "edge": "LINESTRING(4.5 1.5, 4.5 2.5)",
+            "boundary": "LINESTRING(4 2, 5 2)",
+            "source": "c14",
+            "target": "c23",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c18-c27",
+            "edge": "LINESTRING(8.5 1.5, 8.5 2.5)",
+            "boundary": "LINESTRING(8 2, 9 2)",
+            "source": "c18",
+            "target": "c27",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c28-c19",
+            "edge": "LINESTRING(0.5 3.5, 0.5 2.5)",
+            "boundary": "LINESTRING(0 3, 1 3)",
+            "source": "c28",
+            "target": "c19",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c29-c28",
+            "edge": "LINESTRING(1.5 3.5, 0.5 3.5)",
+            "boundary": "LINESTRING(1 3, 1 4)",
+            "source": "c29",
+            "target": "c28",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c30-c29",
+            "edge": "LINESTRING(2.5 3.5, 1.5 3.5)",
+            "boundary": "LINESTRING(2 3, 2 4)",
+            "source": "c30",
+            "target": "c29",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c31-c30",
+            "edge": "LINESTRING(3.5 3.5, 2.5 3.5)",
+            "boundary": "LINESTRING(3 3, 3 4)",
+            "source": "c31",
+            "target": "c30",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c32-c31",
+            "edge": "LINESTRING(4.5 3.5, 3.5 3.5)",
+            "boundary": "LINESTRING(4 3, 4 4)",
+            "source": "c32",
+            "target": "c31",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c23-c32",
+            "edge": "LINESTRING(4.5 2.5, 4.5 3.5)",
+            "boundary": "LINESTRING(4 3, 5 3)",
+            "source": "c23",
+            "target": "c32",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c33-c32",
+            "edge": "LINESTRING(5.5 3.5, 4.5 3.5)",
+            "boundary": "LINESTRING(5 3, 5 4)",
+            "source": "c33",
+            "target": "c32",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c34-c33",
+            "edge": "LINESTRING(6.5 3.5, 5.5 3.5)",
+            "boundary": "LINESTRING(6 3, 6 4)",
+            "source": "c34",
+            "target": "c33",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c35-c34",
+            "edge": "LINESTRING(7.5 3.5, 6.5 3.5)",
+            "boundary": "LINESTRING(7 3, 7 4)",
+            "source": "c35",
+            "target": "c34",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c36-c35",
+            "edge": "LINESTRING(8.5 3.5, 7.5 3.5)",
+            "boundary": "LINESTRING(8 3, 8 4)",
+            "source": "c36",
+            "target": "c35",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c27-c36",
+            "edge": "LINESTRING(8.5 2.5, 8.5 3.5)",
+            "boundary": "LINESTRING(8 3, 9 3)",
+            "source": "c27",
+            "target": "c36",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c37-c28",
+            "edge": "LINESTRING(0.5 4.5, 0.5 3.5)",
+            "boundary": "LINESTRING(0 4, 1 4)",
+            "source": "c37",
+            "target": "c28",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c32-c41",
+            "edge": "LINESTRING(4.5 3.5, 4.5 4.5)",
+            "boundary": "LINESTRING(4 4, 5 4)",
+            "source": "c32",
+            "target": "c41",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c36-c45",
+            "edge": "LINESTRING(8.5 3.5, 8.5 4.5)",
+            "boundary": "LINESTRING(8 4, 9 4)",
+            "source": "c36",
+            "target": "c45",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c46-c37",
+            "edge": "LINESTRING(0.5 5.5, 0.5 4.5)",
+            "boundary": "LINESTRING(0 5, 1 5)",
+            "source": "c46",
+            "target": "c37",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c41-c50",
+            "edge": "LINESTRING(4.5 4.5, 4.5 5.5)",
+            "boundary": "LINESTRING(4 5, 5 5)",
+            "source": "c41",
+            "target": "c50",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c45-c54",
+            "edge": "LINESTRING(8.5 4.5, 8.5 5.5)",
+            "boundary": "LINESTRING(8 5, 9 5)",
+            "source": "c45",
+            "target": "c54",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c55-c46",
+            "edge": "LINESTRING(0.5 6.5, 0.5 5.5)",
+            "boundary": "LINESTRING(0 6, 1 6)",
+            "source": "c55",
+            "target": "c46",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c56-c55",
+            "edge": "LINESTRING(1.5 6.5, 0.5 6.5)",
+            "boundary": "LINESTRING(1 6, 1 7)",
+            "source": "c56",
+            "target": "c55",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c57-c56",
+            "edge": "LINESTRING(2.5 6.5, 1.5 6.5)",
+            "boundary": "LINESTRING(2 6, 2 7)",
+            "source": "c57",
+            "target": "c56",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c58-c57",
+            "edge": "LINESTRING(3.5 6.5, 2.5 6.5)",
+            "boundary": "LINESTRING(3 6, 3 7)",
+            "source": "c58",
+            "target": "c57",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c59-c58",
+            "edge": "LINESTRING(4.5 6.5, 3.5 6.5)",
+            "boundary": "LINESTRING(4 6, 4 7)",
+            "source": "c59",
+            "target": "c58",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c50-c59",
+            "edge": "LINESTRING(4.5 5.5, 4.5 6.5)",
+            "boundary": "LINESTRING(4 6, 5 6)",
+            "source": "c50",
+            "target": "c59",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c60-c59",
+            "edge": "LINESTRING(5.5 6.5, 4.5 6.5)",
+            "boundary": "LINESTRING(5 6, 5 7)",
+            "source": "c60",
+            "target": "c59",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c61-c60",
+            "edge": "LINESTRING(6.5 6.5, 5.5 6.5)",
+            "boundary": "LINESTRING(6 6, 6 7)",
+            "source": "c61",
+            "target": "c60",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c62-c61",
+            "edge": "LINESTRING(7.5 6.5, 6.5 6.5)",
+            "boundary": "LINESTRING(7 6, 7 7)",
+            "source": "c62",
+            "target": "c61",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c63-c62",
+            "edge": "LINESTRING(8.5 6.5, 7.5 6.5)",
+            "boundary": "LINESTRING(8 6, 8 7)",
+            "source": "c63",
+            "target": "c62",
+            "properties": {
+                "type": "door"
+            }
+        },
+        {
+            "id": "c54-c63",
+            "edge": "LINESTRING(8.5 5.5, 8.5 6.5)",
+            "boundary": "LINESTRING(8 6, 9 6)",
+            "source": "c54",
+            "target": "c63",
+            "properties": {
+                "type": "door"
+            }
+        }
+    ],
+    "Layers": [
+        {
+            "id": "l1",
+            "cells": [
+                "c1", "c5", "c9", "c28", "c32", "c36", "c55", "c59", "c63"
+            ],
+            "properties": {
+                "type": "intersection",
+                "speed": 1.0
+            }
+        },
+        {
+            "id": "l2",
+            "cells": [
+                "c2", "c3", "c4"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l3",
+            "cells": [
+                "c6", "c7", "c8"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l4",
+            "cells": [
+                "c29", "c30", "c31"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l5",
+            "cells": [
+                "c33", "c34", "c35"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l6",
+            "cells": [
+                "c56", "c57", "c58"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 1,
+                "speed": 5.0
+            }
+        },
+        {
+            "id": "l7",
+            "cells": [
+                "c60", "c61", "c62"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 1,
+                "speed": 5.0
+            }
+        },
+        {
+            "id": "l8",
+            "cells": [
+                "c10", "c19"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l9",
+            "cells": [
+                "c14", "c23"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l10",
+            "cells": [
+                "c18", "c27"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 1,
+                "speed": 5.0
+            }
+        },
+        {
+            "id": "l11",
+            "cells": [
+                "c37", "c46"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l12",
+            "cells": [
+                "c41", "c50"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 0,
+                "speed": 3.0
+            }
+        },
+        {
+            "id": "l13",
+            "cells": [
+                "c45", "c54"
+            ],
+            "properties": {
+                "type": "road",
+                "level": 1,
+                "speed": 5.0
+            }
+        }
+    ],
+    "Containers": [
+        {
+            "id": "ct1",
+            "cell": "c1",
+            "source": ["c10-c1"],
+            "target": ["c1-c2"],
+            "limited": []
+        },
+        {
+            "id": "ct2",
+            "cell": "c2",
+            "source": ["c1-c2"],
+            "target": ["c2-c3"],
+            "limited": []
+        },
+        {
+            "id": "ct3",
+            "cell": "c3",
+            "source": ["c2-c3"],
+            "target": ["c3-c4"],
+            "limited": []
+        },
+        {
+            "id": "ct4",
+            "cell": "c4",
+            "source": ["c3-c4"],
+            "target": ["c4-c5"],
+            "limited": []
+        },
+        {
+            "id": "ct5",
+            "cell": "c5",
+            "source": ["c4-c5"],
+            "target": ["c5-c6", "c5-c14"],
+            "limited": []
+        },
+        {
+            "id": "ct6",
+            "cell": "c6",
+            "source": ["c5-c6"],
+            "target": ["c6-c7"],
+            "limited": []
+        },
+        {
+            "id": "ct7",
+            "cell": "c7",
+            "source": ["c6-c7"],
+            "target": ["c7-c8"],
+            "limited": []
+        },
+        {
+            "id": "ct8",
+            "cell": "c8",
+            "source": ["c7-c8"],
+            "target": ["c8-c9"],
+            "limited": []
+        },
+        {
+            "id": "ct9",
+            "cell": "c9",
+            "source": ["c8-c9"],
+            "target": ["c9-c18"],
+            "limited": []
+        },
+        {
+            "id": "ct10",
+            "cell": "c10",
+            "source": ["c19-c10"],
+            "target": ["c10-c1"],
+            "limited": []
+        },
+        {
+            "id": "ct14",
+            "cell": "c14",
+            "source": ["c5-c14"],
+            "target": ["c14-c23"],
+            "limited": []
+        },
+        {
+            "id": "ct18",
+            "cell": "c18",
+            "source": ["c9-c18"],
+            "target": ["c18-c27"],
+            "limited": []
+        },
+        {
+            "id": "ct19",
+            "cell": "c19",
+            "source": ["c28-c19"],
+            "target": ["c19-c10"],
+            "limited": []
+        },
+        {
+            "id": "ct23",
+            "cell": "c23",
+            "source": ["c14-c23"],
+            "target": ["c23-c32"],
+            "limited": []
+        },
+        {
+            "id": "ct27",
+            "cell": "c27",
+            "source": ["c18-c27"],
+            "target": ["c27-c36"],
+            "limited": []
+        },
+        {
+            "id": "ct28",
+            "cell": "c28",
+            "source": ["c29-c28", "c37-c28"],
+            "target": ["c28-c19"],
+            "limited": []
+        },
+        {
+            "id": "ct29",
+            "cell": "c29",
+            "source": ["c30-c29"],
+            "target": ["c29-c28"],
+            "limited": []
+        },
+        {
+            "id": "ct30",
+            "cell": "c30",
+            "source": ["c31-c30"],
+            "target": ["c30-c29"],
+            "limited": []
+        },
+        {
+            "id": "ct31",
+            "cell": "c31",
+            "source": ["c32-c31"],
+            "target": ["c31-c30"],
+            "limited": []
+        },
+        {
+            "id": "ct32",
+            "cell": "c32",
+            "source": ["c23-c32", "c33-c32"],
+            "target": ["c32-c31", "c32-c41"],
+            "limited": [["c23-c32", "c32-c41"]]
+        },
+        {
+            "id": "ct33",
+            "cell": "c33",
+            "source": ["c34-c33"],
+            "target": ["c33-c32"],
+            "limited": []
+        },
+        {
+            "id": "ct34",
+            "cell": "c34",
+            "source": ["c35-c34"],
+            "target": ["c34-c33"],
+            "limited": []
+        },
+        {
+            "id": "ct35",
+            "cell": "c35",
+            "source": ["c36-c35"],
+            "target": ["c35-c34"],
+            "limited": []
+        },
+        {
+            "id": "ct36",
+            "cell": "c36",
+            "source": ["c27-c36"],
+            "target": ["c36-c35", "c36-c45"],
+            "limited": []
+        },
+        {
+            "id": "ct37",
+            "cell": "c37",
+            "source": ["c46-c37"],
+            "target": ["c37-c28"],
+            "limited": []
+        },
+        {
+            "id": "ct41",
+            "cell": "c41",
+            "source": ["c32-c41"],
+            "target": ["c41-c50"],
+            "limited": []
+        },
+        {
+            "id": "ct45",
+            "cell": "c45",
+            "source": ["c36-c45"],
+            "target": ["c45-c54"],
+            "limited": []
+        },
+        {
+            "id": "ct46",
+            "cell": "c46",
+            "source": ["c55-c46"],
+            "target": ["c46-c37"],
+            "limited": []
+        },
+        {
+            "id": "ct50",
+            "cell": "c50",
+            "source": ["c41-c50"],
+            "target": ["c50-c59"],
+            "limited": []
+        },
+        {
+            "id": "ct54",
+            "cell": "c54",
+            "source": ["c45-c54"],
+            "target": ["c54-c63"],
+            "limited": []
+        },
+        {
+            "id": "ct55",
+            "cell": "c55",
+            "source": ["c56-c55"],
+            "target": ["c55-c46"],
+            "limited": []
+        },
+        {
+            "id": "ct56",
+            "cell": "c56",
+            "source": ["c57-c56"],
+            "target": ["c56-c55"],
+            "limited": []
+        },
+        {
+            "id": "ct57",
+            "cell": "c57",
+            "source": ["c58-c57"],
+            "target": ["c57-c56"],
+            "limited": []
+        },
+        {
+            "id": "ct58",
+            "cell": "c58",
+            "source": ["c59-c58"],
+            "target": ["c58-c57"],
+            "limited": []
+        },
+        {
+            "id": "ct59",
+            "cell": "c59",
+            "source": ["c50-c59", "c60-c59"],
+            "target": ["c59-c58"],
+            "limited": []
+        },
+        {
+            "id": "ct60",
+            "cell": "c60",
+            "source": ["c61-c60"],
+            "target": ["c60-c59"],
+            "limited": []
+        },
+        {
+            "id": "ct61",
+            "cell": "c61",
+            "source": ["c62-c61"],
+            "target": ["c61-c60"],
+            "limited": []
+        },
+        {
+            "id": "ct62",
+            "cell": "c62",
+            "source": ["c63-c62"],
+            "target": ["c62-c61"],
+            "limited": []
+        },
+        {
+            "id": "ct63",
+            "cell": "c63",
+            "source": ["c54-c63"],
+            "target": ["c63-c62"],
+            "limited": []
+        }
+    ]
+}
