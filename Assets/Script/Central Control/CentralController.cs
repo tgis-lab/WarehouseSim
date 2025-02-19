@@ -8,6 +8,7 @@ using UnityEngine;
 using Map;
 using CentralControl.OrderAssignment;
 using CentralControl.RobotControl;
+using CentralControl.PickerControl;
 
 namespace CentralControl
 {
@@ -15,6 +16,7 @@ namespace CentralControl
     {
         public OrderManager orderManager;
         public RobotManager robotManager;
+        public PickerManager pickerManager;
         public IndoorSpace indoorSpace;
         public MapLoader mapLoader;
         public IntersectionAreaManager intersectionAreaManager;
@@ -56,8 +58,11 @@ namespace CentralControl
             {
                 Debug.Log("Global occupancy layer initialized, initializing intersections...");
                 intersectionAreaManager.InitializeIntersectionAreas(mapLoader.indoorSpace);
+
+                Debug.Log("Map loaded, initializing pickers...");
+                pickerManager.InitializePickers(mapLoader.indoorSpace);
                 
-                Debug.Log("Map loaded, initializing robots...");
+                Debug.Log("Pickers initialized, initializing robots...");
                 robotManager.InitializeRobots(mapLoader.indoorSpace, mapLoader.GetGraph(), mapLoader.GetMapGrid(), globalOccupancyLayer, intersectionAreaManager);
             }
             else

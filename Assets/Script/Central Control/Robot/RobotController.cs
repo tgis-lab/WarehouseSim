@@ -9,6 +9,7 @@ using NetTopologySuite.Geometries;
 using PathPlanning;
 using Map;
 using CentralControl.OrderAssignment;
+using CentralControl.PickerControl;
 
 namespace CentralControl.RobotControl
 {
@@ -57,6 +58,8 @@ namespace CentralControl.RobotControl
         private bool isProcessingOrdersRunning = false;
         private Order currentOrder;
         private Coroutine statusCheckCoroutine;
+
+        private bool pickingCompleted = false;
 
         public bool IsMoving => currentStates.Contains(RobotState.Moving);
         public bool IsPicking => currentStates.Contains(RobotState.Picking);
@@ -330,6 +333,23 @@ namespace CentralControl.RobotControl
             UpdateRobotStatus();
         }
         # endregion
+
+        # region communication module
+        private IEnumerator WaitForPicking(Order order, Vector3 position)
+        {
+            SetState(RobotState.Moving, false);
+            SetState(RobotState.Picking, true);
+            Debug.Log($"Robot {Id} reached picking point, waiting for picker");
+
+            pickingCompleted = false;
+            EventManager.Instance.TriggerRobotReadyForPicking(Id.ToString(), order.PickingPoint, position);
+
+            yield return new WaitUntil(() => pickingCompleted);
+            
+            Debug.Log($"Robot {Id} picking operation completed");
+            SetState(RobotState.Picking, false);
+        }
+        #endregion
 
         # region path planning module
         private Vector3 GetTargetPosition(PickingPoint pickingPoint)

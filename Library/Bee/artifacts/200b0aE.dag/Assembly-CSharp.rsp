@@ -103,7 +103,6 @@
 -define:ENABLE_UNITY_COLLECTIONS_CHECKS
 -define:ENABLE_BURST_AOT
 -define:UNITY_TEAM_LICENSE
--define:UNITY_PRO_LICENSE
 -define:ENABLE_CUSTOM_RENDER_TEXTURE
 -define:ENABLE_DIRECTOR
 -define:ENABLE_LOCALIZATION
@@ -320,8 +319,8 @@
 -r:"/Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/NetStandard/compat/2.1.0/shims/netstandard/System.Xml.XPath.XDocument.dll"
 -r:"/Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/NetStandard/Extensions/2.0.0/System.Runtime.InteropServices.WindowsRuntime.dll"
 -r:"/Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/NetStandard/ref/2.1.0/netstandard.dll"
--r:"/Users/knight9/Repository/WarehouseSim/SmartWarehouseSimulation/Library/PackageCache/com.unity.testtools.codecoverage@1.2.4/lib/ReportGenerator/ReportGeneratorMerged.dll"
--r:"/Users/knight9/Repository/WarehouseSim/SmartWarehouseSimulation/Library/PackageCache/com.unity.visualscripting@1.9.1/Runtime/VisualScripting.Flow/Dependencies/NCalc/Unity.VisualScripting.Antlr3.Runtime.dll"
+-r:"/Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Library/PackageCache/com.unity.testtools.codecoverage@1.2.4/lib/ReportGenerator/ReportGeneratorMerged.dll"
+-r:"/Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Library/PackageCache/com.unity.visualscripting@1.9.1/Runtime/VisualScripting.Flow/Dependencies/NCalc/Unity.VisualScripting.Antlr3.Runtime.dll"
 -r:"Assets/Plugins/NetTopologySuite.dll"
 -r:"Assets/Plugins/Newtonsoft.Json.dll"
 -r:"Library/Bee/artifacts/200b0aE.dag/Unity.EditorCoroutines.Editor.ref.dll"
@@ -353,6 +352,8 @@
 "Assets/Script/Central Control/Order/Order.cs"
 "Assets/Script/Central Control/Order/OrderAssiignmentSelector.cs"
 "Assets/Script/Central Control/Order/OrderManager.cs"
+"Assets/Script/Central Control/Picker/PickerController.cs"
+"Assets/Script/Central Control/Picker/PickerManager.cs"
 "Assets/Script/Central Control/Robot/RobotController.cs"
 "Assets/Script/Central Control/Robot/RobotEvent.cs"
 "Assets/Script/Central Control/Robot/RobotManager.cs"
