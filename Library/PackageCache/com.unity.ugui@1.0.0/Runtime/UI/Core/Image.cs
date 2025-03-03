@@ -884,7 +884,7 @@ namespace UnityEngine.UI
 
         private void TrackSprite()
         {
-            if (activeSprite != null && (activeSprite.texture == null || activeSprite.isUsingPlaceholder))
+            if (activeSprite != null && activeSprite.texture == null)
             {
                 TrackImage(this);
                 m_Tracked = true;
@@ -1072,6 +1072,9 @@ namespace UnityEngine.UI
 
                     int y2 = y + 1;
 
+                    // Check for zero or negative dimensions to prevent invalid quads (UUM-71372)
+                    if ((s_VertScratch[x2].x - s_VertScratch[x].x <= 0) || (s_VertScratch[y2].y - s_VertScratch[y].y <= 0))
+                        continue;
 
                     AddQuad(toFill,
                         new Vector2(s_VertScratch[x].x, s_VertScratch[y].y),
@@ -1862,10 +1865,7 @@ namespace UnityEngine.UI
                 if (null != g.activeSprite && spriteAtlas.CanBindTo(g.activeSprite))
                 {
                     g.SetAllDirty();
-                    if (!spriteAtlas.IsPlaceholder())
-                    {
-                        m_TrackedTexturelessImages.RemoveAt(i);
-                    }
+                    m_TrackedTexturelessImages.RemoveAt(i);
                 }
             }
         }
