@@ -208,6 +208,19 @@ namespace Map
             timeline.AddPlannedOccupancy(startTime, endTime, identifier);
         }
 
+        // 设置实时动态的占用信息
+        public void SetDynamicOccupancy(string cellSpaceId, float startTime, float endTime, string obstacleId, string planId = null)
+        {
+            if (!cellSpaceTimelines.TryGetValue(cellSpaceId, out CellSpaceTimeline timeline))
+            {
+                Debug.LogWarning($"CellSpace {cellSpaceId} not found");
+                return;
+            }
+
+            var identifier = new OccupancyIdentifier(obstacleId, planId, OccupancyType.Realtime);
+            timeline.AddOccupancy(startTime, endTime, identifier);
+        }
+
         // 基础的占用设置方法
         private void SetOccupancy(string cellSpaceId, float startTime, float endTime, OccupancyIdentifier identifier)
         {

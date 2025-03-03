@@ -104,8 +104,31 @@ namespace CentralControl.RobotControl
         private void Awake()
         {
             rb = GetComponent<Rigidbody>();
+            if (rb == null)
+            {
+                Debug.LogWarning($"Robot {Id}: No Rigidbody found, adding one automatically");
+                rb = gameObject.AddComponent<Rigidbody>();
+                
+                // 设置基本属性
+                rb.useGravity = false;  // 通常机器人不需要重力
+                rb.isKinematic = false; // 允许物理引擎移动物体
+                rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+                rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+                rb.interpolation = RigidbodyInterpolation.Interpolate;
+                rb.mass = 1.0f;
+                rb.drag = 0.5f;
+            }
+
             detectionRadius = baseDetectionRadius;
             obstacleLayer = LayerMask.GetMask("RobotLayer", "ObstacleLayer");
+
+            if (GetComponent<Collider>() == null)
+            {
+                CapsuleCollider collider = gameObject.AddComponent<CapsuleCollider>();
+                collider.radius = 0.5f;
+                collider.height = 1.5f;
+                collider.center = new Vector3(0, 0.75f, 0);
+            }
         }
 
         private void Update()
@@ -113,6 +136,7 @@ namespace CentralControl.RobotControl
             if (!isInitialized) return;
 
             UpdateRobotStatus();
+            UpdateDynamicObstaclePerception();
             
             if (IsMoving && !isWaitingForPicking)
             {
@@ -538,26 +562,35 @@ namespace CentralControl.RobotControl
 
         private bool ShouldActivateDWA(float activationDistance)
         {
-            // 检查是否有障碍物
+            // Check for nearby obstacles
             bool nearObstacle = Physics.CheckSphere(transform.position, activationDistance, obstacleLayer);
             
-            // 检查是否在交叉路口附近
+            // Check if near intersection
             bool nearIntersection = false;
             if (intersectionManager != null)
             {
                 nearIntersection = intersectionManager.IsNearIntersection(transform.position, activationDistance);
             }
             
-            // 检查是否接近转弯点
-            bool approachingTurn = IsApproachingTurn();
-            
-            // 为防止频繁切换，添加滞后
+            // Cooldown DWA activation
             if (isDWAEnabled && Time.time - lastDWAStateChangeTime < DWA_STATE_COOLDOWN)
                 return true;
                 
-            bool shouldActivate = nearObstacle || nearIntersection || approachingTurn;
+            bool shouldActivate = nearObstacle || nearIntersection;
+
+            if (shouldActivate)
+            {
+                // If activate DWA due to nearby obstacle, log
+                if (nearObstacle && !isDWAEnabled)
+                    Debug.Log($"Robot {Id}: Activating DWA due to nearby obstacle");
+            }
+            else
+            {
+                // Reset obstacle weight
+                dwaPlanner.ObstacleWeight = 0.15f;
+            }
             
-            // 如果状态发生变化，记录时间
+            // Record DWA state change and time
             if (shouldActivate != isDWAEnabled)
             {
                 lastDWAStateChangeTime = Time.time;
@@ -567,38 +600,18 @@ namespace CentralControl.RobotControl
             return shouldActivate;
         }
 
-        private bool IsApproachingTurn()
-        {
-            if (currentPath == null || currentPathIndex >= currentPath.Count - 2)
-                return false;
-                
-            // 计算当前行进方向
-            Vector3 currentPos = transform.position;
-            Vector3 nextWaypoint = GetPointVector3((Point)currentPath[currentPathIndex].Point);
-            Vector3 currentDir = (nextWaypoint - currentPos).normalized;
-            
-            // 计算下一段路径的方向
-            Vector3 pathPoint1 = GetPointVector3((Point)currentPath[currentPathIndex].Point);
-            Vector3 pathPoint2 = GetPointVector3((Point)currentPath[currentPathIndex + 1].Point);
-            Vector3 nextDir = (pathPoint2 - pathPoint1).normalized;
-            
-            // 如果转角大于30度，视为转弯
-            float angle = Vector3.Angle(currentDir, nextDir);
-            return angle > 30f && Vector3.Distance(currentPos, nextWaypoint) < 2.0f;
-        }
-
         private bool IsOffPath()
         {
             if (currentPath == null || currentPath.Count == 0)
                 return false;
                 
-            // 找到路径上最近的点
+            // Find closest point on path
             Vector3 currentPos = transform.position;
             Vector3 closestPoint = FindClosestPointOnPath(currentPos);
             
             float distanceFromPath = Vector3.Distance(currentPos, closestPoint);
             
-            // 允许在开放单元格中有较大偏差，在边界附近有较小偏差
+            // Allow larger deviation in open cells, smaller near boundaries
             CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(currentPos);
             float deviationThreshold = IsNearCellBoundary(currentCell) ? 0.5f : 1.0f;
             
@@ -610,7 +623,7 @@ namespace CentralControl.RobotControl
             Vector3 closestPoint = Vector3.zero;
             float closestDistance = float.MaxValue;
             
-            // 检查当前和接下来几个路径段，找到最近的点
+            // Check current and next few path segments for closest point
             int startIdx = Mathf.Max(0, currentPathIndex - 1);
             int endIdx = Mathf.Min(currentPath.Count - 1, currentPathIndex + 2);
             
@@ -671,20 +684,19 @@ namespace CentralControl.RobotControl
 
         private void CorrectPathDeviation()
         {
-            // 找到路径上最近的点
+            // Find closest point on path
             Vector3 currentPos = transform.position;
             Vector3 closestPathPoint = FindClosestPointOnPath(currentPos);
             
-            // 调整速度直接指向路径
+            // Adjust velocity directly towards path
             Vector3 correctionDirection = (closestPathPoint - currentPos).normalized;
             
-            // 应用修正力，带有平滑过渡
             Vector3 correctionVelocity = correctionDirection * defaultSpeed;
             rb.velocity = Vector3.Lerp(rb.velocity, correctionVelocity, 0.3f);
             
             Debug.Log($"Robot {Id}: Correcting path deviation. Distance from path: {Vector3.Distance(currentPos, closestPathPoint)}");
             
-            // 如果偏离严重，考虑重新规划路径
+            // Replan path if deviation is too large
             if (Vector3.Distance(currentPos, closestPathPoint) > 2.0f && Time.time - lastReplanTime > replanInterval)
             {
                 lastReplanTime = Time.time;
@@ -744,7 +756,6 @@ namespace CentralControl.RobotControl
                 currentMovement.Add(new PathSegment(path[i], times[i], speeds[i]));
             }
 
-            // 更新DWA最大速度
             dwaPlanner.MaxSpeed = speeds.Max();
         }
         #endregion
@@ -799,6 +810,37 @@ namespace CentralControl.RobotControl
         #endregion
 
         #region Occupancy Layer
+        private void UpdateDynamicObstaclePerception()
+        {
+            float currentTime = Time.time;
+            
+            Collider[] nearbyColliders = Physics.OverlapSphere(transform.position, detectionRadius, obstacleLayer);
+            
+            foreach (var collider in nearbyColliders)
+            {
+                if (collider.gameObject == this.gameObject)
+                    continue;
+                    
+                CellSpace obstacleCellSpace = indoorSpace.GetCellSpaceFromCoordinates(collider.transform.position);
+                if (obstacleCellSpace == null) continue;
+                
+                if (personalOccupancyLayer != null)
+                {
+                    string obstaclerId = "unknown";
+                    RobotController otherRobot = collider.GetComponent<RobotController>();
+                    if (otherRobot != null)
+                        obstaclerId = otherRobot.Id.ToString();
+                        
+                    personalOccupancyLayer.SetDynamicOccupancy(
+                        obstacleCellSpace.Id,
+                        currentTime,
+                        currentTime + 0.5f, 
+                        obstaclerId
+                    );
+                }
+            }
+        }
+    
         public DynamicOccupancyLayer GetPersonalOccupancyLayer()
         {
             return personalOccupancyLayer;
@@ -812,19 +854,18 @@ namespace CentralControl.RobotControl
 
             float currentTime = Time.time;
             
-            // 如果这是第一次检测到单元格
             if (lastCellSpace == null)
             {
                 lastCellSpace = currentCellSpace;
                 return;
             }
 
-            // 检查是否进入了新的单元格
+            // Check if robot has transitioned to a new cell space
             if (currentCellSpace.Id != lastCellSpace.Id)
             {
                 Debug.Log($"Robot {Id}: Transitioning from CellSpace {lastCellSpace.Id} to {currentCellSpace.Id}");
                 
-                // 更新旧单元格的占用时间
+                // Update occupancy for last cell space
                 if (cellSpaceEntryTimes.TryGetValue(lastCellSpace.Id, out float oldEntryTime))
                 {
                     personalOccupancyLayer.SetPlannedOccupancy(
@@ -837,13 +878,13 @@ namespace CentralControl.RobotControl
                     cellSpaceEntryTimes.Remove(lastCellSpace.Id);
                 }
                 
-                // 记录新单元格的进入时间
+                // Record entry time for new cell space
                 cellSpaceEntryTimes[currentCellSpace.Id] = currentTime;
                 lastCellSpace = currentCellSpace;
                 return;
             }
 
-            // 持续更新当前单元格的占用时间
+            // Update occupancy for current cell space
             if (cellSpaceEntryTimes.TryGetValue(currentCellSpace.Id, out float entryTime))
             {
                 personalOccupancyLayer.SetPlannedOccupancy(
@@ -885,13 +926,13 @@ namespace CentralControl.RobotControl
             isIntersectionControlled = true;
             currentIntersectionId = intersection.Id;
             
-            // 获取进入方向和建议出口方向
+            // Get entry and suggested exit directions
             var (entryDirection, suggestedExitDirection) = intersection.CalculateTraversalDirections(
                 transform.position, rb.velocity);
             
-            // 调整DWA参数以优化交叉路口通过
-            dwaPlanner.HeadingWeight = 0.7f;  // 增加航向权重
-            dwaPlanner.MaxSpeed = defaultSpeed * 0.8f;  // 降低速度
+            // Adjust DWA parameters for intersection traversal
+            dwaPlanner.HeadingWeight = 0.7f;
+            dwaPlanner.MaxSpeed = defaultSpeed * 0.8f;
             
             Debug.Log($"Robot {Id} entered intersection {intersection.Id}, entry direction: {entryDirection}, " +
                     $"suggested exit: {suggestedExitDirection}");
@@ -903,7 +944,7 @@ namespace CentralControl.RobotControl
             
             isIntersectionControlled = false;
             
-            // 恢复正常DWA参数
+            // Reset DWA parameters
             dwaPlanner.HeadingWeight = 0.6f;
             dwaPlanner.MaxSpeed = defaultSpeed;
             
@@ -917,19 +958,19 @@ namespace CentralControl.RobotControl
             
             IntersectionArea intersection = intersectionManager.GetIntersectionAtPosition(transform.position);
             
-            // 如果进入了一个新的交叉路口
+            // If entered a new intersection
             if (intersection != null && (currentIntersectionId == null || intersection.Id != currentIntersectionId))
             {
-                // 离开旧的交叉路口(如果有)
+                // If exiting a previous intersection
                 if (currentIntersectionId != null)
                 {
                     ExitIntersection();
                 }
                 
-                // 进入新的交叉路口
+                // Enter new intersection
                 EnterIntersection(intersection);
             }
-            // 如果离开了交叉路口
+            // If exited an intersection
             else if (intersection == null && currentIntersectionId != null)
             {
                 ExitIntersection();
