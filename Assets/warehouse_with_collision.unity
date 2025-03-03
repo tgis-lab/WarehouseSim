@@ -364,11 +364,6 @@ MonoBehaviour:
   maxAcceleration: 2
   maxDeceleration: 3
   MaxOrder: 20
-  pathLineRenderer: {fileID: 0}
-  lineWidth: 0.1
-  pathColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  pathDeviationDistanceThreshold: 1
-  pathCheckInterval: 0.5
 --- !u!4 &732838027
 Transform:
   m_ObjectHideFlags: 0
@@ -835,7 +830,7 @@ MonoBehaviour:
   jsonFile: {fileID: 4900000, guid: 380f9842717a94809999360bd47626ae, type: 3}
   mapVisualizer: {fileID: 1668055372}
   mapBoundaryPrefab: {fileID: 1477745115}
-  height: 0.5
+  height: 0.3
   width: 25
   length: 20
 --- !u!4 &1765155606

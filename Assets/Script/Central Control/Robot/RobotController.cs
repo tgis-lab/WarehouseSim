@@ -21,7 +21,7 @@ namespace CentralControl.RobotControl
     
     public class RobotController : MonoBehaviour
     {
-        #region Inspector Fields
+        # region Inspector Fields
         public Transform targetIndicator;
         public SearchAlgorithm selectedAlgorithm = SearchAlgorithm.Astar_Basic;
         public SearchMethod selectedSearchMethod = SearchMethod.Manhattan_Distance;
@@ -31,9 +31,9 @@ namespace CentralControl.RobotControl
         public float maxAcceleration = 2.0f;
         public float maxDeceleration = 5.0f;
         public int MaxOrder = 20;
-        #endregion
+        # endregion
 
-        #region Public Properties
+        # region Public Properties
         public int Id { get; private set; }
         public Graph graph { get; private set; }
         public IndoorSpace indoorSpace { get; private set; }
@@ -41,9 +41,9 @@ namespace CentralControl.RobotControl
         public bool lastReportedAvailability { get; set; }
         public bool lastReportedFreeStatus { get; set; }
         public int lastReportedOrderCount { get; set; } = -1;
-        #endregion
+        # endregion
 
-        #region Private Fields
+        # region Private Fields
         private DynamicOccupancyLayer personalOccupancyLayer;
         private DynamicOccupancyLayer globalOccupancyLayer;
         private PathPlanner pathPlanner;
@@ -65,9 +65,9 @@ namespace CentralControl.RobotControl
         private bool pickingCompleted = false;
         private string currentPlanId;
         private LayerMask obstacleLayer;
-        #endregion
+        # endregion
 
-        #region State Properties
+        # region State Properties
         public bool IsMoving => currentStates.Contains(RobotState.Moving);
         public bool IsPicking => currentStates.Contains(RobotState.Picking);
         public bool IsFree => currentStates.Count == 0;
@@ -76,52 +76,65 @@ namespace CentralControl.RobotControl
         public bool IsProcessingOrders => isProcessingOrdersRunning;
         public int GetRobotOrdersQueueCount => ordersQueue.Count;
         public List<string> listOrdersQueue => new List<string>(ordersQueue.Select(order => order.Id));
-        #endregion
+        # endregion
 
-        #region Navigation System
+        # region Navigation System
         private enum NavigationPhase
         {
-            FollowingPath,       // 沿着连接点(CellBoundaries)导航
-            ApproachingTarget    // 最终接近目标点(CellSpace内的拣货点)
+            FollowingPath,
+            ApproachingTarget
         }
         private NavigationPhase currentNavigationPhase = NavigationPhase.FollowingPath;
         private Vector3 finalDestination;
         private float pathPointAcceptanceRadius = 0.8f;
         private float finalDestinationAcceptanceRadius = 0.3f;
         private bool hasReportedArrival = false;
-        #endregion
+        private bool navigationEnabled = true;
+        private bool isEmergencyStopped = false;
+        private float lastEmergencyStopTime = 0f;
+        private const float EMERGENCY_COOLDOWN = 3.0f;
+        # endregion
 
-        #region DWA Parameters
+        # region DWA Parameters
         private bool isDWAEnabled = false;
         private float lastDWAStateChangeTime = 0f;
         private const float DWA_STATE_COOLDOWN = 2.0f;
         private IntersectionAreaManager intersectionManager;
         private bool isIntersectionControlled = false;
         private string currentIntersectionId;
-        #endregion
+        # endregion
 
-        #region Unity Lifecycle Methods
+        # region Path Correction
+        private bool needsPathRecovery = false;
+        private int pathRecoveryAttempts = 0;
+        private float lastPathRecoveryTime = 0f;
+        private const int MAX_RECOVERY_ATTEMPTS = 3;
+        private const float RECOVERY_INTERVAL = 2.0f;
+        # endregion
+
+        # region Collision Avoidance
+        private List<GameObject> recentCollisions = new List<GameObject>();
+        private float collisionClearInterval = 5.0f;
+        private float lastCollisionClearTime = 0f;
+        # endregion
+
+        # region Unity Lifecycle Methods
         private void Awake()
         {
             rb = GetComponent<Rigidbody>();
             if (rb == null)
             {
-                Debug.LogWarning($"Robot {Id}: No Rigidbody found, adding one automatically");
                 rb = gameObject.AddComponent<Rigidbody>();
-                
-                // 设置基本属性
-                rb.useGravity = false;  // 通常机器人不需要重力
-                rb.isKinematic = false; // 允许物理引擎移动物体
-                rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-                rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
-                rb.interpolation = RigidbodyInterpolation.Interpolate;
-                rb.mass = 1.0f;
-                rb.drag = 0.5f;
             }
-
-            detectionRadius = baseDetectionRadius;
-            obstacleLayer = LayerMask.GetMask("RobotLayer", "ObstacleLayer");
-
+            
+            // Configure Rigidbody
+            rb.useGravity = false;
+            rb.drag = 2.0f;
+            rb.angularDrag = 5.0f;
+            rb.interpolation = RigidbodyInterpolation.Interpolate;
+            rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+            rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+            
             if (GetComponent<Collider>() == null)
             {
                 CapsuleCollider collider = gameObject.AddComponent<CapsuleCollider>();
@@ -129,23 +142,52 @@ namespace CentralControl.RobotControl
                 collider.height = 1.5f;
                 collider.center = new Vector3(0, 0.75f, 0);
             }
+            
+            detectionRadius = baseDetectionRadius;
+            obstacleLayer = LayerMask.GetMask("RobotLayer", "ObstacleLayer");
+            
+            recentCollisions = new List<GameObject>();
+            lastCollisionClearTime = Time.time;
         }
 
         private void Update()
         {
             if (!isInitialized) return;
 
-            UpdateRobotStatus();
-            UpdateDynamicObstaclePerception();
+            // Update personal occupancy layer
+            UpdatePersonalLayer();
             
-            if (IsMoving && !isWaitingForPicking)
+            // Update robot status
+            UpdateRobotStatus();
+            
+            // Collision Detection
+            CheckSurroundings();
+            
+            // Not moving if emergency stopped
+            if (navigationEnabled && !isEmergencyStopped && IsMoving && !isWaitingForPicking)
             {
                 UpdateMovement();
             }
+            
+            // Update visualization
+            UpdateTargetIndicator();
+            
+            if (isEmergencyStopped || needsPathRecovery)
+            {
+                VisualizeEmergencyState();
+            }
         }
-        #endregion
 
-        #region Initialization
+        private void VisualizeEmergencyState()
+        {
+            // 将在Editor模式下运行的可视化
+            // 在游戏中可以通过材质变色或闪烁效果表示紧急状态
+            Debug.DrawLine(transform.position, transform.position + Vector3.up * 2, Color.red);
+            Debug.DrawLine(transform.position, transform.position + transform.forward * 1.5f, Color.red);
+        }
+        # endregion
+
+        # region Initialization
         public void InitializeRobot(int id, IndoorSpace indoorSpace, Graph graph, MapGrid mapGrid, 
                                     DynamicOccupancyLayer globalOccupancyLayer,
                                     IntersectionAreaManager intersectionManager)
@@ -174,9 +216,9 @@ namespace CentralControl.RobotControl
         {
             globalOccupancyLayer = newGlobalLayer;
         }
-        #endregion
+        # endregion
 
-        #region Order Processing
+        # region Order Processing
         public void ReceiveOrder(Order order)
         {
             if (order == null)
@@ -312,9 +354,9 @@ namespace CentralControl.RobotControl
             pickingCompleted = true;
             Debug.Log($"Robot {Id} notified that picking was completed");
         }
-        #endregion
+        # endregion
 
-        #region Movement System
+        # region Movement System
         private Vector3 GetTargetPosition(PickingPoint pickingPoint)
         {
             CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
@@ -354,74 +396,6 @@ namespace CentralControl.RobotControl
             return result;
         }
 
-        private void UpdateMovement()
-        {
-            if (currentPath == null || currentPath.Count == 0 || isWaitingForPicking)
-                return;
-
-            // 根据当前导航阶段选择目标点和行为
-            Vector3 currentTarget;
-            float acceptanceRadius;
-
-            switch (currentNavigationPhase)
-            {
-                case NavigationPhase.FollowingPath:
-                    // 确保索引有效
-                    if (currentPathIndex >= currentPath.Count)
-                    {
-                        SwitchToApproachingTarget();
-                        return;
-                    }
-
-                    // 目标是下一个连接点
-                    currentTarget = GetPointVector3((Point)currentPath[currentPathIndex].Point);
-                    acceptanceRadius = pathPointAcceptanceRadius;
-
-                    // 检查是否到达当前连接点
-                    if (Vector3.Distance(transform.position, currentTarget) < acceptanceRadius)
-                    {
-                        // 前往下一个连接点
-                        currentPathIndex++;
-                        
-                        // 如果到达最后一个连接点，切换到接近目标阶段
-                        if (currentPathIndex >= currentPath.Count)
-                        {
-                            SwitchToApproachingTarget();
-                            return;
-                        }
-                    }
-                    break;
-                    
-                case NavigationPhase.ApproachingTarget:
-                    // 目标是实际的拣货点
-                    currentTarget = finalDestination;
-                    
-                    // 使用较小的接受半径用于最终目的地
-                    acceptanceRadius = finalDestinationAcceptanceRadius;
-                    
-                    // 检查是否到达最终目标
-                    if (HasReachedFinalDestination())
-                    {
-                        HandleDestinationReached();
-                        return;
-                    }
-                    break;
-                    
-                default:
-                    return;
-            }
-
-            // 根据导航阶段执行移动
-            MoveTowards(currentTarget);
-            CheckIntersectionStatus();
-            
-            // 检查是否偏离路径
-            if (IsOffPath() && currentNavigationPhase == NavigationPhase.FollowingPath)
-            {
-                CorrectPathDeviation();
-            }
-        }
-
         private void SwitchToApproachingTarget()
         {
             currentNavigationPhase = NavigationPhase.ApproachingTarget;
@@ -457,49 +431,58 @@ namespace CentralControl.RobotControl
                 isWaitingForPicking = true;
                 hasReportedArrival = true;
                 
-                // 停止移动
+                // Stop
                 rb.velocity = Vector3.zero;
             }
         }
 
         private void MoveTowards(Vector3 target)
         {
-            // 根据导航阶段使用不同的移动参数
+            // Different movement parameters based on navigation phase
             float dwaActivationDistance;
             float lookAheadDistance;
             
             if (currentNavigationPhase == NavigationPhase.FollowingPath)
             {
-                // 路径跟随阶段的宽松参数
+                // Parameters for path following phase
                 dwaActivationDistance = 1.8f;
                 lookAheadDistance = 2.5f;
             }
             else
             {
-                // 最终接近阶段的精确参数
+                // Params for final approaching phase
                 dwaActivationDistance = 1.0f;
                 lookAheadDistance = 1.2f;
             }
             
-            // 只在需要时激活DWA
+            // Active DWA only when needed
             bool shouldUseDWA = ShouldActivateDWA(dwaActivationDistance);
             
             if (shouldUseDWA)
             {
-                // 配置当前阶段的DWA
                 dwaPlanner.PredictionTime = currentNavigationPhase == NavigationPhase.FollowingPath ? 2.0f : 1.2f;
-                dwaPlanner.HeadingWeight = currentNavigationPhase == NavigationPhase.FollowingPath ? 0.6f : 0.5f;
-                dwaPlanner.VelocityWeight = currentNavigationPhase == NavigationPhase.FollowingPath ? 0.2f : 0.15f;
+                
+                if (rb == null)
+                {
+                    Debug.LogError($"Robot {Id}: Rigidbody component missing");
+                    return;
+                }
                 
                 var (velocity, needReplan) = dwaPlanner.CalculateVelocity(transform.position, rb.velocity, target);
                 
-                // 平滑应用速度
                 Vector3 targetVelocity = velocity.normalized * 
                     Mathf.Min(velocity.magnitude, currentNavigationPhase == NavigationPhase.FollowingPath ? defaultSpeed : defaultSpeed * 0.7f);
                 
+                if (targetVelocity.magnitude < 0.1f && Vector3.Distance(transform.position, target) > 1.0f)
+                {
+                    Debug.LogWarning($"Robot {Id}: DWA failed to find valid velocity, using basic movement");
+                    
+                    targetVelocity = (target - transform.position).normalized * defaultSpeed * 0.3f;
+                }
+                
                 rb.velocity = Vector3.Lerp(rb.velocity, targetVelocity, 0.3f);
                 
-                // 如果DWA报告需要重新规划路径
+                // If DWA reports need to replan path
                 if (needReplan && Time.time - lastReplanTime > replanInterval)
                 {
                     lastReplanTime = Time.time;
@@ -508,23 +491,27 @@ namespace CentralControl.RobotControl
             }
             else
             {
-                // 直接路径跟随，带有航向修正
+                // Path following with heading correction
                 DirectPathFollow(target, lookAheadDistance);
             }
         }
 
         private void DirectPathFollow(Vector3 target, float lookAheadDistance)
         {
-            // 计算到目标的方向
+            if (rb == null)
+            {
+                Debug.LogError($"Robot {Id}: Rigidbody component missing");
+                return;
+            }
+
+            // Calculate direction
             Vector3 directionToTarget = (target - transform.position).normalized;
-            
-            // 获取当前单元格
+
             CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(transform.position);
             
-            // 计算适当的速度
+            //  Calcualte appropriate speed
             float speedMultiplier = 1.0f;
             
-            // 如果接近转弯点，减速
             if (currentPathIndex < currentPath.Count - 1 && currentNavigationPhase == NavigationPhase.FollowingPath)
             {
                 Vector3 nextPoint = currentPathIndex + 1 < currentPath.Count ? 
@@ -540,64 +527,172 @@ namespace CentralControl.RobotControl
                 }
             }
             
-            // 如果在狭窄空间或接近单元边界，减速
+            // Slow down if near cell boundary
             if (IsNearCellBoundary(currentCell))
             {
                 speedMultiplier *= 0.8f;
             }
             
-            // 计算目标速度
+            // Add speed adjustment based on distance to target
+            float distanceToTarget = Vector3.Distance(transform.position, target);
+            if (distanceToTarget < 2.0f)
+            {
+                // Slow down when close to target
+                speedMultiplier *= Mathf.Lerp(0.3f, 1.0f, distanceToTarget / 2.0f);
+            }
+            
+            // Calculate target velocity
             Vector3 targetVelocity = directionToTarget * defaultSpeed * speedMultiplier;
             
-            // 平滑应用速度变化
-            rb.velocity = Vector3.Lerp(rb.velocity, targetVelocity, 0.2f);
+            rb.velocity = Vector3.Lerp(rb.velocity, targetVelocity, 0.15f);
             
-            // 确保机器人朝向移动方向
+            // Make sure robot is facing movement direction
             if (rb.velocity.magnitude > 0.1f)
             {
                 Quaternion targetRotation = Quaternion.LookRotation(rb.velocity.normalized);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.1f);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 0.07f);
             }
         }
 
-        private bool ShouldActivateDWA(float activationDistance)
+        private bool IsNearCellBoundary(CellSpace cellSpace)
         {
-            // Check for nearby obstacles
-            bool nearObstacle = Physics.CheckSphere(transform.position, activationDistance, obstacleLayer);
+            if (cellSpace == null) return false;
             
-            // Check if near intersection
-            bool nearIntersection = false;
-            if (intersectionManager != null)
+            foreach (var boundary in indoorSpace.CellBoundaries)
             {
-                nearIntersection = intersectionManager.IsNearIntersection(transform.position, activationDistance);
+                if (boundary.Source == cellSpace.Id || boundary.Target == cellSpace.Id)
+                {
+                    Vector3 boundaryPos = new Vector3(
+                        (float)boundary.Boundary.Centroid.X,
+                        transform.position.y,
+                        (float)boundary.Boundary.Centroid.Y
+                    );
+                    
+                    if (Vector3.Distance(transform.position, boundaryPos) < 1.0f)
+                        return true;
+                }
             }
             
-            // Cooldown DWA activation
-            if (isDWAEnabled && Time.time - lastDWAStateChangeTime < DWA_STATE_COOLDOWN)
-                return true;
-                
-            bool shouldActivate = nearObstacle || nearIntersection;
+            return false;
+        }
 
-            if (shouldActivate)
+        private Vector3 GetPointVector3(Point point)
+        {
+            return new Vector3((float)point.X, transform.position.y, (float)point.Y);
+        }
+
+        private void UpdateCurrentMovementInfo(List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        {
+            if (path == null || times == null || speeds == null)
             {
-                // If activate DWA due to nearby obstacle, log
-                if (nearObstacle && !isDWAEnabled)
-                    Debug.Log($"Robot {Id}: Activating DWA due to nearby obstacle");
+                Debug.LogError($"Robot {Id}: Null path or timing information");
+                return;
             }
-            else
+
+            if (path.Count != times.Count || path.Count != speeds.Count)
             {
-                // Reset obstacle weight
-                dwaPlanner.ObstacleWeight = 0.15f;
+                Debug.LogError($"Robot {Id}: Mismatched array lengths - Path: {path.Count}, Times: {times.Count}, Speeds: {speeds.Count}");
+                return;
             }
+
+            currentPathIndex = 0;
+            currentPath.Clear();
+            currentPath.AddRange(path);
+            currentMovement.Clear();
+
+            for (int i = 0; i < path.Count; i++)
+            {
+                currentMovement.Add(new PathSegment(path[i], times[i], speeds[i]));
+            }
+
+            dwaPlanner.MaxSpeed = speeds.Max();
+        }
+        # endregion
+
+        # region Path Following
+        private void UpdateMovement()
+        {
+            // If navigation is disabled or emergency stopped, do not move
+            if (!navigationEnabled || isEmergencyStopped) return;
             
-            // Record DWA state change and time
-            if (shouldActivate != isDWAEnabled)
+            if (currentPath == null || currentPath.Count == 0 || isWaitingForPicking)
+                return;
+
+            try
             {
-                lastDWAStateChangeTime = Time.time;
-                isDWAEnabled = shouldActivate;
+                // Selection of target point and behavior based on current navigation phase
+                Vector3 currentTarget;
+                float acceptanceRadius;
+
+                switch (currentNavigationPhase)
+                {
+                    case NavigationPhase.FollowingPath:
+                        if (currentPathIndex >= currentPath.Count)
+                        {
+                            SwitchToApproachingTarget();
+                            return;
+                        }
+
+                        // Next connectionPoint
+                        currentTarget = GetPointVector3((Point)currentPath[currentPathIndex].Point);
+                        acceptanceRadius = pathPointAcceptanceRadius;
+
+                        // Check if reached current connectionPoint
+                        if (Vector3.Distance(transform.position, currentTarget) < acceptanceRadius)
+                        {
+                            // Move to next point
+                            currentPathIndex++;
+                            
+                            // Switch to approaching target phase
+                            if (currentPathIndex >= currentPath.Count)
+                            {
+                                SwitchToApproachingTarget();
+                                return;
+                            }
+                        }
+                        break;
+                        
+                    case NavigationPhase.ApproachingTarget:
+                        // Target is the actual picking point
+                        currentTarget = finalDestination;
+                        
+                        // Use smaller acceptance radius for final destination
+                        acceptanceRadius = finalDestinationAcceptanceRadius;
+                        
+                        // Check if reached final destination
+                        if (HasReachedFinalDestination())
+                        {
+                            HandleDestinationReached();
+                            return;
+                        }
+                        break;
+                        
+                    default:
+                        return;
+                }
+
+                // Move according to current navigation phase
+                if (isDWAEnabled)
+                {
+                    MoveTowards(currentTarget);
+                }
+                else
+                {
+                    DirectPathFollow(currentTarget, 2.0f);
+                }
+                
+                // Path deviation
+                if (IsOffPath() && currentNavigationPhase == NavigationPhase.FollowingPath)
+                {
+                    CorrectPathDeviation();
+                }
             }
-            
-            return shouldActivate;
+            catch (Exception ex)
+            {
+                // Log error and attempt recovery
+                Debug.LogError($"Robot {Id}: UpdateMovement error - {ex.Message}\n{ex.StackTrace}");
+                needsPathRecovery = true;
+            }
         }
 
         private bool IsOffPath()
@@ -605,17 +700,49 @@ namespace CentralControl.RobotControl
             if (currentPath == null || currentPath.Count == 0)
                 return false;
                 
-            // Find closest point on path
-            Vector3 currentPos = transform.position;
-            Vector3 closestPoint = FindClosestPointOnPath(currentPos);
+            // Path index safety check
+            int safeIndex = Mathf.Min(currentPathIndex, currentPath.Count - 1);
             
+            Vector3 currentPos = transform.position;
+            Vector3 targetPos = GetPointVector3((Point)currentPath[safeIndex].Point);
+            
+            // Calculate distance to target
+            float distanceToTarget = Vector3.Distance(currentPos, targetPos);
+            
+            // Non-deviation if very close to target
+            if (distanceToTarget < pathPointAcceptanceRadius * 1.5f)
+                return false;
+            
+            // Find closest point on path
+            Vector3 closestPoint = FindClosestPointOnPath(currentPos);
             float distanceFromPath = Vector3.Distance(currentPos, closestPoint);
             
-            // Allow larger deviation in open cells, smaller near boundaries
-            CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(currentPos);
-            float deviationThreshold = IsNearCellBoundary(currentCell) ? 0.5f : 1.0f;
+            // Dynamic deviation threshold
+            float maxAllowedDeviation = 1.5f;
             
-            return distanceFromPath > deviationThreshold;
+            // Larger deviation allowed at intersections
+            CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(currentPos);
+            if (currentCell != null && IsNearCellBoundary(currentCell))
+            {
+                maxAllowedDeviation = 2.0f;
+            }
+            
+            // Con 1: Distance from path exceeds threshold
+            bool tooFarFromPath = distanceFromPath > maxAllowedDeviation;
+            
+            // Con 2: Direction off path (if velocity is high enough)
+            bool directionOffPath = false;
+            if (rb != null && rb.velocity.magnitude > 0.1f)
+            {
+                Vector3 pathDirection = (targetPos - currentPos).normalized;
+                Vector3 movementDirection = rb.velocity.normalized;
+                
+                // Check if robot movement direction deviates too much from path direction
+                float angleDeviation = Vector3.Angle(pathDirection, movementDirection);
+                directionOffPath = angleDeviation > 45f;
+            }
+            
+            return tooFarFromPath || directionOffPath;
         }
 
         private Vector3 FindClosestPointOnPath(Vector3 position)
@@ -660,50 +787,303 @@ namespace CentralControl.RobotControl
             return lineStart + line * d;
         }
 
-        private bool IsNearCellBoundary(CellSpace cellSpace)
+        private void CorrectPathDeviation()
         {
-            if (cellSpace == null) return false;
-            
-            foreach (var boundary in indoorSpace.CellBoundaries)
+            if (!needsPathRecovery)
             {
-                if (boundary.Source == cellSpace.Id || boundary.Target == cellSpace.Id)
+                // Recovery from general path deviation
+                Vector3 currentPos = transform.position;
+                Vector3 closestPathPoint = FindClosestPointOnPath(currentPos);
+                
+                // Calculate correction direction
+                Vector3 correctionDirection = (closestPathPoint - currentPos).normalized;
+                
+                // Add correction force, apply smooth transition
+                float correctionStrength = defaultSpeed * 0.8f;
+                Vector3 correctionVelocity = correctionDirection * correctionStrength;
+                
+                if (rb != null)
                 {
-                    Vector3 boundaryPos = new Vector3(
-                        (float)boundary.Boundary.Centroid.X,
-                        transform.position.y,
-                        (float)boundary.Boundary.Centroid.Y
-                    );
+                    rb.velocity = Vector3.Lerp(rb.velocity, correctionVelocity, 0.3f);
+                }
+                
+                Debug.Log($"Robot {Id}: Recover from general path deviation. Distance from route: {Vector3.Distance(currentPos, closestPathPoint):F2}m");
+            }
+            else
+            {
+                // Recovery from severe path deviation
+                if (Time.time - lastPathRecoveryTime > RECOVERY_INTERVAL && pathRecoveryAttempts < MAX_RECOVERY_ATTEMPTS)
+                {
+                    pathRecoveryAttempts++;
+                    lastPathRecoveryTime = Time.time;
                     
-                    if (Vector3.Distance(transform.position, boundaryPos) < 1.0f)
-                        return true;
+                    // Stop
+                    if (rb != null)
+                    {
+                        rb.velocity = Vector3.zero;
+                    }
+                    
+                    // Lod
+                    Debug.LogWarning($"Robot {Id}: Recover path - Attempt {pathRecoveryAttempts}/{MAX_RECOVERY_ATTEMPTS}");
+                    
+                    // Replan path
+                    StartCoroutine(ReplanPath());
+                }
+                else if (pathRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS)
+                {
+                    // Recovery failed, perform emergency handling
+                    Debug.LogError($"Robot {Id}: Recovery failed, perform emergency handling");
+                    StartCoroutine(EmergencyRecovery());
+                    needsPathRecovery = false;
+                }
+            }
+        }
+        # endregion
+
+        # region DWA Control
+        private bool ShouldActivateDWA(float activationDistance)
+        {
+            // Force DWA if in emergency state
+            if (isEmergencyStopped || needsPathRecovery)
+                return true;
+            
+            // Check if obstacle ahead
+            bool obstacleAhead = IsObstacleAhead(activationDistance);
+            
+            // Check if near intersection
+            bool nearIntersection = false;
+            if (intersectionManager != null)
+            {
+                nearIntersection = intersectionManager.IsNearIntersection(transform.position, activationDistance);
+            }
+            
+            
+            // Check if near recently collided object
+            bool nearRecentCollision = false;
+            foreach (var collisionObj in recentCollisions)
+            {
+                if (collisionObj != null && Vector3.Distance(transform.position, collisionObj.transform.position) < activationDistance * 1.5f)
+                {
+                    nearRecentCollision = true;
+                    break;
                 }
             }
             
-            return false;
-        }
-
-        private void CorrectPathDeviation()
-        {
-            // Find closest point on path
-            Vector3 currentPos = transform.position;
-            Vector3 closestPathPoint = FindClosestPointOnPath(currentPos);
+            bool shouldActivate = obstacleAhead || nearIntersection || nearRecentCollision;
             
-            // Adjust velocity directly towards path
-            Vector3 correctionDirection = (closestPathPoint - currentPos).normalized;
+            // Cool down
+            if (isDWAEnabled && Time.time - lastDWAStateChangeTime < DWA_STATE_COOLDOWN)
+                return true;
             
-            Vector3 correctionVelocity = correctionDirection * defaultSpeed;
-            rb.velocity = Vector3.Lerp(rb.velocity, correctionVelocity, 0.3f);
-            
-            Debug.Log($"Robot {Id}: Correcting path deviation. Distance from path: {Vector3.Distance(currentPos, closestPathPoint)}");
-            
-            // Replan path if deviation is too large
-            if (Vector3.Distance(currentPos, closestPathPoint) > 2.0f && Time.time - lastReplanTime > replanInterval)
+            // Record time if state changed
+            if (shouldActivate != isDWAEnabled)
             {
-                lastReplanTime = Time.time;
-                StartCoroutine(ReplanPath());
+                lastDWAStateChangeTime = Time.time;
+                isDWAEnabled = shouldActivate;
+                
+                if (shouldActivate)
+                {
+                    if (obstacleAhead)
+                    {
+                        float obstacleDistance = GetForwardObstacleDistance();
+                        float distanceFactor = Mathf.Clamp01(obstacleDistance / (activationDistance * 1.5f));
+                        
+                        dwaPlanner.HeadingWeight = Mathf.Lerp(0.2f, 0.4f, distanceFactor);
+                        dwaPlanner.ObstacleWeight = Mathf.Lerp(0.5f, 0.3f, distanceFactor);
+                        dwaPlanner.MaxSpeed = defaultSpeed * Mathf.Lerp(0.5f, 0.8f, distanceFactor);
+                    }
+                    else if (nearRecentCollision)
+                    {
+                        dwaPlanner.HeadingWeight = 0.3f;
+                        dwaPlanner.ObstacleWeight = 0.4f;
+                        dwaPlanner.MaxSpeed = defaultSpeed * 0.7f;
+                    }
+                    else
+                    {
+                        dwaPlanner.HeadingWeight = 0.5f;
+                        dwaPlanner.ObstacleWeight = 0.25f;
+                        dwaPlanner.MaxSpeed = defaultSpeed * 0.9f;
+                    }
+                }
+                else
+                {
+                    dwaPlanner.HeadingWeight = 0.6f;
+                    dwaPlanner.ObstacleWeight = 0.15f;
+                    dwaPlanner.MaxSpeed = defaultSpeed;
+                }
             }
+            
+            return shouldActivate;
         }
 
+        private bool IsObstacleAhead(float distance)
+        {
+            // Get forward direction
+            Vector3 forwardDirection = rb.velocity.magnitude > 0.1f ? 
+                rb.velocity.normalized : transform.forward;
+            
+            // Detect obstacles in front
+            bool obstacleDetected = false;
+            float fanAngle = 90f;
+            int rayCount = 5;
+            
+            for (int i = 0; i < rayCount; i++)
+            {
+                float angle = (i - (rayCount - 1) / 2f) * (fanAngle / (rayCount - 1));
+                Vector3 rayDirection = Quaternion.Euler(0, angle, 0) * forwardDirection;
+                
+                // 绘制调试射线
+                Debug.DrawRay(transform.position, rayDirection * distance, Color.yellow, 0.1f);
+                
+                if (Physics.Raycast(transform.position, rayDirection, out RaycastHit hit, distance, obstacleLayer))
+                {
+                    if (hit.collider.gameObject == this.gameObject)
+                        continue;
+                        
+                    Debug.DrawRay(transform.position, rayDirection * hit.distance, Color.red, 0.1f);
+                    obstacleDetected = true;
+                }
+            }
+            
+            return obstacleDetected;
+        }
+
+        private float GetForwardObstacleDistance()
+        {
+            Vector3 forwardDirection = rb.velocity.magnitude > 0.1f ? 
+                rb.velocity.normalized : transform.forward;
+            
+            float minDistance = float.MaxValue;
+            float fanAngle = 90f;
+            int rayCount = 7;
+            
+            for (int i = 0; i < rayCount; i++)
+            {
+                float angle = (i - (rayCount - 1) / 2f) * (fanAngle / (rayCount - 1));
+                Vector3 rayDirection = Quaternion.Euler(0, angle, 0) * forwardDirection;
+                
+                if (Physics.Raycast(transform.position, rayDirection, out RaycastHit hit, detectionRadius * 2, obstacleLayer))
+                {
+                    if (hit.collider.gameObject == this.gameObject)
+                        continue;
+                        
+                    minDistance = Mathf.Min(minDistance, hit.distance);
+                }
+            }
+            
+            return minDistance < float.MaxValue ? minDistance : detectionRadius * 2;
+        }
+        # endregion
+
+        #region Emergency Recovery
+        private IEnumerator EmergencyRecovery()
+        {
+            // Stop
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+            
+            // Log error and notify central controller
+            Debug.LogError($"Robot {Id}: Emergency recovery initiated");
+            
+            // Failed Order
+            if (currentOrder != null)
+            {
+                Debug.LogWarning($"Robot {Id}: Failed order {currentOrder.Id}");
+                // 这里可以通知中央控制器订单失败
+            }
+            
+            // Reset robot state
+            ResetRobot();
+            
+            yield return new WaitForSeconds(2.0f);
+            
+            // Attempt to recover to safe position
+            Vector3 safePosition = FindSafePosition();
+            yield return StartCoroutine(MoveToSafePosition(safePosition));
+        }
+
+        private Vector3 FindSafePosition()
+        {
+            // Attempt to find safe position nearby
+            Vector3 currentPos = transform.position;
+            CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(currentPos);
+            
+            // Stay at current position if safe
+            if (currentCell != null && !Physics.CheckSphere(currentPos, 1.0f, obstacleLayer))
+                return currentPos;
+            
+            // Search for safe position nearby
+            for (float radius = 2.0f; radius <= 10.0f; radius += 2.0f)
+            {
+                for (int angle = 0; angle < 360; angle += 45)
+                {
+                    float radians = angle * Mathf.Deg2Rad;
+                    Vector3 testPos = currentPos + new Vector3(
+                        Mathf.Cos(radians) * radius,
+                        0,
+                        Mathf.Sin(radians) * radius
+                    );
+                    
+                    CellSpace testCell = indoorSpace.GetCellSpaceFromCoordinates(testPos);
+                    if (testCell != null && testCell.IsNavigable() && !Physics.CheckSphere(testPos, 1.0f, obstacleLayer))
+                    {
+                        return testPos;
+                    }
+                }
+            }
+            
+            // Return to origin/predefined safe position if no safe position found
+            return Vector3.zero;
+        }
+
+        private IEnumerator MoveToSafePosition(Vector3 safePosition)
+        {
+            Debug.Log($"Robot {Id}: Moving to a safe position {safePosition}");
+            
+            // Replan path to safe position
+            var result = PlanPath(safePosition);
+            if (result.path != null && result.path.Count > 0)
+            {
+                currentPlanId = result.planId;
+                UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
+                
+                // Force DWA activation
+                isDWAEnabled = true;
+                lastDWAStateChangeTime = Time.time;
+                
+                float startTime = Time.time;
+                float timeout = 30f;
+                
+                while (Vector3.Distance(transform.position, safePosition) > 0.5f)
+                {
+                    if (Time.time - startTime > timeout)
+                    {
+                        Debug.LogError($"Robot {Id}: Timeout while moving to safe position");
+                        break;
+                    }
+                    
+                    yield return null;
+                }
+                
+                Debug.Log($"Robot {Id}: Reached safe position {safePosition}");
+            }
+            else
+            {
+                Debug.LogError($"Robot {Id}: Failed to plan path to safe position");
+            }
+            
+            // Reset recovery state
+            needsPathRecovery = false;
+            pathRecoveryAttempts = 0;
+            isDWAEnabled = false;
+            isEmergencyStopped = false;
+            
+            // Clear recent collisions
+            recentCollisions.Clear();
+        }
         private IEnumerator ReplanPath()
         {
             Debug.Log($"Robot {Id}: Replanning path to destination");
@@ -714,53 +1094,66 @@ namespace CentralControl.RobotControl
                 yield break;
             }
             
-            var result = PlanPath(currentOrder.Destination, currentPlanId);
-            if (result.path == null || result.path.Count == 0)
+            // Save current position and final target
+            Vector3 currentPos = transform.position;
+            Vector3 finalTarget = GetTargetPosition(currentOrder.PickingPoint);
+            
+            // Disabling navigation to prevent interference
+            bool wasNavigationEnabled = navigationEnabled;
+            navigationEnabled = false;
+            
+            if (isDWAEnabled)
             {
-                Debug.LogError($"Robot {Id}: Failed to replan path");
-                yield break;
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.5f;
             }
             
-            currentPlanId = result.planId;
-            UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
+            // Wait for stabilization
+            yield return new WaitForSeconds(0.5f);
             
-            Debug.Log($"Robot {Id}: Path replanned successfully");
-        }
-
-        private Vector3 GetPointVector3(Point point)
-        {
-            return new Vector3((float)point.X, transform.position.y, (float)point.Y);
-        }
-
-        private void UpdateCurrentMovementInfo(List<ConnectionPoint> path, List<float> times, List<float> speeds)
-        {
-            if (path == null || times == null || speeds == null)
+            // Replan path
+            var result = PlanPath(finalTarget, currentPlanId);
+            if (result.path != null && result.path.Count > 0)
             {
-                Debug.LogError($"Robot {Id}: Null path or timing information");
-                return;
+                currentPlanId = result.planId;
+                UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
+                currentPathIndex = 0;
+                
+                // Reset navigation phase
+                currentNavigationPhase = NavigationPhase.FollowingPath;
+                
+                Debug.Log($"Robot {Id}: Replanning path succeeded.");
             }
-
-            if (path.Count != times.Count || path.Count != speeds.Count)
+            else
             {
-                Debug.LogError($"Robot {Id}: Mismatched array lengths - Path: {path.Count}, Times: {times.Count}, Speeds: {speeds.Count}");
-                return;
+                Debug.LogError($"Robot {Id}: Replanning path failed.");
+                
+                // Attempt to intermediate target
+                Vector3 intermediateTarget = Vector3.Lerp(currentPos, finalTarget, 0.5f);
+                CellSpace intermediateCell = indoorSpace.GetCellSpaceFromCoordinates(intermediateTarget);
+                
+                if (intermediateCell != null && intermediateCell.IsNavigable())
+                {
+                    Debug.Log($"Robot {Id}: Attempt to intermediate target {intermediateTarget}");
+                    result = PlanPath(intermediateTarget);
+                    
+                    if (result.path != null && result.path.Count > 0)
+                    {
+                        currentPlanId = result.planId;
+                        UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
+                        currentPathIndex = 0;
+                        finalDestination = intermediateTarget;
+                        
+                        Debug.Log($"Robot {Id}: Replanning to intermediate target succeeded.");
+                    }
+                }
             }
-
-            currentPathIndex = 0;
-            currentPath.Clear();
-            currentPath.AddRange(path);
-            currentMovement.Clear();
-
-            for (int i = 0; i < path.Count; i++)
-            {
-                currentMovement.Add(new PathSegment(path[i], times[i], speeds[i]));
-            }
-
-            dwaPlanner.MaxSpeed = speeds.Max();
+            
+            // Re-enable navigation
+            navigationEnabled = wasNavigationEnabled;
         }
-        #endregion
+        # endregion
 
-        #region Status Management
+        # region Status Management
         private void UpdateRobotStatus()
         {
             bool previousFreeStatus = IsFree;
@@ -807,9 +1200,9 @@ namespace CentralControl.RobotControl
             
             Debug.Log($"Robot {Id} has been reset");
         }
-        #endregion
+        # endregion
 
-        #region Occupancy Layer
+        # region Occupancy Layer
         private void UpdateDynamicObstaclePerception()
         {
             float currentTime = Time.time;
@@ -863,7 +1256,6 @@ namespace CentralControl.RobotControl
             // Check if robot has transitioned to a new cell space
             if (currentCellSpace.Id != lastCellSpace.Id)
             {
-                Debug.Log($"Robot {Id}: Transitioning from CellSpace {lastCellSpace.Id} to {currentCellSpace.Id}");
                 
                 // Update occupancy for last cell space
                 if (cellSpaceEntryTimes.TryGetValue(lastCellSpace.Id, out float oldEntryTime))
@@ -872,8 +1264,8 @@ namespace CentralControl.RobotControl
                         lastCellSpace.Id,
                         oldEntryTime,
                         currentTime,
-                        Id.ToString(),
-                        "RealTimeMovement"
+                        Id.ToString(), 
+                        currentPlanId
                     );
                     cellSpaceEntryTimes.Remove(lastCellSpace.Id);
                 }
@@ -891,8 +1283,8 @@ namespace CentralControl.RobotControl
                     currentCellSpace.Id,
                     entryTime,
                     currentTime,
-                    Id.ToString(),
-                    "RealTimeMovement"
+                    Id.ToString(), 
+                    currentPlanId
                 );
             }
         }
@@ -916,9 +1308,9 @@ namespace CentralControl.RobotControl
             lastCellSpace = null;
             currentPlanId = null;
         }
-        #endregion
+        # endregion
 
-        #region Intersection Management
+        # region Intersection Management
         private void EnterIntersection(IntersectionArea intersection)
         {
             if (intersection == null) return;
@@ -976,102 +1368,219 @@ namespace CentralControl.RobotControl
                 ExitIntersection();
             }
         }
-        #endregion
+        # endregion
 
         #region Collision Detection
         private void CheckSurroundings()
         {
-            // 检测周围环境的障碍物
+            // Clean up recent collisions list
+            if (Time.time - lastCollisionClearTime > collisionClearInterval)
+            {
+                recentCollisions.Clear();
+                lastCollisionClearTime = Time.time;
+            }
+
+            // Check for nearby obstacles
             Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius, obstacleLayer);
             bool emergencySituation = false;
             
             foreach (var hitCollider in hitColliders)
             {
-                // 忽略自身碰撞体
                 if (hitCollider.gameObject == gameObject)
                     continue;
                     
-                // 获取另一个机器人
                 RobotController otherRobot = hitCollider.GetComponent<RobotController>();
                 if (otherRobot != null)
                 {
                     float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
                     
-                    // 如果非常接近，可能需要紧急制动
+                    // Emergency stop if too close
                     if (distance < emergencyStopDistance)
                     {
                         emergencySituation = true;
                         
-                        // 执行紧急避险操作，如减速或停止
                         EmergencyStop();
+                        
+                        // Record this collision
+                        if (!recentCollisions.Contains(otherRobot.gameObject))
+                        {
+                            recentCollisions.Add(otherRobot.gameObject);
+                        }
+                        
+                        break;
+                    }
+                    
+                    // Determine if potential collision risk
+                    if (distance < detectionRadius * 0.7f && !isEmergencyStopped)
+                    {
+                        // Calculate relative velocity and approach speed
+                        Vector3 relativeVelocity = Vector3.zero;
+                        if (otherRobot.rb != null && rb != null)
+                        {
+                            relativeVelocity = otherRobot.rb.velocity - rb.velocity;
+                        }
+                        
+                        Vector3 directionToOther = (otherRobot.transform.position - transform.position).normalized;
+                        float approachSpeed = -Vector3.Dot(relativeVelocity, directionToOther);
+                        
+                        // Force DWA activation if approaching too fast
+                        if (approachSpeed > 0.5f)
+                        {
+                            isDWAEnabled = true;
+                            lastDWAStateChangeTime = Time.time;
+                            dwaPlanner.ObstacleWeight = 0.4f;
+                            
+                            Debug.Log($"Robot {Id}: Detected risk of collision, DWA activated. Approach speed: {approachSpeed:F2}m/s");
+                        }
+                    }
+                }
+                else
+                {
+                    // Other types of obstacles
+                    float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
+                    if (distance < emergencyStopDistance * 1.5f)
+                    {
+                        emergencySituation = true;
+                        EmergencyStop();
+                        
+                        if (!recentCollisions.Contains(hitCollider.gameObject))
+                        {
+                            recentCollisions.Add(hitCollider.gameObject);
+                        }
+                        
                         break;
                     }
                 }
             }
             
-            // 如果没有紧急情况但启用了紧急制动，则恢复正常运行
+            // Check if emergency stop can be resumed, if no emergency situation but emergency stopped
             if (!emergencySituation && isEmergencyStopped)
             {
-                ResumeFromEmergencyStop();
+                // Cooldown before resuming
+                if (Time.time - lastEmergencyStopTime > EMERGENCY_COOLDOWN)
+                {
+                    ResumeFromEmergencyStop();
+                }
             }
         }
-        
-        private bool isEmergencyStopped = false;
-        
+
         private void EmergencyStop()
         {
             if (!isEmergencyStopped)
             {
                 isEmergencyStopped = true;
-                rb.velocity = Vector3.zero;
-                Debug.Log($"Robot {Id} executing emergency stop");
+                lastEmergencyStopTime = Time.time;
+                
+                // Stop
+                if (rb != null)
+                {
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                
+                // Force DWA activation
+                isDWAEnabled = true;
+                lastDWAStateChangeTime = Time.time;
+                
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.3f;
+                dwaPlanner.ObstacleWeight = 0.5f;
+                dwaPlanner.HeadingWeight = 0.3f;
+                
+                Debug.Log($"Robot {Id}: Emergency stop activated");
+                
+                // Mark for path recovery
+                needsPathRecovery = true;
+                pathRecoveryAttempts = 0;
             }
         }
-        
+
         private void ResumeFromEmergencyStop()
         {
-            isEmergencyStopped = false;
-            Debug.Log($"Robot {Id} resuming from emergency stop");
+            if (isEmergencyStopped)
+            {
+                isEmergencyStopped = false;
+                
+                // Recover DWA parameters
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.7f;
+                dwaPlanner.ObstacleWeight = 0.3f;
+                dwaPlanner.HeadingWeight = 0.5f;
+                
+                // Maintain DWA for a while
+                lastDWAStateChangeTime = Time.time;
+                
+                Debug.Log($"Robot {Id}: Resuming from emergency stop");
+                
+                // Replan path if needed
+                StartCoroutine(ReplanPath());
+            }
+        }
+
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (collision.gameObject.layer == LayerMask.NameToLayer("GroundLayer"))
+                return;
+                
+            Debug.LogWarning($"Robot {Id}: Detected collision - {collision.gameObject.name}");
+            
+            if (!recentCollisions.Contains(collision.gameObject))
+            {
+                recentCollisions.Add(collision.gameObject);
+            }
+            
+            EmergencyStop();
+            
+            // Wait for situation to stabilize
+            StartCoroutine(TemporaryDisableNavigation());
+        }
+
+        private IEnumerator TemporaryDisableNavigation()
+        {
+            navigationEnabled = false;
+            yield return new WaitForSeconds(1.0f);
+            navigationEnabled = true;
+            
+            // Replan path
+            yield return StartCoroutine(ReplanPath());
         }
         #endregion
 
-        #region Visualization
+        # region Visualization
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying) return;
             
-            // 可视化探测半径
+            // Visualize detection radius
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(transform.position, detectionRadius);
             
-            // 可视化探测范围
+            // Visualize detection coverage
             Gizmos.color = new Color(1, 1, 0, 0.1f); 
             Gizmos.DrawSphere(transform.position, detectionRadius);
             
-            // 显示机器人ID和状态
+            // Display robot ID and state
             UnityEditor.Handles.Label(transform.position + Vector3.up * 2, 
                 $"Robot {Id}\nState: {(IsMoving ? "Moving" : IsPicking ? "Picking" : "Idle")}\nOrders: {ordersQueue.Count}");
             
-            // 可视化当前速度
+            // Visualize velocity
             if (rb != null)
             {
                 Gizmos.color = Color.blue;
                 Gizmos.DrawLine(transform.position, transform.position + rb.velocity * 0.5f);
             }
             
-            // 可视化当前目标方向
+            // Visualize target indicator
             if (currentOrder != null && finalDestination != Vector3.zero)
             {
                 Gizmos.color = Color.red;
                 Gizmos.DrawRay(transform.position, (finalDestination - transform.position).normalized);
             }
             
-            // 可视化路径
+            // Visualize path
             if (currentPath != null && currentPath.Count > 0)
             {
                 Gizmos.color = Color.cyan;
                 
-                // 绘制整个路径
+                // Draw the entire path
                 for (int i = 0; i < currentPath.Count - 1; i++)
                 {
                     Vector3 start = GetPointVector3((Point)currentPath[i].Point);
@@ -1080,7 +1589,7 @@ namespace CentralControl.RobotControl
                     Gizmos.DrawLine(start, end);
                 }
                 
-                // 高亮显示当前路径段
+                // Highligh current path segment
                 if (currentPathIndex < currentPath.Count)
                 {
                     Vector3 currentPos = transform.position;
@@ -1089,13 +1598,6 @@ namespace CentralControl.RobotControl
                     Gizmos.color = Color.green;
                     Gizmos.DrawLine(currentPos, targetPos);
                     Gizmos.DrawSphere(targetPos, 0.2f);
-                }
-                
-                // 显示最终目标
-                if (finalDestination != Vector3.zero)
-                {
-                    Gizmos.color = Color.red;
-                    Gizmos.DrawSphere(finalDestination, 0.3f);
                 }
             }
         }
@@ -1115,9 +1617,9 @@ namespace CentralControl.RobotControl
                 }
             }
         }
-        #endregion
+        # endregion
         
-        #region Helper Methods
+        # region Helper Methods
         private bool isInitialized = false;
         private CellSpace lastCellSpace = null;
         private Dictionary<string, float> cellSpaceEntryTimes = new Dictionary<string, float>();
@@ -1136,6 +1638,6 @@ namespace CentralControl.RobotControl
                 Speed = speed;
             }
         }
-        #endregion
+        # endregion
     }
 }

@@ -60,7 +60,7 @@ namespace CentralControl
                 intersectionAreaManager.InitializeIntersectionAreas(mapLoader.indoorSpace);
 
                 Debug.Log("Map loaded, initializing pickers...");
-                pickerManager.InitializePickers(mapLoader.indoorSpace);
+                pickerManager.InitializePickers(mapLoader.indoorSpace, mapLoader.GetMapGrid());
                 
                 Debug.Log("Pickers initialized, initializing robots...");
                 robotManager.InitializeRobots(mapLoader.indoorSpace, mapLoader.GetGraph(), mapLoader.GetMapGrid(), globalOccupancyLayer, intersectionAreaManager);

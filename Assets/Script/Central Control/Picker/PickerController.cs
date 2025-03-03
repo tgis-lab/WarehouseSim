@@ -183,9 +183,6 @@ namespace CentralControl.PickerControl
                     movementSpeed * Time.deltaTime
                 );
                 
-                Debug.Log($"Picker {Id} moving: current position = {transform.position}, target = {targetPosition}, " +
-                         $"distance = {Vector3.Distance(transform.position, targetPosition)}");
-                
                 yield return null;
             }
             

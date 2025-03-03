@@ -16,6 +16,7 @@ namespace CentralControl.PickerControl
 
         #region Private Fields
         private IndoorSpace indoorSpace;
+        private MapGrid mapGrid;
         private List<PickerController> pickers = new List<PickerController>();
         private Dictionary<string, List<PickerController>> pickingPointAssignments = new Dictionary<string, List<PickerController>>();
         private bool isInitialized = false;
@@ -27,7 +28,7 @@ namespace CentralControl.PickerControl
         #endregion
 
         #region Initialization
-        public void InitializePickers(IndoorSpace indoorSpace)
+        public void InitializePickers(IndoorSpace indoorSpace, MapGrid mapGrid)
         {
             if (isInitialized)
             {
@@ -36,6 +37,7 @@ namespace CentralControl.PickerControl
             }
 
             this.indoorSpace = indoorSpace;
+            this.mapGrid = mapGrid;
             CreatePickers();
             AssignPickingZones();
             isInitialized = true;
@@ -92,7 +94,7 @@ namespace CentralControl.PickerControl
                 {
                     center += new Vector3(
                         (float)cellSpace.Space.Centroid.X,
-                        0,
+                        mapGrid.height,
                         (float)cellSpace.Space.Centroid.Y
                     );
                 }
