@@ -174,6 +174,23 @@ namespace CentralControl
             }
         }
 
+        private void OnRobotReadyForPicking(object sender, PickingEventArgs args)
+        {
+            // Get the best picker for this picking point
+            PickerController bestPicker = pickerManager.GetBestPickerForPoint(args.PickingPoint, args.Location);
+            
+            if (bestPicker != null)
+            {
+                Debug.Log($"Selected Picker {bestPicker.Id} for Robot {args.RobotId} at picking point {args.PickingPoint.Id}");
+                // Directly notify only the best picker
+                bestPicker.HandlePickingRequest(new PickingEventArgs(args.RobotId, args.PickingPoint, args.Location));
+            }
+            else
+            {
+                Debug.LogWarning($"No suitable picker found for Robot {args.RobotId} at picking point {args.PickingPoint.Id}");
+            }
+        }
+
         public static void NotifyRobotFree(RobotController robot)
         {
             OnRobotBecameFree?.Invoke(null, new RobotStatusEventArgs(robot));

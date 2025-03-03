@@ -164,44 +164,67 @@ namespace CentralControl.PickerControl
         #region Zone Management
         private void AssignPickingZones()
         {
-            List<PickingPoint> allPickingPoints = indoorSpace.PickingPoints;
+            // Clear previous assignments
             pickingPointAssignments.Clear();
-
-            // First, assign picking points to their nearest pickers
-            foreach (var pickingPoint in allPickingPoints)
+            
+            // Get all picking points
+            List<PickingPoint> pickingPoints = indoorSpace.PickingPoints;
+            Debug.Log($"Total picking points to assign: {pickingPoints.Count}");
+            
+            foreach (var pickingPoint in pickingPoints)
             {
-                var eligiblePickers = pickers
+                // Find pickers in range of this picking point
+                List<PickerController> pickersInRange = pickers
                     .Where(p => p.IsPickingPointInRange(pickingPoint))
                     .ToList();
-
-                if (eligiblePickers.Any())
+                    
+                Debug.Log($"Picking point {pickingPoint.Id} has {pickersInRange.Count} pickers in range");
+                
+                if (!pickingPointAssignments.ContainsKey(pickingPoint.Id))
                 {
-                    pickingPointAssignments[pickingPoint.Id] = eligiblePickers;
+                    pickingPointAssignments[pickingPoint.Id] = new List<PickerController>();
                 }
-                else
+                
+                pickingPointAssignments[pickingPoint.Id].AddRange(pickersInRange);
+                
+                // Also assign to the pickers
+                foreach (var picker in pickersInRange)
                 {
-                    Debug.LogWarning($"No eligible pickers found for picking point {pickingPoint.Id}");
+                    picker.AssignPickingPoints(new List<PickingPoint> { pickingPoint });
                 }
             }
-
-            // Then update each picker's assigned points
+            
+            // Log assignments
             foreach (var picker in pickers)
             {
-                var assignedPoints = allPickingPoints
-                    .Where(p => picker.IsPickingPointInRange(p))
-                    .ToList();
-
-                picker.AssignPickingPoints(assignedPoints);
-
-                if (assignedPoints.Count == 0)
-                {
-                    Debug.LogWarning($"Picker {picker.Id} has no assigned picking points");
-                }
-                else
-                {
-                    Debug.Log($"Picker {picker.Id} assigned to {assignedPoints.Count} picking points");
-                }
+                Debug.Log($"Picker {picker.Id} is assigned to {picker.QueuedTaskCount} picking points");
             }
+        }
+        #endregion
+
+        #region Broadcast Events
+        public PickerController GetBestPickerForPoint(PickingPoint pickingPoint, Vector3 location)
+        {
+            // Get pickers in range
+            var availablePickers = pickers.Where(p => 
+                p.IsPickingPointInRange(pickingPoint) && 
+                p.IsIdle).ToList();
+            
+            if (availablePickers.Count == 0)
+            {
+                // If no idle pickers, get pickers with shortest queue
+                availablePickers = pickers.Where(p => 
+                    p.IsPickingPointInRange(pickingPoint)).OrderBy(p => 
+                    p.QueuedTaskCount).ToList();
+                    
+                if (availablePickers.Count == 0)
+                    return null;
+            }
+            
+            // Find closest picker or picker with least workload
+            return availablePickers
+                .OrderBy(p => Vector3.Distance(p.CurrentPosition, location) * (1 + p.QueuedTaskCount * 0.5f))
+                .FirstOrDefault();
         }
         #endregion
 

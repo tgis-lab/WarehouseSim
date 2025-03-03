@@ -54,6 +54,7 @@ namespace CentralControl
 
         public void TriggerRobotReadyForPicking(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
+            Debug.Log($"EventManager: Robot {robotId} ready for picking at {location}");
             OnRobotReadyForPicking?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
         }
 

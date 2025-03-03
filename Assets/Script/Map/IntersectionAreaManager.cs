@@ -92,11 +92,57 @@ namespace Map
             }
         }
 
+        public bool IsRobotInIntersection(int robotId)
+        {
+            if (!_isInitialized)
+            {
+                Debug.LogWarning("Intersection areas not initialized");
+                return false;
+            }
+
+            // Get robot position
+            GameObject robotObj = GameObject.Find($"Robot {robotId}");
+            if (robotObj == null)
+                return false;
+                
+            Vector3 robotPosition = robotObj.transform.position;
+            
+            // Check if robot is in any intersection area
+            foreach (var intersection in _intersectionAreas.Values)
+            {
+                if (intersection.Contains(robotPosition))
+                {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
+        public bool IsNearIntersection(Vector3 position, float activationDistance)
+        {
+            if (!_isInitialized)
+            {
+                Debug.LogWarning("Intersection areas not initialized");
+                return false;
+            }
+
+            foreach (var intersection in _intersectionAreas.Values)
+            {
+                if (intersection.IsNear(position, activationDistance))
+                {
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
         public IntersectionArea GetIntersectionAtPosition(Vector3 position)
         {
             if (!_isInitialized)
             {
-                Debug.LogError("Intersection areas not initialized");
+                Debug.LogWarning("Intersection areas not initialized");
                 return null;
             }
 
@@ -107,6 +153,7 @@ namespace Map
                     return intersection;
                 }
             }
+            
             return null;
         }
 

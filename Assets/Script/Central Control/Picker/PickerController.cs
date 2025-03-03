@@ -95,17 +95,22 @@ namespace CentralControl.PickerControl
                 (float)cellSpace.Space.Centroid.Y
             );
 
-            return Vector3.Distance(baseLocation.position, pickingPosition) <= workAreaRadius;
+            float distance = Vector3.Distance(baseLocation.position, pickingPosition);
+            Debug.Log($"Picker {Id}: Distance to picking point {pickingPoint.Id} is {distance}, threshold is {workAreaRadius}");
+            return distance <= workAreaRadius;
         }
         #endregion
 
         #region Task management
         private void HandleRobotReadyForPicking(object sender, PickingEventArgs args)
         {
+            Debug.Log($"Picker {Id} received event: Robot {args.RobotId} at {args.Location}");
             if (!IsPickingPointInRange(args.PickingPoint))
             {
+                Debug.Log($"Picker {Id}: Picking point {args.PickingPoint.Id} is NOT in range");
                 return;
             }
+            Debug.Log($"Picker {Id}: Picking point {args.PickingPoint.Id} is in range, adding to queue");
 
             // Add task to queue
             pickingQueue.Enqueue(args);
@@ -137,7 +142,7 @@ namespace CentralControl.PickerControl
             Debug.Log($"Picker {Id}: All tasks completed");
         }
 
-        private IEnumerator HandlePickingRequest(PickingEventArgs args)
+        public IEnumerator HandlePickingRequest(PickingEventArgs args)
         {
             // Move to picking location
             SetState(PickerState.Moving, true);
@@ -157,6 +162,10 @@ namespace CentralControl.PickerControl
 
             // Prepare for next task
             SetState(PickerState.Idle, true);
+
+            // After completing picking
+            EventManager.Instance.TriggerPickingCompleted(args.RobotId, args.PickingPoint, args.Location);
+            Debug.Log($"Picker {Id} completed picking operation for Robot {args.RobotId}");
         }
         # endregion
 

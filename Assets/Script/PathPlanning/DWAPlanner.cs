@@ -8,16 +8,16 @@ namespace PathPlanning
     {
         public float MaxSpeed { get; set; } = 2.0f;
         public float MinSpeed { get; set; } = 0.5f;
-        public float MaxRotSpeed { get; set; } = 1.0f;
-        public float MaxAccel { get; set; } = 3.0f;
-        public float VelocityResolution { get; set; } = 0.1f;
-        public float RotationResolution { get; set; } = 0.1f;
+        public float MaxRotSpeed { get; set; } = 0.8f;
+        public float MaxAccel { get; set; } = 2.5f;
+        public float VelocityResolution { get; set; } = 0.15f;
+        public float RotationResolution { get; set; } = 0.2f;
         public float PredictionTime { get; set; } = 1.0f;
-        public float HeadingWeight { get; set; } = 0.4f;
+        public float HeadingWeight { get; set; } = 0.6f;
         public float DistanceWeight { get; set; } = 0.3f;
-        public float VelocityWeight { get; set; } = 0.2f;
-        public float ObstacleWeight { get; set; } = 0.1f;
-        public float DWAScoreThreshold { get; set; } = 0.3f;
+        public float VelocityWeight { get; set; } = 0.15f;
+        public float ObstacleWeight { get; set; } = 0.15f;
+        public float DWAScoreThreshold { get; set; } = 0.25f;
         public LayerMask ObstacleLayer { get; set; }
 
         public (Vector3 velocity, bool needReplan) CalculateVelocity(
@@ -83,15 +83,21 @@ namespace PathPlanning
             Vector3 predictedPosition = currentPosition + velocity * PredictionTime;
             
             float headingScore = Vector3.Dot((goalPosition - predictedPosition).normalized, velocity.normalized);
+            headingScore = Mathf.Pow(headingScore, 2);
             
             float distanceScore = 1.0f / (1.0f + Vector3.Distance(predictedPosition, goalPosition));
             
             float normalizedSpeed = velocity.magnitude / MaxSpeed;
             float velocityScore = normalizedSpeed;
 
-            if (normalizedSpeed > 0.8f)
+            if (Mathf.Abs(velocity.x) < 0.2f * velocity.magnitude)
             {
-                velocityScore *= 1.5f;
+                velocityScore *= 1.2f;
+            }
+
+            if (normalizedSpeed > 0.75f)
+            {
+                velocityScore *= 1.3f;
             }
             else if (normalizedSpeed < 0.3f)
             {

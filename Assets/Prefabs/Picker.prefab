@@ -113,5 +113,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   pickingTime: 10
   movementSpeed: 3
-  workAreaRadius: 20
+  workAreaRadius: 10
   baseLocation: {fileID: 0}

@@ -45,6 +45,80 @@ namespace Map
             _deactivationDistance = 1.5f;
         }
 
+        public (Vector3 entryDirection, Vector3 suggestedExitDirection) CalculateTraversalDirections(Vector3 robotPosition, Vector3 robotVelocity)
+        {
+            // Identifier the direction from which the robot is entering
+            ConnectionPoint nearestEntryPoint = null;
+            float minDistance = float.MaxValue;
+            
+            foreach (var entryPoint in _entryPoints)
+            {
+                Point entry = (Point) entryPoint.Point;
+                Vector3 entryPos = new Vector3((float)entry.X, robotPosition.y, (float)entry.Y);
+                float distance = Vector3.Distance(robotPosition, entryPos);
+                
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    nearestEntryPoint = entryPoint;
+                }
+            }
+            
+            // If no entry point is found, use the current velocity direction
+            Vector3 entryDirection = robotVelocity.normalized;
+            if (nearestEntryPoint != null)
+            {
+                Point nearestEntry = (Point) nearestEntryPoint.Point;
+                Vector3 entryPos = new Vector3((float)nearestEntry.X, robotPosition.y, (float)nearestEntry.Y);
+                entryDirection = (robotPosition - entryPos).normalized;
+            }
+            
+            // Find the best exit direction (approximately opposite to the entry direction)
+            Vector3 suggestedExitDirection = -entryDirection;
+            float bestAlignment = -1f;
+            
+            foreach (var exitPoint in _exitPoints)
+            {
+                Point exit = (Point) exitPoint.Point;
+                Vector3 exitPos = new Vector3((float)exit.X, robotPosition.y, (float)exit.Y);
+                Vector3 exitDir = (exitPos - robotPosition).normalized;
+                
+                // Find the exit closest to the continuation of the entry direction
+                float alignment = Vector3.Dot(entryDirection, exitDir);
+                if (alignment > bestAlignment)
+                {
+                    bestAlignment = alignment;
+                    suggestedExitDirection = exitDir;
+                }
+            }
+            
+            return (entryDirection, suggestedExitDirection);
+        }
+
+        public List<string> GetBorderingCellIds()
+        {
+            List<string> borderingCellIds = new List<string>();
+            
+            foreach (var entryPoint in _entryPoints)
+            {
+                if (!borderingCellIds.Contains(entryPoint.CellBoundary.Source))
+                    borderingCellIds.Add(entryPoint.CellBoundary.Source);
+            }
+            
+            foreach (var exitPoint in _exitPoints)
+            {
+                if (!borderingCellIds.Contains(exitPoint.CellBoundary.Target))
+                    borderingCellIds.Add(exitPoint.CellBoundary.Target);
+            }
+            
+            return borderingCellIds;
+        }
+
+        public List<string> GetAllCellIds()
+        {
+            return _intersectionCells.Select(cell => cell.Id).ToList();
+        }
+
         public void AddEntryPoint(ConnectionPoint point)
         {
             if (!_entryPoints.Any(p => p.Id == point.Id))
