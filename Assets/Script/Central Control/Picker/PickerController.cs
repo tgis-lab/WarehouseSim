@@ -16,14 +16,24 @@ namespace CentralControl.PickerControl
     public class PickerController : MonoBehaviour
     {
         #region Inspector Fields
-        public int Id { get; private set; }
+        public int Id 
+        { 
+            get { return _id; } 
+            private set 
+            { 
+                _id = value; 
+                gameObject.name = $"Picker_{value}";
+            } 
+        }
         public float pickingTime = 10f;
         public float movementSpeed = 3f;
         public float workAreaRadius = 10f;
         #endregion
 
         #region Private Fields
+        private int _id = -1;
         private IndoorSpace indoorSpace;
+        private MapGrid mapGrid;
         private HashSet<PickerState> currentStates = new HashSet<PickerState>();
         private Vector3 currentPosition;
         private List<PickingPoint> assignedPickingPoints = new List<PickingPoint>();
@@ -43,9 +53,26 @@ namespace CentralControl.PickerControl
         private bool isProcessingTasks = false;
         #endregion
 
-        private void Start()
+        public PickerController()
         {
-            EventManager.Instance.OnRobotReadyForPicking += HandleRobotReadyForPicking;
+            // 确保默认ID不为0
+            _id = -1;
+        }
+
+        private void Awake()
+        {
+            // 如果ID为0，给出警告
+            if (_id == 0)
+            {
+                Debug.LogWarning($"警告: Picker的ID为0，这可能导致问题。GameObject: {gameObject.name}");
+            }
+            
+            // 确保不会有未初始化就注册的事件处理器
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotReadyForPicking -= HandleRobotReadyForPicking;
+                EventManager.Instance.OnPickingCompleted -= HandlePickingCompleted;
+            }
         }
 
         private void OnDestroy()
@@ -53,23 +80,42 @@ namespace CentralControl.PickerControl
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.OnRobotReadyForPicking -= HandleRobotReadyForPicking;
+                EventManager.Instance.OnPickingCompleted -= HandlePickingCompleted;
             }
         }
 
         #region Initialization
-        public void Initialize(int id, IndoorSpace indoorSpace, Vector3 basePosition)
+        public void Initialize(int id, IndoorSpace indoorSpace, MapGrid mapGrid, Vector3 basePosition)
         {
-            Id = id;
+            this.Id = id;
             this.indoorSpace = indoorSpace;
+            this.mapGrid = mapGrid;
             
-            GameObject baseLocationObj = new GameObject($"Picker_{id}_BaseLocation");
-            baseLocationObj.transform.parent = this.transform;
-            baseLocation = baseLocationObj.transform;
+            if (workAreaRadius <= 0f)
+            {
+                workAreaRadius = 10f;
+                Debug.Log($"Picker {id}: default work area radius {workAreaRadius}");
+            }
+            
+            if (baseLocation == null)
+            {
+                GameObject baseLocationObj = new GameObject($"Picker_{id}_BaseLocation");
+                baseLocationObj.transform.SetParent(transform, false);
+                baseLocation = baseLocationObj.transform;
+            }
+            
             baseLocation.position = basePosition;
-
             currentPosition = basePosition;
+            
             SetState(PickerState.Idle, true);
-            Debug.Log($"Picker {Id} initialized at position {basePosition}");
+            
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotReadyForPicking += HandleRobotReadyForPicking;
+                EventManager.Instance.OnPickingCompleted += HandlePickingCompleted;
+            }
+            
+            Debug.Log($"Picker {Id} initialized at {basePosition}");
         }
 
         public void AssignPickingPoints(List<PickingPoint> pickingPoints)
@@ -82,22 +128,75 @@ namespace CentralControl.PickerControl
         #region Picking Point Management
         public bool IsPickingPointInRange(PickingPoint pickingPoint)
         {
-            CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
-            if (cellSpace == null)
+            if (pickingPoint == null)
             {
-                Debug.LogWarning($"Picker {Id}: Unable to find cell space for picking point {pickingPoint.Id}");
+                Debug.LogError($"Picker {Id}: pickingPoint is null");
                 return false;
             }
+            
+            if (indoorSpace == null)
+            {
+                Debug.LogError($"Picker {Id}: indoorSpace is null");
 
-            Vector3 pickingPosition = new Vector3(
-                (float)cellSpace.Space.Centroid.X,
-                transform.position.y,
-                (float)cellSpace.Space.Centroid.Y
-            );
-
+                var mapLoader = FindObjectOfType<MapLoader>();
+                if (mapLoader != null)
+                {
+                    indoorSpace = mapLoader.indoorSpace;
+                    Debug.Log($"Picker {Id}: try to recover indoorSpace - success: {indoorSpace != null}");
+                }
+                
+                if (indoorSpace == null)
+                    return false;
+            }
+            
+            if (baseLocation == null)
+            {
+                Debug.LogError($"Picker {Id}: baseLocation is null");
+                // Back up to current position
+                return Vector3.Distance(transform.position, GetPickingPointPosition(pickingPoint)) <= workAreaRadius;
+            }
+            
+            // Get picking point position
+            Vector3 pickingPosition = GetPickingPointPosition(pickingPoint);
+            
+            // Calculate distance to picking point
             float distance = Vector3.Distance(baseLocation.position, pickingPosition);
-            Debug.Log($"Picker {Id}: Distance to picking point {pickingPoint.Id} is {distance}, threshold is {workAreaRadius}");
-            return distance <= workAreaRadius;
+            bool inRange = distance <= workAreaRadius;
+            
+            if (inRange)
+            {
+                Debug.Log($"Picker {Id}: picking point {pickingPoint.Id} in range (distance: {distance:F2}, work radius: {workAreaRadius:F2})");
+            }
+            else
+            {
+                Debug.Log($"Picker {Id}: picking point {pickingPoint.Id} out of range (distance: {distance:F2}, work radius: {workAreaRadius:F2})");
+            }
+            
+            return inRange;
+        }
+
+        private Vector3 GetPickingPointPosition(PickingPoint pickingPoint)
+        {
+            try
+            {
+                CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
+                if (cellSpace == null || cellSpace.Space == null || cellSpace.Space.Centroid == null)
+                {
+                    Debug.LogWarning($"Picker {Id}: cannot get the picking point {pickingPoint.Id} CellSpace");
+                    return transform.position;
+                }
+
+                return new Vector3(
+                    (float)cellSpace.Space.Centroid.X,
+                    transform.position.y,
+                    (float)cellSpace.Space.Centroid.Y
+                );
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Picker {Id}: error getting picking point {pickingPoint.Id} position: {ex.Message}");
+                return transform.position;
+            }
         }
         #endregion
 
@@ -134,6 +233,12 @@ namespace CentralControl.PickerControl
 
                 yield return StartCoroutine(HandlePickingRequest(currentTask));
 
+                if (EventManager.Instance != null)
+                {
+                    EventManager.Instance.TriggerPickingCompleted(currentTask.RobotId, currentTask.PickingPoint, currentTask.Location);
+                    Debug.Log($"Picker {Id}: Notified robot {currentTask.RobotId} of picking completion");
+                }
+
                 pickingQueue.Dequeue();
                 Debug.Log($"Picker {Id}: Completed task for Robot {currentTask.RobotId}. Remaining tasks: {pickingQueue.Count}");
             }
@@ -166,6 +271,26 @@ namespace CentralControl.PickerControl
             // After completing picking
             EventManager.Instance.TriggerPickingCompleted(args.RobotId, args.PickingPoint, args.Location);
             Debug.Log($"Picker {Id} completed picking operation for Robot {args.RobotId}");
+        }
+
+        private void HandlePickingCompleted(object sender, PickingEventArgs args)
+        {
+            if (pickingQueue.Count > 0 && pickingQueue.Peek().RobotId == args.RobotId)
+            {
+                Debug.Log($"Picker {Id}: Finished robot {args.RobotId}'s picking task");
+                
+                SetState(PickerState.Idle, true);
+                
+                if (pickingQueue.Count > 0)
+                {
+                    pickingQueue.Dequeue();
+                }
+                
+                if (pickingQueue.Count > 0 && !isProcessingTasks)
+                {
+                    StartCoroutine(ProcessPickingTask());
+                }
+            }
         }
         # endregion
 

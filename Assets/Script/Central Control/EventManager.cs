@@ -1,6 +1,8 @@
 using System;
 using UnityEngine;
 using Map;
+using CentralControl.RobotControl;
+using CentralControl.PickerControl;
 
 namespace CentralControl
 {
@@ -55,6 +57,30 @@ namespace CentralControl
         public void TriggerRobotReadyForPicking(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
             Debug.Log($"EventManager: Robot {robotId} ready for picking at {location}");
+            
+            // 检查无效的监听器
+            if (OnRobotReadyForPicking != null)
+            {
+                // 获取所有订阅者
+                var delegates = OnRobotReadyForPicking.GetInvocationList();
+                foreach (var del in delegates)
+                {
+                    // 检查订阅者的目标对象是否为PickerController
+                    PickerController picker = del.Target as PickerController;
+                    if (picker != null)
+                    {
+                        Debug.Log($"EventManager: 事件将通知 Picker {picker.Id}");
+                        
+                        // 检查无效的Picker (ID为0或已销毁的GameObject)
+                        if (picker.Id == 0 || picker == null || picker.gameObject == null)
+                        {
+                            Debug.LogWarning($"EventManager: 检测到无效的Picker监听器 (ID: {picker.Id})，自动移除");
+                            OnRobotReadyForPicking -= (EventHandler<PickingEventArgs>)del;
+                        }
+                    }
+                }
+            }
+            
             OnRobotReadyForPicking?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
         }
 

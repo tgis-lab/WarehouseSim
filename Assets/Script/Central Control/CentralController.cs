@@ -176,19 +176,60 @@ namespace CentralControl
 
         private void OnRobotReadyForPicking(object sender, PickingEventArgs args)
         {
-            // Get the best picker for this picking point
-            PickerController bestPicker = pickerManager.GetBestPickerForPoint(args.PickingPoint, args.Location);
+            Debug.Log($"Robot {args.RobotId} is ready for picking at the picking point {args.PickingPoint.Id}");
+            
+            // Get the best picker for the robot at the picking point
+            PickerController bestPicker = GetBestPickerForPoint(args.PickingPoint, args.Location);
             
             if (bestPicker != null)
             {
-                Debug.Log($"Selected Picker {bestPicker.Id} for Robot {args.RobotId} at picking point {args.PickingPoint.Id}");
-                // Directly notify only the best picker
-                bestPicker.HandlePickingRequest(new PickingEventArgs(args.RobotId, args.PickingPoint, args.Location));
+                Debug.Log($"Picker {bestPicker.Id} serves robot {args.RobotId} at the picking point {args.PickingPoint.Id}");
+                
+                // Only notify the best picker
+                bestPicker.HandlePickingRequest(args);
             }
             else
             {
-                Debug.LogWarning($"No suitable picker found for Robot {args.RobotId} at picking point {args.PickingPoint.Id}");
+                Debug.LogWarning($"Cannot find the best Picker serve robot {args.RobotId} at the picking point {args.PickingPoint.Id}");
             }
+        }
+
+        private PickerController GetBestPickerForPoint(PickingPoint pickingPoint, Vector3 location)
+        {
+            // Get all pickers that can handle this picking point
+            List<PickerController> availablePickers = new List<PickerController>();
+            
+            foreach (var picker in pickerManager.GetAllPickers())
+            {
+                try
+                {
+                    if (picker.IsPickingPointInRange(pickingPoint))
+                    {
+                        availablePickers.Add(picker);
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"Error when checking picker {picker.Id} for picking point {pickingPoint.Id}: {ex.Message}");
+                }
+            }
+            
+            if (availablePickers.Count == 0)
+            {
+                Debug.LogWarning($"No Pickercan serve picking point {pickingPoint.Id}");
+                return null;
+            }
+            
+            // Priority is given to idle pickers
+            var idlePickers = availablePickers.Where(p => p.IsIdle).ToList();
+            if (idlePickers.Count > 0)
+            {
+                // If there are idle Pickers, choose the closest one
+                return idlePickers.OrderBy(p => Vector3.Distance(p.transform.position, location)).FirstOrDefault();
+            }
+            
+            // If there are no idle Pickers, choose the one with the least queued tasks
+            return availablePickers.OrderBy(p => p.QueuedTaskCount).FirstOrDefault();
         }
 
         public static void NotifyRobotFree(RobotController robot)

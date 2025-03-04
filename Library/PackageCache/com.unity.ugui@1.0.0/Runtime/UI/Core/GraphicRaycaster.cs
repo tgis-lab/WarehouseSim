@@ -212,11 +212,9 @@ namespace UnityEngine.UI
                 {
                     if (ReflectionMethodsCache.Singleton.raycast3D != null)
                     {
-                        RaycastHit hit;
-                        if (ReflectionMethodsCache.Singleton.raycast3D(ray, out hit, distanceToClipPlane, (int)m_BlockingMask))
-                        {
-                            hitDistance = hit.distance;
-                        }
+                        var hits = ReflectionMethodsCache.Singleton.raycast3DAll(ray, distanceToClipPlane, (int)m_BlockingMask);
+                        if (hits.Length > 0)
+                            hitDistance = hits[0].distance;
                     }
                 }
 #endif

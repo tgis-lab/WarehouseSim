@@ -1493,7 +1493,7 @@ namespace UnityEngine.UI
 
                         if (lineType == LineType.MultiLineSubmit && c == '\n')
                         {
-                            UpdateLabel();
+                            m_Keyboard.text = m_Text;
 
                             SendOnSubmit();
                             OnDeselect(null);

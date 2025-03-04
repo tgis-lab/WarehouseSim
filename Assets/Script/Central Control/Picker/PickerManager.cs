@@ -49,6 +49,8 @@ namespace CentralControl.PickerControl
         {
             List<Vector3> basePositions = CalculatePickerBasePositions();
 
+            pickers.Clear();
+
             for (int i = 0; i < numberOfPickers; i++)
             {
                 if (i >= basePositions.Count)
@@ -59,17 +61,27 @@ namespace CentralControl.PickerControl
 
                 Vector3 basePosition = basePositions[i];
                 GameObject pickerObj = Instantiate(pickerPrefab, basePosition, Quaternion.identity, pickersParent);
-                pickerObj.name = $"Picker_{i + 1}";
+                int pickerId = i + 1;
+                pickerObj.name = $"Picker_{pickerId}";
 
                 PickerController picker = pickerObj.GetComponent<PickerController>();
+                if (picker == null)
+                {
+                    picker = pickerObj.GetComponentInChildren<PickerController>();
+                    if (picker == null)
+                    {
+                        picker = pickerObj.AddComponent<PickerController>();
+                    }
+                }
+
                 if (picker != null)
                 {
-                    picker.Initialize(i + 1, indoorSpace, basePosition);
+                    picker.Initialize(pickerId, indoorSpace, mapGrid, basePosition);
                     pickers.Add(picker);
                 }
                 else
                 {
-                    Debug.LogError($"Failed to get PickerController component for picker {i + 1}");
+                    Debug.LogError($"Failed to get PickerController component for picker {pickerId}");
                 }
             }
         }
@@ -166,41 +178,91 @@ namespace CentralControl.PickerControl
         #region Zone Management
         private void AssignPickingZones()
         {
-            // Clear previous assignments
+            // Clear existing assignments
             pickingPointAssignments.Clear();
             
             // Get all picking points
-            List<PickingPoint> pickingPoints = indoorSpace.PickingPoints;
-            Debug.Log($"Total picking points to assign: {pickingPoints.Count}");
+            List<PickingPoint> allPickingPoints = indoorSpace.PickingPoints;
+            Debug.Log($"Total picking points: {allPickingPoints.Count}");
             
-            foreach (var pickingPoint in pickingPoints)
+            // Check if any picker has a valid work area radius
+            bool anyAssignmentsFound = false;
+            
+            // Update the picking point assignment dictionary
+            foreach (var pickingPoint in allPickingPoints)
             {
-                // Find pickers in range of this picking point
-                List<PickerController> pickersInRange = pickers
-                    .Where(p => p.IsPickingPointInRange(pickingPoint))
-                    .ToList();
-                    
-                Debug.Log($"Picking point {pickingPoint.Id} has {pickersInRange.Count} pickers in range");
-                
                 if (!pickingPointAssignments.ContainsKey(pickingPoint.Id))
                 {
                     pickingPointAssignments[pickingPoint.Id] = new List<PickerController>();
                 }
                 
-                pickingPointAssignments[pickingPoint.Id].AddRange(pickersInRange);
-                
-                // Also assign to the pickers
-                foreach (var picker in pickersInRange)
+                foreach (var picker in pickers)
                 {
-                    picker.AssignPickingPoints(new List<PickingPoint> { pickingPoint });
+                    bool inRange = false;
+                    try
+                    {
+                        inRange = picker.IsPickingPointInRange(pickingPoint);
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"Picker {picker.Id} threw an exception: {ex.Message}");
+                        continue;
+                    }
+                    
+                    if (inRange)
+                    {
+                        pickingPointAssignments[pickingPoint.Id].Add(picker);
+                        anyAssignmentsFound = true;
+                        Debug.Log($"Picking point {pickingPoint.Id} is asssigned to Picker {picker.Id}");
+                    }
                 }
             }
             
-            // Log assignments
+            // Auto-adjustment logic for work area radius
+            if (!anyAssignmentsFound)
+            {
+                Debug.LogWarning("No assignments found. Increasing work area radius for all pickers.");
+                
+                // Auto-increase the work area radius for all pickers
+                foreach (var picker in pickers)
+                {
+                    picker.workAreaRadius *= 2.0f;
+                    Debug.Log($"Picker {picker.Id}'s work area raidus is increasing to {picker.workAreaRadius}");
+                }
+                
+                // Re-assign picking zones
+                AssignPickingZones();
+                return;
+            }
+
+            // Assign Picking Points for each picker and log
+            Dictionary<int, int> pickerAssignmentCounts = new Dictionary<int, int>();
+            
             foreach (var picker in pickers)
             {
-                Debug.Log($"Picker {picker.Id} is assigned to {picker.QueuedTaskCount} picking points");
+                var assignedPoints = allPickingPoints
+                    .Where(p => IsPickerAssignedToPoint(picker, p))
+                    .ToList();
+                    
+                picker.AssignPickingPoints(assignedPoints);
+                pickerAssignmentCounts[picker.Id] = assignedPoints.Count;
+                
+                Debug.Log($"Picker {picker.Id} has assigned picking point: {string.Join(", ", assignedPoints.Select(p => p.Id))}");
             }
+            
+            foreach (var picker in pickers)
+            {
+                Debug.Log($"Picker {picker.Id} is assigned {pickerAssignmentCounts[picker.Id]} picking points");
+            }
+        }
+
+        private bool IsPickerAssignedToPoint(PickerController picker, PickingPoint point)
+        {
+            if (pickingPointAssignments.TryGetValue(point.Id, out var assignedPickers))
+            {
+                return assignedPickers.Contains(picker);
+            }
+            return false;
         }
         #endregion
 
