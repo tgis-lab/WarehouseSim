@@ -22,7 +22,7 @@ AssetImportWorker0
 -logFile
 Logs/AssetImportWorker0.log
 -srvPort
-58633
+53166
 Successfully changed project path to: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim
 /Users/knight9/Repository/WarehouseSim_private/WarehouseSim
 [UnityMemory] Configuration Parameters - Can be set up in boot.config
@@ -54,13 +54,13 @@ Successfully changed project path to: /Users/knight9/Repository/WarehouseSim_pri
     "memorysetup-temp-allocator-size-cloud-worker=32768"
     "memorysetup-temp-allocator-size-gi-baking-worker=262144"
     "memorysetup-temp-allocator-size-gfx=262144"
-Player connection [8596211776] Host "[IP] 192.168.50.58 [Port] 0 [Flags] 2 [Guid] 371778688 [EditorId] 371778688 [Version] 1048832 [Id] OSXEditor(0,Bluu) [Debug] 1 [PackageName] OSXEditor [ProjectName] Editor" joined multi-casting on [225.0.0.222:54997]...
+Player connection [8596211776] Host "[IP] 192.168.50.58 [Port] 0 [Flags] 2 [Guid] 85680170 [EditorId] 85680170 [Version] 1048832 [Id] OSXEditor(0,Bluu) [Debug] 1 [PackageName] OSXEditor [ProjectName] Editor" joined multi-casting on [225.0.0.222:54997]...
 
-Player connection [8596211776] Host "[IP] 192.168.50.58 [Port] 0 [Flags] 2 [Guid] 371778688 [EditorId] 371778688 [Version] 1048832 [Id] OSXEditor(0,Bluu) [Debug] 1 [PackageName] OSXEditor [ProjectName] Editor" joined alternative multi-casting on [225.0.0.222:34997]...
+Player connection [8596211776] Host "[IP] 192.168.50.58 [Port] 0 [Flags] 2 [Guid] 85680170 [EditorId] 85680170 [Version] 1048832 [Id] OSXEditor(0,Bluu) [Debug] 1 [PackageName] OSXEditor [ProjectName] Editor" joined alternative multi-casting on [225.0.0.222:34997]...
 
 AS: AutoStreaming module initializing.
 [Physics::Module] Initialized MultithreadedJobDispatcher with {0} workers.
-Refreshing native plugins compatible for Editor in 71.67 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 62.46 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
 Initialize engine version: 2021.3.32f1c1 (fa19b96eeab7)
 [Subsystems] Discovering subsystems at path /Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/Resources/UnitySubsystems
@@ -75,79 +75,79 @@ Initialize mono
 Mono path[0] = '/Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/Managed'
 Mono path[1] = '/Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/MonoBleedingEdge/lib/mono/unityjit-macos'
 Mono config path = '/Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/MonoBleedingEdge/etc'
-Using monoOptions --debugger-agent=transport=dt_socket,embedding=1,server=y,suspend=n,address=127.0.0.1:56468
+Using monoOptions --debugger-agent=transport=dt_socket,embedding=1,server=y,suspend=n,address=127.0.0.1:56680
 Begin MonoManager ReloadAssembly
 Registering precompiled unity dll's ...
 Register platform support module: /Applications/Unity/Hub/Editor/2021.3.32f1c1/PlaybackEngines/WebGLSupport/UnityEditor.WebGL.Extensions.dll
 Register platform support module: /Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/UnityEditor.OSXStandalone.Extensions.dll
-Registered in 0.002349 seconds.
+Registered in 0.001253 seconds.
 Native extension for OSXStandalone target not found
 Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 62.05 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 67.50 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
 Mono: successfully reloaded assembly
-- Completed reload, in  0.447 seconds
+- Completed reload, in  0.434 seconds
 Domain Reload Profiling:
-	ReloadAssembly (447ms)
-		BeginReloadAssembly (83ms)
+	ReloadAssembly (434ms)
+		BeginReloadAssembly (79ms)
 			ExecutionOrderSort (0ms)
 			DisableScriptedObjects (0ms)
 			BackupInstance (0ms)
 			ReleaseScriptingObjects (0ms)
 			CreateAndSetChildDomain (0ms)
-		EndReloadAssembly (301ms)
-			LoadAssemblies (84ms)
+		EndReloadAssembly (299ms)
+			LoadAssemblies (80ms)
 			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (76ms)
+			SetupTypeCache (75ms)
 			ReleaseScriptCaches (0ms)
-			RebuildScriptCaches (23ms)
+			RebuildScriptCaches (22ms)
 			SetupLoadedEditorAssemblies (173ms)
 				LogAssemblyErrors (0ms)
 				InitializePlatformSupportModulesInManaged (4ms)
 				SetLoadedEditorAssemblies (0ms)
-				RefreshPlugins (62ms)
+				RefreshPlugins (68ms)
 				BeforeProcessingInitializeOnLoad (1ms)
-				ProcessInitializeOnLoadAttributes (74ms)
-				ProcessInitializeOnLoadMethodAttributes (32ms)
+				ProcessInitializeOnLoadAttributes (75ms)
+				ProcessInitializeOnLoadMethodAttributes (25ms)
 				AfterProcessingInitializeOnLoad (0ms)
 				EditorAssembliesLoaded (0ms)
 			ExecutionOrderSort2 (0ms)
 			AwakeInstancesAfterBackupRestoration (0ms)
 Platform modules already initialized, skipping
 Registering precompiled user dll's ...
-Registered in 0.002047 seconds.
+Registered in 0.007647 seconds.
 Begin MonoManager ReloadAssembly
 Native extension for OSXStandalone target not found
 Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.51 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 0.32 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
 Package Manager log level set to [2]
 [Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
 [Package Manager] Cannot connect to Unity Package Manager local server
 Mono: successfully reloaded assembly
-- Completed reload, in  1.044 seconds
+- Completed reload, in  1.170 seconds
 Domain Reload Profiling:
-	ReloadAssembly (1045ms)
-		BeginReloadAssembly (64ms)
+	ReloadAssembly (1170ms)
+		BeginReloadAssembly (68ms)
 			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (3ms)
+			DisableScriptedObjects (4ms)
 			BackupInstance (0ms)
 			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (10ms)
-		EndReloadAssembly (914ms)
-			LoadAssemblies (60ms)
+			CreateAndSetChildDomain (11ms)
+		EndReloadAssembly (1035ms)
+			LoadAssemblies (79ms)
 			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (181ms)
+			SetupTypeCache (182ms)
 			ReleaseScriptCaches (0ms)
-			RebuildScriptCaches (36ms)
-			SetupLoadedEditorAssemblies (619ms)
+			RebuildScriptCaches (90ms)
+			SetupLoadedEditorAssemblies (664ms)
 				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (2ms)
+				InitializePlatformSupportModulesInManaged (3ms)
 				SetLoadedEditorAssemblies (1ms)
-				RefreshPlugins (1ms)
-				BeforeProcessingInitializeOnLoad (48ms)
-				ProcessInitializeOnLoadAttributes (554ms)
-				ProcessInitializeOnLoadMethodAttributes (13ms)
+				RefreshPlugins (0ms)
+				BeforeProcessingInitializeOnLoad (50ms)
+				ProcessInitializeOnLoadAttributes (591ms)
+				ProcessInitializeOnLoadMethodAttributes (18ms)
 				AfterProcessingInitializeOnLoad (1ms)
 				EditorAssembliesLoaded (0ms)
 			ExecutionOrderSort2 (0ms)
@@ -156,333 +156,225 @@ Platform modules already initialized, skipping
 ========================================================================
 Worker process is ready to serve import requests
 Launching external process: /Applications/Unity/Hub/Editor/2021.3.32f1c1/Unity.app/Contents/Tools/UnityShaderCompiler
-Launched and connected shader compiler UnityShaderCompiler after 0.20 seconds
+Launched and connected shader compiler UnityShaderCompiler after 0.25 seconds
+Refreshing native plugins compatible for Editor in 0.31 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Unloading 3112 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 25 unused Assets / (Unknown). Loaded Objects now: 3573.
+Memory consumption went from 109.3 MB to 109.4 MB.
+Total: 2.651542 ms (FindLiveObjects: 0.109167 ms CreateObjectMapping: 0.037083 ms MarkObjects: 2.443958 ms  DeleteObjects: 0.060625 ms)
+
+AssetImportParameters requested are different than current active one (requested -> active):
+  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
+  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
+  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
+  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
+  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
+  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
+  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
+  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
+  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
+  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+========================================================================
+Received Import Request.
+  Time since last request: 162286.590017 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '12b1d5e1b4df07ba6f357b75cc2545fb') in 1.771669 seconds 
+Number of asset objects unloaded after import = 10541
+========================================================================
+Received Import Request.
+  Time since last request: 0.000075 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/beacon_script.prefab
+  artifactKey: Guid(022589fc3cabf564c8fb8a7dc0f4f152) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/beacon_script.prefab using Guid(022589fc3cabf564c8fb8a7dc0f4f152) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'ed777137cd5a97a2869a42cb910cc663') in 0.044195 seconds 
+Number of asset objects unloaded after import = 41
+========================================================================
+Received Import Request.
+  Time since last request: 0.000060 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/omniwheel_frame.prefab
+  artifactKey: Guid(6201f3ead307ae440bed4ced07eec34b) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/omniwheel_frame.prefab using Guid(6201f3ead307ae440bed4ced07eec34b) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '5970229f0b8e637ad7cccd14a311c367') in 0.070096 seconds 
+Number of asset objects unloaded after import = 4115
+========================================================================
+Received Import Request.
+  Time since last request: 0.000044 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/ground.mat
+  artifactKey: Guid(2937b4a285414c74190f059993d1451e) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/ground.mat using Guid(2937b4a285414c74190f059993d1451e) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '59553c369bd830d0fc599760e602bd46') in 0.046905 seconds 
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000061 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel_Multi.prefab
+  artifactKey: Guid(bb073b6433c85c2419b6c5545d276d81) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel_Multi.prefab using Guid(bb073b6433c85c2419b6c5545d276d81) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '98c8a3be3a5f4586f0797abc8ab01ea7') in 0.168048 seconds 
+Number of asset objects unloaded after import = 10547
+========================================================================
+Received Import Request.
+  Time since last request: 0.000082 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Meshes/attach_mechanism.fbx
+  artifactKey: Guid(f922790f1a0bd0745994ae1607a10d8f) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Meshes/attach_mechanism.fbx using Guid(f922790f1a0bd0745994ae1607a10d8f) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '41700c779064a546a3295e94e2f74845') in 0.106303 seconds 
+Number of asset objects unloaded after import = 44
+========================================================================
+Received Import Request.
+  Time since last request: 0.000090 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Meshes/omniwheel.fbx
+  artifactKey: Guid(b37cefd89f6ce0a4ea921124f795ebc1) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Meshes/omniwheel.fbx using Guid(b37cefd89f6ce0a4ea921124f795ebc1) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '2bfd899d00e9d6556577da186d4af657') in 0.315655 seconds 
+Number of asset objects unloaded after import = 411
+========================================================================
+Received Import Request.
+  Time since last request: 0.003439 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/New Physic Material.physicMaterial
+  artifactKey: Guid(4b4ccd837ad3a7a4f8d11048b3f7d560) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/New Physic Material.physicMaterial using Guid(4b4ccd837ad3a7a4f8d11048b3f7d560) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '41912fe2a31effc385d86d2b4e302cab') in 0.051303 seconds 
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000329 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Meshes/beacon.fbx
+  artifactKey: Guid(a55d6ce8d882b3d4c901693e535151b1) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Meshes/beacon.fbx using Guid(a55d6ce8d882b3d4c901693e535151b1) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '77ebb49fca682297c3975f895a684540') in 0.038644 seconds 
+Number of asset objects unloaded after import = 29
+========================================================================
+Received Import Request.
+  Time since last request: 0.000048 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/omniwheel.prefab
+  artifactKey: Guid(72a3d2b90954b124686cfc07e7ccd145) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/omniwheel.prefab using Guid(72a3d2b90954b124686cfc07e7ccd145) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '0013d3eb8173f023548486fcded75634') in 0.047415 seconds 
+Number of asset objects unloaded after import = 411
+========================================================================
+Received Import Request.
+  Time since last request: 0.000058 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/beacon_glass.mat
+  artifactKey: Guid(507db8e7766e5f54b9a85662891d3eba) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/beacon_glass.mat using Guid(507db8e7766e5f54b9a85662891d3eba) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'd5b39826425294c61ae53122edded89a') in 0.066376 seconds 
+Number of asset objects unloaded after import = 7
+========================================================================
+Received Import Request.
+  Time since last request: 0.000078 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/wheel.mat
+  artifactKey: Guid(d15a30acac63b5d43801c8384b740ea0) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/wheel.mat using Guid(d15a30acac63b5d43801c8384b740ea0) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'bdfbdc70e107b2ec33ffde682eff7937') in 0.051384 seconds 
+Number of asset objects unloaded after import = 6
+========================================================================
+Received Import Request.
+  Time since last request: 0.000059 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/beacon.mat
+  artifactKey: Guid(6828af65ba3636247a6c7fbd65e40b17) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/beacon.mat using Guid(6828af65ba3636247a6c7fbd65e40b17) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '8c17c338ea026169521848e57c4eb4aa') in 0.069572 seconds 
+Number of asset objects unloaded after import = 7
+========================================================================
+Received Import Request.
+  Time since last request: 0.000094 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel_Controllable.prefab
+  artifactKey: Guid(42f8f66199709ca4a8707813659ea248) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel_Controllable.prefab using Guid(42f8f66199709ca4a8707813659ea248) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '328aab2234e82dddc0e9c90a822c2bdc') in 0.268277 seconds 
+Number of asset objects unloaded after import = 6891
+========================================================================
+Received Import Request.
+  Time since last request: 0.000097 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/frame.mat
+  artifactKey: Guid(aef7fe9c123c0d04aaf9d01a57630acf) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/frame.mat using Guid(aef7fe9c123c0d04aaf9d01a57630acf) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '2e0e9f4812e4aa961fbe9947c747b3f6') in 0.045593 seconds 
+Number of asset objects unloaded after import = 6
+========================================================================
+Received Import Request.
+  Time since last request: 0.000076 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/FrictionMaterial.physicMaterial
+  artifactKey: Guid(f871a261e8f9fc24595c4d4b7fd2a457) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/FrictionMaterial.physicMaterial using Guid(f871a261e8f9fc24595c4d4b7fd2a457) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '563fcb3322c93eb4f54d3c6a7deb7ee5') in 0.002374 seconds 
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.000102 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel_Attachable.prefab
+  artifactKey: Guid(f7ccb347fdff32843918b050530a654f) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel_Attachable.prefab using Guid(f7ccb347fdff32843918b050530a654f) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'c390740e1849460737c27332d5bd5e4e') in 0.210131 seconds 
+Number of asset objects unloaded after import = 6918
+========================================================================
+Received Import Request.
+  Time since last request: 0.000124 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Materials/mechanism.mat
+  artifactKey: Guid(fcb2122fef8439e4688df041f445a8df) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Materials/mechanism.mat using Guid(fcb2122fef8439e4688df041f445a8df) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '79b1ee3b58e10e73584fe608c5fed894') in 0.061301 seconds 
+Number of asset objects unloaded after import = 6
+========================================================================
+Received Import Request.
+  Time since last request: 0.000070 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/attach_mechanism.prefab
+  artifactKey: Guid(4ceea529d8ffa814a805b2f88e513e61) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/attach_mechanism.prefab using Guid(4ceea529d8ffa814a805b2f88e513e61) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'a1bd7f48ba6c6431b929794a1f97c0c9') in 0.038027 seconds 
+Number of asset objects unloaded after import = 43
+========================================================================
+Received Prepare
+Registering precompiled user dll's ...
+Registered in 0.001887 seconds.
+Begin MonoManager ReloadAssembly
+Thread 0x31919f000 may have been prematurely finalized
+Native extension for OSXStandalone target not found
+Native extension for WebGL target not found
 Refreshing native plugins compatible for Editor in 0.30 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3109 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 25 unused Assets / (40.6 KB). Loaded Objects now: 3571.
-Memory consumption went from 109.5 MB to 109.5 MB.
-Total: 2.638958 ms (FindLiveObjects: 0.132208 ms CreateObjectMapping: 0.040917 ms MarkObjects: 2.395333 ms  DeleteObjects: 0.069292 ms)
-
-AssetImportParameters requested are different than current active one (requested -> active):
-  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
-  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
-  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
-  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
-  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
-  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
-  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
-  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
-  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
-  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-========================================================================
-Received Import Request.
-  Time since last request: 37053.969462 seconds.
-  path: Assets/Model/Banana Man.prefab
-  artifactKey: Guid(2197ee51af37a4ebab5941e94129c478) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
-Number of updated assets reloaded before import = 0
-Start importing Assets/Model/Banana Man.prefab using Guid(2197ee51af37a4ebab5941e94129c478) Importer(815301076,1909f56bfc062723c751e8b465ee728b) Asset 'picker action': Transition 'AnyState -> idle' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
-Asset 'picker action': Transition 'AnyState -> walk' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
- -> (artifact id: '33a0467d4b1a5a3a228d553fc9d7ada5') in 1.124271 seconds 
-Number of asset objects unloaded after import = 304
-========================================================================
-Received Import Request.
-  Time since last request: 56.604109 seconds.
-  path: Assets/Prefabs/Picker.prefab
-  artifactKey: Guid(0e9f6001e0d354546b456ba4eb878a60) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
-Number of updated assets reloaded before import = 0
-Start importing Assets/Prefabs/Picker.prefab using Guid(0e9f6001e0d354546b456ba4eb878a60) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'bfd7e5f92e83133d04d1249385272624') in 0.037488 seconds 
-Number of asset objects unloaded after import = 9
-========================================================================
-Received Import Request.
-  Time since last request: 6.274589 seconds.
-  path: Assets/Model/Banana Man Variant.prefab
-  artifactKey: Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
-Number of updated assets reloaded before import = 0
-Start importing Assets/Model/Banana Man Variant.prefab using Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b) Asset 'picker action': Transition 'AnyState -> idle' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
-Asset 'picker action': Transition 'AnyState -> walk' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
- -> (artifact id: '09720f4bd7b824fffaaafd523e6e6132') in 0.051844 seconds 
-Number of asset objects unloaded after import = 305
-========================================================================
-Received Prepare
-Registering precompiled user dll's ...
-Registered in 0.002306 seconds.
-Begin MonoManager ReloadAssembly
-Thread 0x306ccf000 may have been prematurely finalized
-Native extension for OSXStandalone target not found
-Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.83 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
 [Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
 [Package Manager] Cannot connect to Unity Package Manager local server
 Mono: successfully reloaded assembly
-- Completed reload, in  1.224 seconds
+- Completed reload, in  1.283 seconds
 Domain Reload Profiling:
-	ReloadAssembly (1225ms)
-		BeginReloadAssembly (173ms)
+	ReloadAssembly (1284ms)
+		BeginReloadAssembly (142ms)
 			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (6ms)
-			BackupInstance (0ms)
-			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (56ms)
-		EndReloadAssembly (994ms)
-			LoadAssemblies (90ms)
-			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (221ms)
-			ReleaseScriptCaches (1ms)
-			RebuildScriptCaches (35ms)
-			SetupLoadedEditorAssemblies (656ms)
-				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (3ms)
-				SetLoadedEditorAssemblies (0ms)
-				RefreshPlugins (1ms)
-				BeforeProcessingInitializeOnLoad (40ms)
-				ProcessInitializeOnLoadAttributes (595ms)
-				ProcessInitializeOnLoadMethodAttributes (15ms)
-				AfterProcessingInitializeOnLoad (1ms)
-				EditorAssembliesLoaded (0ms)
-			ExecutionOrderSort2 (0ms)
-			AwakeInstancesAfterBackupRestoration (3ms)
-Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 1.49 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3584.
-Memory consumption went from 122.9 MB to 122.8 MB.
-Total: 2.982375 ms (FindLiveObjects: 0.136333 ms CreateObjectMapping: 0.039667 ms MarkObjects: 2.763500 ms  DeleteObjects: 0.041792 ms)
-
-AssetImportParameters requested are different than current active one (requested -> active):
-  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
-  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
-  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
-  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
-  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
-  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
-  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
-  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
-  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
-  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-========================================================================
-Received Prepare
-Registering precompiled user dll's ...
-Registered in 0.002777 seconds.
-Begin MonoManager ReloadAssembly
-Thread 0x16fcab000 may have been prematurely finalized
-Native extension for OSXStandalone target not found
-Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.63 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
-[Package Manager] Cannot connect to Unity Package Manager local server
-Mono: successfully reloaded assembly
-- Completed reload, in  1.345 seconds
-Domain Reload Profiling:
-	ReloadAssembly (1346ms)
-		BeginReloadAssembly (153ms)
-			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (6ms)
+			DisableScriptedObjects (4ms)
 			BackupInstance (0ms)
 			ReleaseScriptingObjects (0ms)
 			CreateAndSetChildDomain (58ms)
-		EndReloadAssembly (1114ms)
-			LoadAssemblies (85ms)
-			RebuildTransferFunctionScriptingTraits (1ms)
-			SetupTypeCache (283ms)
-			ReleaseScriptCaches (1ms)
-			RebuildScriptCaches (41ms)
-			SetupLoadedEditorAssemblies (684ms)
-				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (4ms)
-				SetLoadedEditorAssemblies (2ms)
-				RefreshPlugins (1ms)
-				BeforeProcessingInitializeOnLoad (44ms)
-				ProcessInitializeOnLoadAttributes (617ms)
-				ProcessInitializeOnLoadMethodAttributes (17ms)
-				AfterProcessingInitializeOnLoad (1ms)
-				EditorAssembliesLoaded (0ms)
-			ExecutionOrderSort2 (0ms)
-			AwakeInstancesAfterBackupRestoration (6ms)
-Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 0.52 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3587.
-Memory consumption went from 122.9 MB to 122.8 MB.
-Total: 3.478209 ms (FindLiveObjects: 0.166084 ms CreateObjectMapping: 0.153875 ms MarkObjects: 3.116125 ms  DeleteObjects: 0.040959 ms)
-
-AssetImportParameters requested are different than current active one (requested -> active):
-  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
-  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
-  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
-  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
-  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
-  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
-  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
-  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
-  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
-  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-========================================================================
-Received Prepare
-Registering precompiled user dll's ...
-Registered in 0.002602 seconds.
-Begin MonoManager ReloadAssembly
-Thread 0x16fcab000 may have been prematurely finalized
-Native extension for OSXStandalone target not found
-Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.42 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
-[Package Manager] Cannot connect to Unity Package Manager local server
-Mono: successfully reloaded assembly
-- Completed reload, in  1.336 seconds
-Domain Reload Profiling:
-	ReloadAssembly (1338ms)
-		BeginReloadAssembly (139ms)
-			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (4ms)
-			BackupInstance (0ms)
-			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (49ms)
-		EndReloadAssembly (1125ms)
-			LoadAssemblies (68ms)
+		EndReloadAssembly (1073ms)
+			LoadAssemblies (69ms)
 			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (254ms)
+			SetupTypeCache (317ms)
 			ReleaseScriptCaches (1ms)
-			RebuildScriptCaches (47ms)
-			SetupLoadedEditorAssemblies (718ms)
+			RebuildScriptCaches (37ms)
+			SetupLoadedEditorAssemblies (631ms)
 				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (4ms)
-				SetLoadedEditorAssemblies (1ms)
-				RefreshPlugins (0ms)
-				BeforeProcessingInitializeOnLoad (51ms)
-				ProcessInitializeOnLoadAttributes (635ms)
-				ProcessInitializeOnLoadMethodAttributes (25ms)
-				AfterProcessingInitializeOnLoad (1ms)
-				EditorAssembliesLoaded (0ms)
-			ExecutionOrderSort2 (0ms)
-			AwakeInstancesAfterBackupRestoration (3ms)
-Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 0.63 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3590.
-Memory consumption went from 122.9 MB to 122.9 MB.
-Total: 2.736416 ms (FindLiveObjects: 0.126292 ms CreateObjectMapping: 0.039916 ms MarkObjects: 2.521542 ms  DeleteObjects: 0.047958 ms)
-
-AssetImportParameters requested are different than current active one (requested -> active):
-  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
-  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
-  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
-  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
-  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
-  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
-  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
-  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
-  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
-  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-========================================================================
-Received Prepare
-Registering precompiled user dll's ...
-Registered in 0.001897 seconds.
-Begin MonoManager ReloadAssembly
-Thread 0x16fcab000 may have been prematurely finalized
-Native extension for OSXStandalone target not found
-Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.36 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
-[Package Manager] Cannot connect to Unity Package Manager local server
-Mono: successfully reloaded assembly
-- Completed reload, in  1.243 seconds
-Domain Reload Profiling:
-	ReloadAssembly (1244ms)
-		BeginReloadAssembly (140ms)
-			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (4ms)
-			BackupInstance (0ms)
-			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (56ms)
-		EndReloadAssembly (1041ms)
-			LoadAssemblies (72ms)
-			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (253ms)
-			ReleaseScriptCaches (1ms)
-			RebuildScriptCaches (38ms)
-			SetupLoadedEditorAssemblies (650ms)
-				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (3ms)
+				InitializePlatformSupportModulesInManaged (2ms)
 				SetLoadedEditorAssemblies (0ms)
 				RefreshPlugins (0ms)
-				BeforeProcessingInitializeOnLoad (41ms)
-				ProcessInitializeOnLoadAttributes (586ms)
-				ProcessInitializeOnLoadMethodAttributes (18ms)
+				BeforeProcessingInitializeOnLoad (38ms)
+				ProcessInitializeOnLoadAttributes (575ms)
+				ProcessInitializeOnLoadMethodAttributes (15ms)
 				AfterProcessingInitializeOnLoad (1ms)
 				EditorAssembliesLoaded (0ms)
 			ExecutionOrderSort2 (0ms)
 			AwakeInstancesAfterBackupRestoration (2ms)
 Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 0.48 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 0.52 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (22.0 KB). Loaded Objects now: 3593.
-Memory consumption went from 122.9 MB to 122.9 MB.
-Total: 5.009083 ms (FindLiveObjects: 0.132125 ms CreateObjectMapping: 0.041000 ms MarkObjects: 4.793166 ms  DeleteObjects: 0.042041 ms)
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3621.
+Memory consumption went from 130.8 MB to 130.8 MB.
+Total: 2.678083 ms (FindLiveObjects: 0.123417 ms CreateObjectMapping: 0.040375 ms MarkObjects: 2.487583 ms  DeleteObjects: 0.026084 ms)
 
 AssetImportParameters requested are different than current active one (requested -> active):
   custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
@@ -498,159 +390,83 @@ AssetImportParameters requested are different than current active one (requested
   custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
 ========================================================================
 Received Import Request.
-  Time since last request: 238.346656 seconds.
-  path: Assets/Model/Banana Man Variant.prefab
-  artifactKey: Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+  Time since last request: 95.819767 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
 Number of updated assets reloaded before import = 0
-Start importing Assets/Model/Banana Man Variant.prefab using Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b) Asset 'picker action': Transition 'AnyState -> idle' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
-Asset 'picker action': Transition 'AnyState -> walk' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
- -> (artifact id: '9c5312c60ea4006a2bb1d6d75dd84d53') in 0.144691 seconds 
-Number of asset objects unloaded after import = 305
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '3779f67317c6ace7f7454dfd705c3722') in 0.453820 seconds 
+Number of asset objects unloaded after import = 10541
 ========================================================================
 Received Import Request.
-  Time since last request: 2.214350 seconds.
-  path: Assets/Model/Banana Man Variant.prefab
-  artifactKey: Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+  Time since last request: 0.984084 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
 Number of updated assets reloaded before import = 0
-Start importing Assets/Model/Banana Man Variant.prefab using Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b) Asset 'picker action': Transition 'AnyState -> idle' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
-Asset 'picker action': Transition 'AnyState -> walk' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
- -> (artifact id: 'b3cd24f7bd4842c6d0724ac609224912') in 0.032356 seconds 
-Number of asset objects unloaded after import = 305
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'f005cf4294ef8d1770569dbb238a08ff') in 0.242685 seconds 
+Number of asset objects unloaded after import = 10541
 ========================================================================
 Received Import Request.
-  Time since last request: 0.968457 seconds.
-  path: Assets/Model/Banana Man Variant.prefab
-  artifactKey: Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+  Time since last request: 1.151337 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
 Number of updated assets reloaded before import = 0
-Start importing Assets/Model/Banana Man Variant.prefab using Guid(d012c3e4f33f94fb19c0cd24c3b4cbab) Importer(815301076,1909f56bfc062723c751e8b465ee728b) Asset 'picker action': Transition 'AnyState -> idle' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
-Asset 'picker action': Transition 'AnyState -> walk' in state 'AnyState' doesn't have an Exit Time or any condition, transition will be ignored
-UnityEngine.StackTraceUtility:ExtractStackTrace () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs:37)
-UnityEditor.EditorUtility:Internal_InstantiateRemoveAllNonAnimationComponentsSingle (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion)
-UnityEditor.EditorUtility:InstantiateRemoveAllNonAnimationComponents (UnityEngine.Object,UnityEngine.Vector3,UnityEngine.Quaternion) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:656)
-UnityEditor.EditorUtility:InstantiateForAnimatorPreview (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/EditorUtility.cs:622)
-UnityEditor.GameObjectInspector/PreviewData:UpdateGameObject (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:101)
-UnityEditor.GameObjectInspector/PreviewData:.ctor (UnityEngine.Object) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:95)
-UnityEditor.GameObjectInspector:GetPreviewData () (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:677)
-UnityEditor.GameObjectInspector:RenderStaticPreview (string,UnityEngine.Object[],int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/Inspector/GameObjectInspector.cs:887)
-UnityEditor.AssetPreviewUpdater:CreatePreview (UnityEngine.Object,UnityEngine.Object[],string,int,int) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:47)
-UnityEditor.AssetPreviewUpdater:CreatePreviewForAsset (UnityEngine.Object,UnityEngine.Object[],string) (at /Volumes/jenkins1/sharedspace/ra_2021.3/Editor/Mono/AssetPreviewUpdater.cs:14)
-
-[/Volumes/jenkins1/sharedspace/ra_2021.3/Runtime/Export/Scripting/StackTrace.cs line 37]
-
- -> (artifact id: 'fc067b9579ab904502a76e79e62735c7') in 0.030025 seconds 
-Number of asset objects unloaded after import = 305
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'a05ab65e6e93e3bc59f397dee52428c5') in 0.263990 seconds 
+Number of asset objects unloaded after import = 10541
+========================================================================
+Received Import Request.
+  Time since last request: 3.558923 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'fdfd38619f0c95eeb6d2ca1ad59776ec') in 0.299587 seconds 
+Number of asset objects unloaded after import = 10541
 ========================================================================
 Received Prepare
 Registering precompiled user dll's ...
-Registered in 0.001858 seconds.
+Registered in 0.001780 seconds.
 Begin MonoManager ReloadAssembly
-Thread 0x16fcab000 may have been prematurely finalized
+Thread 0x16d393000 may have been prematurely finalized
 Native extension for OSXStandalone target not found
 Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.35 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 1.82 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
 [Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
 [Package Manager] Cannot connect to Unity Package Manager local server
 Mono: successfully reloaded assembly
-- Completed reload, in  1.217 seconds
+- Completed reload, in  1.377 seconds
 Domain Reload Profiling:
-	ReloadAssembly (1218ms)
-		BeginReloadAssembly (101ms)
+	ReloadAssembly (1378ms)
+		BeginReloadAssembly (291ms)
 			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (3ms)
+			DisableScriptedObjects (7ms)
 			BackupInstance (0ms)
 			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (40ms)
-		EndReloadAssembly (1063ms)
-			LoadAssemblies (47ms)
+			CreateAndSetChildDomain (181ms)
+		EndReloadAssembly (1016ms)
+			LoadAssemblies (79ms)
 			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (243ms)
+			SetupTypeCache (236ms)
 			ReleaseScriptCaches (1ms)
-			RebuildScriptCaches (51ms)
-			SetupLoadedEditorAssemblies (684ms)
+			RebuildScriptCaches (36ms)
+			SetupLoadedEditorAssemblies (657ms)
 				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (4ms)
-				SetLoadedEditorAssemblies (0ms)
-				RefreshPlugins (0ms)
-				BeforeProcessingInitializeOnLoad (46ms)
-				ProcessInitializeOnLoadAttributes (616ms)
+				InitializePlatformSupportModulesInManaged (3ms)
+				SetLoadedEditorAssemblies (1ms)
+				RefreshPlugins (2ms)
+				BeforeProcessingInitializeOnLoad (39ms)
+				ProcessInitializeOnLoadAttributes (596ms)
 				ProcessInitializeOnLoadMethodAttributes (16ms)
 				AfterProcessingInitializeOnLoad (1ms)
 				EditorAssembliesLoaded (0ms)
 			ExecutionOrderSort2 (0ms)
 			AwakeInstancesAfterBackupRestoration (3ms)
 Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 0.38 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 0.30 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3596.
-Memory consumption went from 122.9 MB to 122.9 MB.
-Total: 4.076500 ms (FindLiveObjects: 0.200958 ms CreateObjectMapping: 0.054375 ms MarkObjects: 3.752000 ms  DeleteObjects: 0.067958 ms)
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3624.
+Memory consumption went from 132.2 MB to 132.2 MB.
+Total: 2.425792 ms (FindLiveObjects: 0.138167 ms CreateObjectMapping: 0.060375 ms MarkObjects: 2.199583 ms  DeleteObjects: 0.027084 ms)
 
 AssetImportParameters requested are different than current active one (requested -> active):
   custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
@@ -665,112 +481,412 @@ AssetImportParameters requested are different than current active one (requested
   custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
   custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
 ========================================================================
+Received Import Request.
+  Time since last request: 61.016061 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '37d5af0e22ff95859e07739a235d1d33') in 0.470923 seconds 
+Number of asset objects unloaded after import = 10541
+========================================================================
+Received Import Request.
+  Time since last request: 0.859733 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '6dc8569a80699777ad5ff3c42d30e2f4') in 0.222438 seconds 
+Number of asset objects unloaded after import = 10541
+========================================================================
+Received Import Request.
+  Time since last request: 1.726475 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '2548ab7b9e8b6d5c3cc3177b9bad6769') in 0.374090 seconds 
+Number of asset objects unloaded after import = 10541
+========================================================================
 Received Prepare
 Registering precompiled user dll's ...
-Registered in 0.001568 seconds.
+Registered in 0.001949 seconds.
 Begin MonoManager ReloadAssembly
-Thread 0x16fcab000 may have been prematurely finalized
+Thread 0x16d393000 may have been prematurely finalized
 Native extension for OSXStandalone target not found
 Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.92 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 0.79 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
 [Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
 [Package Manager] Cannot connect to Unity Package Manager local server
 Mono: successfully reloaded assembly
-- Completed reload, in  1.279 seconds
+- Completed reload, in  1.218 seconds
 Domain Reload Profiling:
-	ReloadAssembly (1279ms)
-		BeginReloadAssembly (129ms)
+	ReloadAssembly (1219ms)
+		BeginReloadAssembly (137ms)
 			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (9ms)
+			DisableScriptedObjects (7ms)
 			BackupInstance (0ms)
 			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (43ms)
-		EndReloadAssembly (1091ms)
-			LoadAssemblies (51ms)
+			CreateAndSetChildDomain (48ms)
+		EndReloadAssembly (998ms)
+			LoadAssemblies (80ms)
 			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (266ms)
-			ReleaseScriptCaches (2ms)
-			RebuildScriptCaches (41ms)
-			SetupLoadedEditorAssemblies (691ms)
+			SetupTypeCache (231ms)
+			ReleaseScriptCaches (1ms)
+			RebuildScriptCaches (34ms)
+			SetupLoadedEditorAssemblies (643ms)
 				LogAssemblyErrors (0ms)
 				InitializePlatformSupportModulesInManaged (4ms)
 				SetLoadedEditorAssemblies (0ms)
 				RefreshPlugins (1ms)
-				BeforeProcessingInitializeOnLoad (43ms)
-				ProcessInitializeOnLoadAttributes (624ms)
-				ProcessInitializeOnLoadMethodAttributes (18ms)
-				AfterProcessingInitializeOnLoad (1ms)
-				EditorAssembliesLoaded (0ms)
-			ExecutionOrderSort2 (0ms)
-			AwakeInstancesAfterBackupRestoration (2ms)
-Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 0.38 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3599.
-Memory consumption went from 122.9 MB to 122.9 MB.
-Total: 3.004541 ms (FindLiveObjects: 0.135292 ms CreateObjectMapping: 0.041625 ms MarkObjects: 2.753584 ms  DeleteObjects: 0.072750 ms)
-
-AssetImportParameters requested are different than current active one (requested -> active):
-  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
-  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
-  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
-  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
-  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
-  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
-  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
-  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
-  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
-  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
-========================================================================
-Received Prepare
-Registering precompiled user dll's ...
-Registered in 0.001452 seconds.
-Begin MonoManager ReloadAssembly
-Thread 0x16f6a7000 may have been prematurely finalized
-Native extension for OSXStandalone target not found
-Native extension for WebGL target not found
-Refreshing native plugins compatible for Editor in 0.34 ms, found 2 plugins.
-Preloading 0 native plugins for Editor in 0.00 ms.
-[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
-[Package Manager] Cannot connect to Unity Package Manager local server
-Mono: successfully reloaded assembly
-- Completed reload, in  1.231 seconds
-Domain Reload Profiling:
-	ReloadAssembly (1232ms)
-		BeginReloadAssembly (125ms)
-			ExecutionOrderSort (0ms)
-			DisableScriptedObjects (4ms)
-			BackupInstance (0ms)
-			ReleaseScriptingObjects (0ms)
-			CreateAndSetChildDomain (42ms)
-		EndReloadAssembly (1015ms)
-			LoadAssemblies (66ms)
-			RebuildTransferFunctionScriptingTraits (0ms)
-			SetupTypeCache (237ms)
-			ReleaseScriptCaches (1ms)
-			RebuildScriptCaches (38ms)
-			SetupLoadedEditorAssemblies (650ms)
-				LogAssemblyErrors (0ms)
-				InitializePlatformSupportModulesInManaged (3ms)
-				SetLoadedEditorAssemblies (0ms)
-				RefreshPlugins (0ms)
-				BeforeProcessingInitializeOnLoad (40ms)
-				ProcessInitializeOnLoadAttributes (591ms)
+				BeforeProcessingInitializeOnLoad (38ms)
+				ProcessInitializeOnLoadAttributes (585ms)
 				ProcessInitializeOnLoadMethodAttributes (14ms)
 				AfterProcessingInitializeOnLoad (1ms)
 				EditorAssembliesLoaded (0ms)
 			ExecutionOrderSort2 (0ms)
 			AwakeInstancesAfterBackupRestoration (2ms)
 Platform modules already initialized, skipping
-Refreshing native plugins compatible for Editor in 1.12 ms, found 2 plugins.
+Refreshing native plugins compatible for Editor in 0.29 ms, found 2 plugins.
 Preloading 0 native plugins for Editor in 0.00 ms.
-Unloading 3101 Unused Serialized files (Serialized files now loaded: 0)
-Unloading 20 unused Assets / (22.0 KB). Loaded Objects now: 3602.
-Memory consumption went from 122.9 MB to 122.9 MB.
-Total: 3.582500 ms (FindLiveObjects: 0.125125 ms CreateObjectMapping: 0.042083 ms MarkObjects: 3.369667 ms  DeleteObjects: 0.044709 ms)
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3627.
+Memory consumption went from 132.3 MB to 132.2 MB.
+Total: 2.701042 ms (FindLiveObjects: 0.143417 ms CreateObjectMapping: 0.071125 ms MarkObjects: 2.440750 ms  DeleteObjects: 0.045167 ms)
+
+AssetImportParameters requested are different than current active one (requested -> active):
+  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
+  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
+  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
+  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
+  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
+  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
+  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
+  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
+  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
+  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+========================================================================
+Received Import Request.
+  Time since last request: 40.833000 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '70c13369194d25263cb50f24aaaee497') in 0.462144 seconds 
+Number of asset objects unloaded after import = 10541
+========================================================================
+Received Import Request.
+  Time since last request: 33.792351 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '4191f43de8f4a0003484c37677aeeff9') in 0.392465 seconds 
+Number of asset objects unloaded after import = 10543
+========================================================================
+Received Import Request.
+  Time since last request: 14.968922 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '7121f0032a5eab60d1d4253c2b5442b3') in 0.400992 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Import Request.
+  Time since last request: 60.028227 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '53792c65484fbb4ab9d2375abf96af11') in 0.482681 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Import Request.
+  Time since last request: 4.776290 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '1084776a040c3f69c3880d97b3743074') in 0.309414 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Import Request.
+  Time since last request: 6.437225 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'e3a9f549acde104030910d8be21dfc84') in 0.294528 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Import Request.
+  Time since last request: 3.718011 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'a4cedf40b7c6ac9b53adae40485711c8') in 0.259035 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Prepare
+Registering precompiled user dll's ...
+Registered in 0.003245 seconds.
+Begin MonoManager ReloadAssembly
+Thread 0x16d393000 may have been prematurely finalized
+Native extension for OSXStandalone target not found
+Native extension for WebGL target not found
+Refreshing native plugins compatible for Editor in 0.29 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
+[Package Manager] Cannot connect to Unity Package Manager local server
+Mono: successfully reloaded assembly
+- Completed reload, in  1.226 seconds
+Domain Reload Profiling:
+	ReloadAssembly (1228ms)
+		BeginReloadAssembly (147ms)
+			ExecutionOrderSort (0ms)
+			DisableScriptedObjects (5ms)
+			BackupInstance (0ms)
+			ReleaseScriptingObjects (0ms)
+			CreateAndSetChildDomain (61ms)
+		EndReloadAssembly (1013ms)
+			LoadAssemblies (67ms)
+			RebuildTransferFunctionScriptingTraits (0ms)
+			SetupTypeCache (237ms)
+			ReleaseScriptCaches (1ms)
+			RebuildScriptCaches (39ms)
+			SetupLoadedEditorAssemblies (648ms)
+				LogAssemblyErrors (0ms)
+				InitializePlatformSupportModulesInManaged (3ms)
+				SetLoadedEditorAssemblies (0ms)
+				RefreshPlugins (0ms)
+				BeforeProcessingInitializeOnLoad (39ms)
+				ProcessInitializeOnLoadAttributes (589ms)
+				ProcessInitializeOnLoadMethodAttributes (14ms)
+				AfterProcessingInitializeOnLoad (1ms)
+				EditorAssembliesLoaded (0ms)
+			ExecutionOrderSort2 (0ms)
+			AwakeInstancesAfterBackupRestoration (3ms)
+Platform modules already initialized, skipping
+Refreshing native plugins compatible for Editor in 1.14 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3630.
+Memory consumption went from 133.8 MB to 133.8 MB.
+Total: 4.382375 ms (FindLiveObjects: 0.470791 ms CreateObjectMapping: 0.265125 ms MarkObjects: 3.608291 ms  DeleteObjects: 0.037167 ms)
+
+AssetImportParameters requested are different than current active one (requested -> active):
+  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
+  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
+  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
+  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
+  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
+  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
+  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
+  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
+  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
+  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+========================================================================
+Received Import Request.
+  Time since last request: 149.602725 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '85f987d574c653fb2844c0b5b2ed4f7a') in 0.555413 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Import Request.
+  Time since last request: 11.955894 seconds.
+  path: Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab
+  artifactKey: Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Megapoly.Art/AGV Omniwheel/Prefabs/AGV_Omniwheel.prefab using Guid(a4df2e4fde981be47ab9c9fb684e92e3) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '95849f44acaf33d9dfc0a38869a910f9') in 0.401923 seconds 
+Number of asset objects unloaded after import = 10544
+========================================================================
+Received Prepare
+Registering precompiled user dll's ...
+Registered in 0.001666 seconds.
+Begin MonoManager ReloadAssembly
+Thread 0x16d393000 may have been prematurely finalized
+Native extension for OSXStandalone target not found
+Native extension for WebGL target not found
+Refreshing native plugins compatible for Editor in 0.85 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
+[Package Manager] Cannot connect to Unity Package Manager local server
+Mono: successfully reloaded assembly
+- Completed reload, in  1.210 seconds
+Domain Reload Profiling:
+	ReloadAssembly (1211ms)
+		BeginReloadAssembly (137ms)
+			ExecutionOrderSort (0ms)
+			DisableScriptedObjects (7ms)
+			BackupInstance (0ms)
+			ReleaseScriptingObjects (0ms)
+			CreateAndSetChildDomain (52ms)
+		EndReloadAssembly (1010ms)
+			LoadAssemblies (68ms)
+			RebuildTransferFunctionScriptingTraits (0ms)
+			SetupTypeCache (226ms)
+			ReleaseScriptCaches (1ms)
+			RebuildScriptCaches (44ms)
+			SetupLoadedEditorAssemblies (656ms)
+				LogAssemblyErrors (0ms)
+				InitializePlatformSupportModulesInManaged (6ms)
+				SetLoadedEditorAssemblies (0ms)
+				RefreshPlugins (1ms)
+				BeforeProcessingInitializeOnLoad (40ms)
+				ProcessInitializeOnLoadAttributes (590ms)
+				ProcessInitializeOnLoadMethodAttributes (17ms)
+				AfterProcessingInitializeOnLoad (1ms)
+				EditorAssembliesLoaded (0ms)
+			ExecutionOrderSort2 (0ms)
+			AwakeInstancesAfterBackupRestoration (3ms)
+Platform modules already initialized, skipping
+Refreshing native plugins compatible for Editor in 0.46 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (21.9 KB). Loaded Objects now: 3633.
+Memory consumption went from 133.6 MB to 133.5 MB.
+Total: 2.808334 ms (FindLiveObjects: 0.131125 ms CreateObjectMapping: 0.038250 ms MarkObjects: 2.587334 ms  DeleteObjects: 0.050125 ms)
+
+AssetImportParameters requested are different than current active one (requested -> active):
+  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
+  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
+  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
+  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
+  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
+  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
+  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
+  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
+  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
+  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+========================================================================
+Received Import Request.
+  Time since last request: 84.787885 seconds.
+  path: Assets/Plugins/Banana Yellow Games/Characters/Banana Man/Demo Scene/Gray Skybox.mat
+  artifactKey: Guid(3af0ba1359eab664798873d9a539a9be) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Plugins/Banana Yellow Games/Characters/Banana Man/Demo Scene/Gray Skybox.mat using Guid(3af0ba1359eab664798873d9a539a9be) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '195586f715057c44eefdce52396c644d') in 0.237248 seconds 
+Number of asset objects unloaded after import = 1
+========================================================================
+Received Import Request.
+  Time since last request: 0.677415 seconds.
+  path: Assets/Plugins/Banana Yellow Games/Characters/Banana Man/Materials/Body.mat
+  artifactKey: Guid(945e2f586a1a63a49a99d9080a8e9f24) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Plugins/Banana Yellow Games/Characters/Banana Man/Materials/Body.mat using Guid(945e2f586a1a63a49a99d9080a8e9f24) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: '207da709ca2f0afd3032e9373da0e714') in 0.026415 seconds 
+Number of asset objects unloaded after import = 2
+========================================================================
+Received Import Request.
+  Time since last request: 0.572826 seconds.
+  path: Assets/Plugins/Banana Yellow Games/Characters/Banana Man/Textures/Banana Man Albedo.png
+  artifactKey: Guid(ba30b5ad10906d145b2715c1a9446f41) Importer(815301076,1909f56bfc062723c751e8b465ee728b)
+Number of updated assets reloaded before import = 0
+Start importing Assets/Plugins/Banana Yellow Games/Characters/Banana Man/Textures/Banana Man Albedo.png using Guid(ba30b5ad10906d145b2715c1a9446f41) Importer(815301076,1909f56bfc062723c751e8b465ee728b)  -> (artifact id: 'efb38fb483121484333a5fb1888acd39') in 0.414726 seconds 
+Number of asset objects unloaded after import = 2
+========================================================================
+Received Prepare
+Registering precompiled user dll's ...
+Registered in 0.001681 seconds.
+Begin MonoManager ReloadAssembly
+Thread 0x16d393000 may have been prematurely finalized
+Native extension for OSXStandalone target not found
+Native extension for WebGL target not found
+Refreshing native plugins compatible for Editor in 0.46 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
+[Package Manager] Cannot connect to Unity Package Manager local server
+Mono: successfully reloaded assembly
+- Completed reload, in  1.164 seconds
+Domain Reload Profiling:
+	ReloadAssembly (1165ms)
+		BeginReloadAssembly (124ms)
+			ExecutionOrderSort (0ms)
+			DisableScriptedObjects (4ms)
+			BackupInstance (0ms)
+			ReleaseScriptingObjects (0ms)
+			CreateAndSetChildDomain (49ms)
+		EndReloadAssembly (979ms)
+			LoadAssemblies (57ms)
+			RebuildTransferFunctionScriptingTraits (0ms)
+			SetupTypeCache (236ms)
+			ReleaseScriptCaches (1ms)
+			RebuildScriptCaches (37ms)
+			SetupLoadedEditorAssemblies (626ms)
+				LogAssemblyErrors (0ms)
+				InitializePlatformSupportModulesInManaged (3ms)
+				SetLoadedEditorAssemblies (0ms)
+				RefreshPlugins (0ms)
+				BeforeProcessingInitializeOnLoad (42ms)
+				ProcessInitializeOnLoadAttributes (568ms)
+				ProcessInitializeOnLoadMethodAttributes (11ms)
+				AfterProcessingInitializeOnLoad (1ms)
+				EditorAssembliesLoaded (0ms)
+			ExecutionOrderSort2 (0ms)
+			AwakeInstancesAfterBackupRestoration (2ms)
+Platform modules already initialized, skipping
+Refreshing native plugins compatible for Editor in 0.38 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (22.0 KB). Loaded Objects now: 3639.
+Memory consumption went from 137.7 MB to 137.7 MB.
+Total: 2.531458 ms (FindLiveObjects: 0.127542 ms CreateObjectMapping: 0.046417 ms MarkObjects: 2.320083 ms  DeleteObjects: 0.036583 ms)
+
+AssetImportParameters requested are different than current active one (requested -> active):
+  custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
+  custom:container-muxer-webm: aa71ff27fc2769a1b78a27578f13a17b -> 
+  custom:container-demuxer-webm: 4f35f7cbe854078d1ac9338744f61a02 -> 
+  custom:video-encoder-webm-vp8: eb34c28f22e8b96e1ab97ce403110664 -> 
+  custom:framework-osx-AVFoundation: e770b220cccbd017edd2c1fefb359320 -> 
+  custom:CustomObjectIndexerAttribute: bc11b3a6c3213fcdd17b65e7da85e133 -> 
+  custom:audio-encoder-webm-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+  custom:SearchIndexIgnoredProperties: e643bd26f0fe6173181afceb89e7c659 -> 
+  custom:container-demuxer-ogg: 62fdf1f143b41e24485cea50d1cbac27 -> 
+  custom:video-decoder-webm-vp8: 9c59270c3fd7afecdb556c50c9e8de78 -> 
+  custom:audio-decoder-ogg-vorbis: bf7c407c2cedff20999df2af8eb42d56 -> 
+========================================================================
+Received Prepare
+Registering precompiled user dll's ...
+Registered in 0.001552 seconds.
+Begin MonoManager ReloadAssembly
+Thread 0x16d393000 may have been prematurely finalized
+Native extension for OSXStandalone target not found
+Native extension for WebGL target not found
+Refreshing native plugins compatible for Editor in 0.33 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+[Package Manager] Server::EnsureServerProcessIsRunning -- launch failed, reason: Unity was launched with the -noUpm command-line argument
+[Package Manager] Cannot connect to Unity Package Manager local server
+Mono: successfully reloaded assembly
+- Completed reload, in  1.269 seconds
+Domain Reload Profiling:
+	ReloadAssembly (1269ms)
+		BeginReloadAssembly (100ms)
+			ExecutionOrderSort (0ms)
+			DisableScriptedObjects (5ms)
+			BackupInstance (0ms)
+			ReleaseScriptingObjects (0ms)
+			CreateAndSetChildDomain (31ms)
+		EndReloadAssembly (1096ms)
+			LoadAssemblies (64ms)
+			RebuildTransferFunctionScriptingTraits (0ms)
+			SetupTypeCache (286ms)
+			ReleaseScriptCaches (1ms)
+			RebuildScriptCaches (41ms)
+			SetupLoadedEditorAssemblies (682ms)
+				LogAssemblyErrors (0ms)
+				InitializePlatformSupportModulesInManaged (4ms)
+				SetLoadedEditorAssemblies (0ms)
+				RefreshPlugins (0ms)
+				BeforeProcessingInitializeOnLoad (40ms)
+				ProcessInitializeOnLoadAttributes (621ms)
+				ProcessInitializeOnLoadMethodAttributes (16ms)
+				AfterProcessingInitializeOnLoad (1ms)
+				EditorAssembliesLoaded (0ms)
+			ExecutionOrderSort2 (0ms)
+			AwakeInstancesAfterBackupRestoration (2ms)
+Platform modules already initialized, skipping
+Refreshing native plugins compatible for Editor in 0.33 ms, found 2 plugins.
+Preloading 0 native plugins for Editor in 0.00 ms.
+Unloading 3105 Unused Serialized files (Serialized files now loaded: 0)
+Unloading 20 unused Assets / (22.0 KB). Loaded Objects now: 3642.
+Memory consumption went from 137.7 MB to 137.7 MB.
+Total: 3.343000 ms (FindLiveObjects: 0.140334 ms CreateObjectMapping: 0.047208 ms MarkObjects: 3.136542 ms  DeleteObjects: 0.018292 ms)
 
 AssetImportParameters requested are different than current active one (requested -> active):
   custom:video-decoder-ogg-theora: a1e56fd34408186e4bbccfd4996cb3dc -> 
