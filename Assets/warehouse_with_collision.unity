@@ -408,7 +408,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b4266108a1e17427686fbeceadea4d13, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  pickerPrefab: {fileID: 919132149155446097, guid: 81bb9eea30387e442899949a80011e55, type: 3}
+  pickerPrefab: {fileID: 7642240971951750203, guid: 0be4e1c6b7e874042a041c429a847e87, type: 3}
   numberOfPickers: 5
   minPickerSpacing: 10
   pickersParent: {fileID: 706901190}
@@ -731,7 +731,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7998438430aea46c7a90189ad7ccb6e8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  robotPrefab: {fileID: 8841361260369869970, guid: a4df2e4fde981be47ab9c9fb684e92e3, type: 3}
+  robotPrefab: {fileID: 8841361260369869970, guid: eb24a2b82e9fe46a2b4f48fa3ce1987a, type: 3}
   numberOfRobots: 10
   targetIndicatorPrefab: {fileID: 1239929927}
 --- !u!4 &1545376426
@@ -830,7 +830,7 @@ MonoBehaviour:
   jsonFile: {fileID: 4900000, guid: 380f9842717a94809999360bd47626ae, type: 3}
   mapVisualizer: {fileID: 1668055372}
   mapBoundaryPrefab: {fileID: 1477745115}
-  height: 0.3
+  height: 0
   width: 25
   length: 20
 --- !u!4 &1765155606

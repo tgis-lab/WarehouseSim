@@ -1589,16 +1589,16 @@ namespace CentralControl.RobotControl
                     Gizmos.DrawLine(start, end);
                 }
                 
-                // Highligh current path segment
-                if (currentPathIndex < currentPath.Count)
-                {
-                    Vector3 currentPos = transform.position;
-                    Vector3 targetPos = GetPointVector3((Point)currentPath[currentPathIndex].Point);
+                // // Highligh current path segment
+                // if (currentPathIndex < currentPath.Count)
+                // {
+                //     Vector3 currentPos = transform.position;
+                //     Vector3 targetPos = GetPointVector3((Point)currentPath[currentPathIndex].Point);
                     
-                    Gizmos.color = Color.green;
-                    Gizmos.DrawLine(currentPos, targetPos);
-                    Gizmos.DrawSphere(targetPos, 0.2f);
-                }
+                //     Gizmos.color = Color.green;
+                //     Gizmos.DrawLine(currentPos, targetPos);
+                //     Gizmos.DrawSphere(targetPos, 0.2f);
+                // }
             }
         }
         

@@ -60,20 +60,43 @@ namespace CentralControl.PickerControl
                 }
 
                 Vector3 basePosition = basePositions[i];
-                GameObject pickerObj = Instantiate(pickerPrefab, basePosition, Quaternion.identity, pickersParent);
                 int pickerId = i + 1;
-                pickerObj.name = $"Picker_{pickerId}";
-
-                PickerController picker = pickerObj.GetComponent<PickerController>();
-                if (picker == null)
-                {
-                    picker = pickerObj.GetComponentInChildren<PickerController>();
-                    if (picker == null)
-                    {
-                        picker = pickerObj.AddComponent<PickerController>();
-                    }
-                }
-
+                
+                // Create a container object for the picker
+                GameObject pickerContainer = new GameObject($"Picker_{pickerId}_Container");
+                pickerContainer.transform.SetParent(pickersParent);
+                pickerContainer.transform.position = basePosition;
+                pickerContainer.tag = "Picker";
+                pickerContainer.layer = LayerMask.NameToLayer("PickerLayer");
+                
+                // Instantiate the picker model as a child of the container
+                GameObject pickerModel = Instantiate(pickerPrefab, Vector3.zero, Quaternion.identity);
+                pickerModel.name = $"Picker_{pickerId}_Model";
+                pickerModel.transform.SetParent(pickerContainer.transform, false);
+                pickerModel.transform.localPosition = Vector3.zero;
+                
+                // Add a BoxCollider and Rigidbody to the container
+                BoxCollider collider = pickerContainer.AddComponent<BoxCollider>();
+                collider.size = new Vector3(0.8f, 1.85f, 0.5f); // Human-like collider size
+                collider.center = new Vector3(0, 0.9f, 0.05f); // Adjust center to match model
+                collider.isTrigger = false;
+                
+                Rigidbody rb = pickerContainer.AddComponent<Rigidbody>();
+                rb.isKinematic = false;
+                rb.useGravity = false;
+                rb.constraints = RigidbodyConstraints.FreezeRotation;
+                rb.mass = 30f; // Human-like mass
+                rb.drag = 10f; // Increase drag to simulate human-like movement
+                rb.angularDrag = 0.05f;
+                rb.collisionDetectionMode = CollisionDetectionMode.Continuous; // More accurate collision detection
+                
+                // Add a PickerController component to the container
+                PickerController picker = pickerContainer.AddComponent<PickerController>();
+                
+                // Add a ModelSynchronizer component to the container
+                ModelSynchronizer synchronizer = pickerContainer.AddComponent<ModelSynchronizer>();
+                synchronizer.pickerModel = pickerModel;
+                
                 if (picker != null)
                 {
                     picker.Initialize(pickerId, indoorSpace, mapGrid, basePosition);
@@ -81,7 +104,7 @@ namespace CentralControl.PickerControl
                 }
                 else
                 {
-                    Debug.LogError($"Failed to get PickerController component for picker {pickerId}");
+                    Debug.LogError($"Failed to add PickerController component for picker {pickerId}");
                 }
             }
         }

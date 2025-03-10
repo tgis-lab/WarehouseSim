@@ -61,12 +61,12 @@ namespace CentralControl.RobotControl
         {
             for (int attempts = 0; attempts < 10; attempts++)
             {
-                Vector3 initialPosition = new Vector3(Random.Range(0, mapGrid.width), mapGrid.height, Random.Range(0, mapGrid.length));
+                Vector3 initialPosition = new Vector3(Random.Range(0, mapGrid.width), mapGrid.height + 0.05f, Random.Range(0, mapGrid.length));
                 CellSpace cellSpace = indoorSpace.GetCellSpaceFromCoordinates(initialPosition);
                 if (cellSpace != null && cellSpace.IsNavigable())
                 {
                     Point point = (Point)cellSpace.Node;
-                    return new Vector3((float)point.X, mapGrid.height, (float)point.Y);
+                    return new Vector3((float)point.X, mapGrid.height + 0.05f, (float)point.Y);
                 }
             }
             return Vector3.zero;
@@ -76,15 +76,17 @@ namespace CentralControl.RobotControl
         {
             GameObject robotObj = Instantiate(robotPrefab, position, Quaternion.identity);
             robotObj.tag = "Robot";
-            robotObj.name = $"Robot {id}";
+            robotObj.name = $"Robot_{id}";
             robotObj.layer = LayerMask.NameToLayer("RobotLayer");
             RobotController robot = robotObj.GetComponent<RobotController>();
             if (robot != null)
             {
                 if (robotObj.GetComponent<Collider>() == null)
                 {
-                    CapsuleCollider collider = robotObj.AddComponent<CapsuleCollider>();
-                    collider.radius = 0.5f;
+                    BoxCollider collider = robotObj.AddComponent<BoxCollider>();
+
+                    collider.size = new Vector3(2.5f, 0.8f, 5.4f); // AGV size
+                    collider.center = new Vector3(0, 0.1f, 0.05f); // Adjust collider position
                 }
 
                 if (robotObj.GetComponent<Rigidbody>() == null)
@@ -93,7 +95,12 @@ namespace CentralControl.RobotControl
                     rb.isKinematic = false;
                     rb.useGravity = false;
                     rb.constraints = RigidbodyConstraints.FreezeRotation;
+                    rb.mass = 50f; // AGV mass
+                    rb.drag = 1f; // Add some drag to slow down the AGV
+                    rb.angularDrag = 0.05f;
+                    rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
                 }
+                
                 robot.InitializeRobot(id, indoorSpace, graph, mapGrid, globalOccupancyLayer, intersectionAreaManager);
 
                 Transform targetIndicatorInstance = Instantiate(targetIndicatorPrefab);

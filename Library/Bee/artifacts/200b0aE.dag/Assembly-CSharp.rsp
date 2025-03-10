@@ -356,6 +356,7 @@
 "Assets/Script/Central Control/Order/Order.cs"
 "Assets/Script/Central Control/Order/OrderAssiignmentSelector.cs"
 "Assets/Script/Central Control/Order/OrderManager.cs"
+"Assets/Script/Central Control/Picker/ModelSynchronizer.cs"
 "Assets/Script/Central Control/Picker/PickerController.cs"
 "Assets/Script/Central Control/Picker/PickerManager.cs"
 "Assets/Script/Central Control/Robot/RobotController.cs"
