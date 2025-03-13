@@ -1,10 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
-using NetTopologySuite.Geometries;
 using UnityEngine;
+using UnityEngine.AI;
 using Map;
 using CentralControl.OrderAssignment;
 using CentralControl.RobotControl;
@@ -14,267 +13,412 @@ namespace CentralControl
 {
     public class CentralController : MonoBehaviour
     {
+        #region Inspector Fields
+        [Header("组件引用")]
         public OrderManager orderManager;
         public RobotManager robotManager;
         public PickerManager pickerManager;
-        public IndoorSpace indoorSpace;
         public MapLoader mapLoader;
         public IntersectionAreaManager intersectionAreaManager;
+        
+        [Header("地图设置")]
         public float width, length;
-        public Graph graph;
+        
+        [Header("订单生成设置")]
         public float interval = 5f;
         public int orderCount = 10;
+        
+        [Header("导航设置")]
         public float correctionFactor = 0.1f;
         public float dynamicUpdateInterval = 0.5f;
         public float windowDuration = 300f;
         public float timeStep = 0.1f;
+        
+        [Header("NavMesh设置")]
+        public bool autoRebuildNavMesh = true;
+        public float navMeshRebuildInterval = 60f;
+        public NavMeshSurface navMeshSurface;
+        #endregion
 
-        private OrderAssignmentSelector orderAssignmentSelector;
+        #region 私有变量
+        // 系统状态
+        private bool isSystemInitialized = false;
         private bool isInitialDispatchDone = false;
-        private bool generatingOrders;
+        private bool generatingOrders = false;
+        
+        // 导航相关
+        private Graph graph;
+        private DynamicOccupancyLayer globalOccupancyLayer;
+        private bool navMeshInitialized = false;
+        private float lastUpdateTime;
+        
+        // 订单相关
+        private OrderAssignmentSelector orderAssignmentSelector;
         private List<Order> pendingOrders = new List<Order>();
         private List<Order> unassignedOrders = new List<Order>();
         private readonly object dispatchLock = new object();
+        
+        // 协程引用
         private Coroutine systemCheckCoroutine;
+        private Coroutine navMeshUpdateCoroutine;
+        private Coroutine orderGenerationCoroutine;
+        #endregion
 
-        private DynamicOccupancyLayer globalOccupancyLayer;
-        private float lastUpdateTime;
-
+        #region 事件
         public static event EventHandler<RobotStatusEventArgs> OnRobotBecameFree;
+        #endregion
 
+        #region Unity生命周期
         private void Start()
         {
-            EventManager.Instance.OnMapLoaded += OnMapLoaded;
-            EventManager.Instance.OnRobotsInitialized += OnRobotsInitialized;
+            Debug.Log("CentralController启动...");
+            
+            // 注册事件
+            RegisterEvents();
+            
+            // 初始化订单分配器
             orderAssignmentSelector = new OrderAssignmentSelector();
-            OnRobotBecameFree += HandleRobotBecameFree;
+            
+            // 启动系统初始化序列
+            StartCoroutine(InitializeSystemSequence());
         }
 
-        private void OnMapLoaded()
+        private void Update()
         {
-            Debug.Log("Map loaded, initializing global occupancy layer...");
-            InitializeGlobalOccupancyLayer();
-            if (globalOccupancyLayer != null)
-            {
-                Debug.Log("Global occupancy layer initialized, initializing intersections...");
-                intersectionAreaManager.InitializeIntersectionAreas(mapLoader.indoorSpace);
-
-                Debug.Log("Map loaded, initializing pickers...");
-                pickerManager.InitializePickers(mapLoader.indoorSpace, mapLoader.GetMapGrid());
-                
-                Debug.Log("Pickers initialized, initializing robots...");
-                robotManager.InitializeRobots(mapLoader.indoorSpace, mapLoader.GetGraph(), mapLoader.GetMapGrid(), globalOccupancyLayer, intersectionAreaManager);
-            }
-            else
-            {
-                Debug.LogError("Failed to initialize global occupancy layer.");
-            }
-        }
-
-        private void OnRobotsInitialized()
-        {
-            Debug.Log("Robots initialized, starting order generation...");
-            StartCoroutine(StartGeneratingOrders());
-            StartCoroutine(PeriodicSystemCheck());
-            StartCoroutine(UpdateGlobalOccupancyLayerRoutine());
+            // 调试快捷键
+            HandleDebugKeys();
         }
 
         private void OnDestroy()
         {
-            EventManager.Instance.OnMapLoaded -= OnMapLoaded;
-            EventManager.Instance.OnRobotsInitialized -= OnRobotsInitialized;
-        }
-
-        private void OnDisable()
-        {
-            OnRobotBecameFree -= HandleRobotBecameFree;
-            if (systemCheckCoroutine != null)
-            {
-                StopCoroutine(systemCheckCoroutine);
-            }
-        }
-
-        # region order generation module
-        IEnumerator StartGeneratingOrders()
-        {
-            generatingOrders = true;
-            while (generatingOrders)
-            {
-                Debug.Log("Starting to generate orders...");
-                GenerateRandomOrders();
-                DispatchOrders();
-                yield return new WaitForSeconds(interval);
-            }
-        }
-
-        private void GenerateRandomOrders()
-        {
-            pendingOrders.Clear();
-
-            for (int i = 0; i < orderCount; i++)
-            {
-                Order newOrder = CreateRandomOrder();
-                if (newOrder != null)
-                {
-                    orderManager.AddOrder(newOrder);
-                    pendingOrders.Add(newOrder);
-                }
-            }
-        }
-
-        private Order CreateRandomOrder()
-        {
-            string id = System.Guid.NewGuid().ToString();
-            IndoorSpace indoorSpace = mapLoader.indoorSpace;
-            int randomIndex = UnityEngine.Random.Range(0, indoorSpace.BusinessPoints.Count);
-            CellSpace cellSpace = indoorSpace.BusinessPoints[randomIndex];
-            Vector3 position = new Vector3((float)cellSpace.Space.Centroid.X, 0, (float)cellSpace.Space.Centroid.Y);
-
-            float executionTime = UnityEngine.Random.Range(0f, 30f) * correctionFactor;
-            PickingPoint pickingPointCellSpace = indoorSpace.GetPickingPointFromBusinessPoint(cellSpace);
-
-            if (pickingPointCellSpace == null)
-            {
-                Debug.LogError($"Failed to get picking point for cell space {cellSpace.Id}");
-                return null;
-            }
-
-            Order newOrder = new Order(id, position, pickingPointCellSpace, executionTime);
-            // Debug.Log($"Generated order {id} at {cellSpace.Id} with execution time {executionTime}");
-            return newOrder;
-        }
-        # endregion
-
-        # region order dispatch module
-        private void DispatchOrders()
-        {
-            lock (dispatchLock)
-            {
-                List<Order> ordersToAssign = new List<Order>(pendingOrders);
-                ordersToAssign.AddRange(unassignedOrders);
-                List<RobotController> robotsToAssign = isInitialDispatchDone 
-                    ? robotManager.GetAvailableRobots() 
-                    : robotManager.GetAllRobots();
-
-                if (!isInitialDispatchDone)
-                {
-                    orderAssignmentSelector.InitialOrderDistribution(ordersToAssign, robotsToAssign);
-                    isInitialDispatchDone = true;
-                }
-                else
-                {
-                    orderAssignmentSelector.AssignOrders(ordersToAssign, robotsToAssign);
-                }
-
-                int assignedCount = ordersToAssign.Count(o => o.AssignedRobotId != null);
-                unassignedOrders = ordersToAssign.Where(o => o.AssignedRobotId == null).ToList();
-                pendingOrders.Clear();
-
-                Debug.Log($"Successfully assigned {assignedCount} orders. Unassigned orders: {unassignedOrders.Count}");
-            }
-        }
-
-        private void OnRobotReadyForPicking(object sender, PickingEventArgs args)
-        {
-            Debug.Log($"Robot {args.RobotId} is ready for picking at the picking point {args.PickingPoint.Id}");
+            // 清理事件注册
+            UnregisterEvents();
             
-            // Get the best picker for the robot at the picking point
-            PickerController bestPicker = GetBestPickerForPoint(args.PickingPoint, args.Location);
-            
-            if (bestPicker != null)
+            // 停止所有协程
+            StopAllCoroutines();
+        }
+        #endregion
+
+        #region 初始化流程
+        private void RegisterEvents()
+        {
+            if (EventManager.Instance != null)
             {
-                Debug.Log($"Picker {bestPicker.Id} serves robot {args.RobotId} at the picking point {args.PickingPoint.Id}");
-                
-                // Only notify the best picker
-                bestPicker.HandlePickingRequest(args);
+                EventManager.Instance.OnMapLoaded += OnMapLoaded;
+                EventManager.Instance.OnRobotsInitialized += OnRobotsInitialized;
             }
             else
             {
-                Debug.LogWarning($"Cannot find the best Picker serve robot {args.RobotId} at the picking point {args.PickingPoint.Id}");
+                Debug.LogError("EventManager未找到，事件系统将不可用");
+            }
+            
+            OnRobotBecameFree += HandleRobotBecameFree;
+        }
+
+        private void UnregisterEvents()
+        {
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnMapLoaded -= OnMapLoaded;
+                EventManager.Instance.OnRobotsInitialized -= OnRobotsInitialized;
+            }
+            
+            OnRobotBecameFree -= HandleRobotBecameFree;
+        }
+
+        private IEnumerator InitializeSystemSequence()
+        {
+            Debug.Log("系统初始化序列启动...");
+            
+            // 等待地图加载完成
+            while (mapLoader == null || !mapLoader.IsMapLoaded)
+            {
+                Debug.Log("等待地图加载...");
+                yield return new WaitForSeconds(1f);
+            }
+            
+            Debug.Log("地图已加载，初始化NavMesh...");
+            
+            // 初始化和构建NavMesh
+            yield return StartCoroutine(InitializeNavMeshCoroutine());
+            
+            // 初始化全局占用层
+            Debug.Log("初始化全局占用层...");
+            InitializeGlobalOccupancyLayer();
+            
+            // 初始化交叉区域
+            Debug.Log("初始化交叉区域...");
+            if (intersectionAreaManager != null)
+            {
+                intersectionAreaManager.InitializeIntersectionAreas(mapLoader.indoorSpace);
+            }
+            
+            // 初始化Pickers
+            Debug.Log("初始化拣货员...");
+            if (pickerManager != null)
+            {
+                pickerManager.InitializePickers(mapLoader.indoorSpace, mapLoader.GetMapGrid());
+            }
+            
+            // 初始化Robots
+            Debug.Log("初始化机器人...");
+            if (robotManager != null)
+            {
+                robotManager.InitializeRobots(mapLoader.indoorSpace, mapLoader.GetGraph(), 
+                                           mapLoader.GetMapGrid(), globalOccupancyLayer, 
+                                           intersectionAreaManager);
+            }
+            
+            // 检查系统状态
+            yield return StartCoroutine(VerifySystemReadiness());
+            
+            // 如果系统就绪，启动运行时循环
+            if (isSystemInitialized)
+            {
+                StartRuntimeCycles();
+            }
+            else
+            {
+                Debug.LogError("系统初始化失败，请检查日志获取详细信息");
             }
         }
 
-        private PickerController GetBestPickerForPoint(PickingPoint pickingPoint, Vector3 location)
+        private IEnumerator VerifySystemReadiness()
         {
-            // Get all pickers that can handle this picking point
-            List<PickerController> availablePickers = new List<PickerController>();
+            Debug.Log("验证系统就绪状态...");
             
-            foreach (var picker in pickerManager.GetAllPickers())
+            // 验证重要组件
+            bool mapReady = mapLoader != null && mapLoader.IsMapLoaded;
+            bool navMeshReady = navMeshInitialized;
+            bool robotsReady = robotManager != null && robotManager.TotalRobots > 0;
+            bool pickersReady = pickerManager != null && pickerManager.TotalPickers > 0;
+            
+            Debug.Log($"系统状态：地图就绪={mapReady}, NavMesh就绪={navMeshReady}, " +
+                    $"机器人就绪={robotsReady}({robotManager?.TotalRobots ?? 0}个), " + 
+                    $"拣货员就绪={pickersReady}({pickerManager?.TotalPickers ?? 0}个)");
+            
+            // 如果机器人未就绪，尝试再次创建
+            if (!robotsReady && robotManager != null)
             {
-                try
+                Debug.LogWarning("未检测到机器人，尝试强制创建...");
+                TryForceCreateRobots();
+                
+                // 等待片刻再次检查
+                yield return new WaitForSeconds(2.0f);
+                robotsReady = robotManager.TotalRobots > 0;
+                Debug.Log($"强制创建后，机器人就绪={robotsReady}({robotManager.TotalRobots}个)");
+            }
+            
+            // 设置系统状态
+            isSystemInitialized = mapReady && navMeshReady && robotsReady;
+            
+            if (isSystemInitialized)
+            {
+                Debug.Log("系统验证完成：系统已就绪");
+            }
+            else
+            {
+                Debug.LogError("系统验证完成：系统未就绪，缺少必要组件");
+            }
+        }
+        
+        private void TryForceCreateRobots()
+        {
+            try
+            {
+                // 从地图获取一些有效位置
+                List<Vector3> positions = new List<Vector3>();
+                
+                if (mapLoader != null && mapLoader.indoorSpace != null)
                 {
-                    if (picker.IsPickingPointInRange(pickingPoint))
+                    // 从可导航区域获取位置
+                    var navigableCells = mapLoader.indoorSpace.CellSpaces
+                        .Where(c => c.IsNavigable() && !c.IsBusinesspoint() && !c.IsPickingPoint())
+                        .Take(10)
+                        .ToList();
+                        
+                    foreach (var cell in navigableCells)
                     {
-                        availablePickers.Add(picker);
+                        positions.Add(new Vector3(
+                            (float)cell.Space.Centroid.X,
+                            0.05f,
+                            (float)cell.Space.Centroid.Y
+                        ));
                     }
                 }
-                catch (System.Exception ex)
+                
+                // 如果没有足够位置，添加一些固定位置
+                if (positions.Count < 5)
                 {
-                    Debug.LogError($"Error when checking picker {picker.Id} for picking point {pickingPoint.Id}: {ex.Message}");
+                    for (int i = 0; i < 5; i++)
+                    {
+                        positions.Add(new Vector3(10 + i * 5, 0.05f, 10 + i * 5));
+                    }
+                }
+                
+                // 要求机器人管理器创建机器人
+                Debug.Log($"尝试在{positions.Count}个位置创建机器人");
+                if (robotManager != null)
+                {
+                    robotManager.ForceCreateRobots(positions);
                 }
             }
-            
-            if (availablePickers.Count == 0)
+            catch (Exception ex)
             {
-                Debug.LogWarning($"No Pickercan serve picking point {pickingPoint.Id}");
-                return null;
+                Debug.LogError($"强制创建机器人时出错: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+
+        private void StartRuntimeCycles()
+        {
+            Debug.Log("启动运行时循环...");
+            
+            // 开始生成订单
+            GenerateInitialOrders();
+            
+            // 启动周期性任务
+            systemCheckCoroutine = StartCoroutine(PeriodicSystemCheck());
+            orderGenerationCoroutine = StartCoroutine(StartGeneratingOrders());
+            
+            if (autoRebuildNavMesh)
+            {
+                navMeshUpdateCoroutine = StartCoroutine(PeriodicNavMeshUpdate());
             }
             
-            // Priority is given to idle pickers
-            var idlePickers = availablePickers.Where(p => p.IsIdle).ToList();
-            if (idlePickers.Count > 0)
+            Debug.Log("所有运行时循环已启动");
+        }
+        #endregion
+        
+        #region NavMesh管理
+        private IEnumerator InitializeNavMeshCoroutine()
+        {
+            if (navMeshSurface == null)
             {
-                // If there are idle Pickers, choose the closest one
-                return idlePickers.OrderBy(p => Vector3.Distance(p.transform.position, location)).FirstOrDefault();
+                navMeshSurface = gameObject.AddComponent<NavMeshSurface>();
             }
             
-            // If there are no idle Pickers, choose the one with the least queued tasks
-            return availablePickers.OrderBy(p => p.QueuedTaskCount).FirstOrDefault();
+            ConfigureNavMeshSurface();
+            
+            // 构建NavMesh
+            navMeshSurface.BuildNavMesh();
+            
+            // 等待一帧确保NavMesh已构建
+            yield return null;
+            
+            // 验证NavMesh
+            ValidateNavMesh();
+            
+            navMeshInitialized = true;
+            Debug.Log("NavMesh初始化完成");
         }
-
-        public static void NotifyRobotFree(RobotController robot)
+        
+        private void ConfigureNavMeshSurface()
         {
-            OnRobotBecameFree?.Invoke(null, new RobotStatusEventArgs(robot));
+            navMeshSurface.collectObjects = CollectObjects.All;
+            navMeshSurface.layerMask = LayerMask.GetMask("GroundLayer", "Default");
+            navMeshSurface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
+            
+            // 配置代理参数
+            NavMeshBuildSettings settings = navMeshSurface.GetBuildSettings();
+            settings.agentTypeID = 0; // 默认代理类型
+            settings.agentRadius = 0.4f;
+            settings.agentHeight = 1.8f;
+            settings.agentSlope = 45f;
+            settings.agentClimb = 0.4f;
+            
+            // 增强设置
+            settings.minRegionArea = 1f; // 较小值以包括小区域
+            settings.overrideVoxelSize = true;
+            settings.voxelSize = 0.1f; // 更精细的体素尺寸
+            
+            navMeshSurface.defaultArea = 0; // 可行走区域
         }
-
-        private void HandleRobotBecameFree(object sender, RobotStatusEventArgs e)
+        
+        private void ValidateNavMesh()
         {
-            Debug.Log($"Robot {e.Robot.Id} became free. Attempting to assign unassigned orders.");
-            AssignOrdersToFreeRobot(e.Robot);
-        }
-
-        private void AssignOrdersToFreeRobot(RobotController freeRobot)
-        {
-            lock (dispatchLock)
+            NavMeshTriangulation triangulation = NavMesh.CalculateTriangulation();
+            
+            if (triangulation.vertices.Length == 0)
             {
-                if (unassignedOrders.Count > 0)
+                Debug.LogError("NavMesh构建失败！没有生成任何可导航区域");
+                return;
+            }
+            
+            // 计算NavMesh覆盖面积
+            float area = CalculateNavMeshArea(triangulation);
+            Debug.Log($"NavMesh构建成功: {triangulation.vertices.Length}个顶点, 覆盖面积: {area}平方单位");
+            
+            // 尝试采样关键点
+            if (mapLoader != null && mapLoader.indoorSpace != null)
+            {
+                SampleKeyLocations(mapLoader.indoorSpace);
+            }
+        }
+        
+        private float CalculateNavMeshArea(NavMeshTriangulation triangulation)
+        {
+            float area = 0;
+            for (int i = 0; i < triangulation.indices.Length; i += 3)
+            {
+                Vector3 p1 = triangulation.vertices[triangulation.indices[i]];
+                Vector3 p2 = triangulation.vertices[triangulation.indices[i + 1]];
+                Vector3 p3 = triangulation.vertices[triangulation.indices[i + 2]];
+                
+                area += Vector3.Cross(p2 - p1, p3 - p1).magnitude * 0.5f;
+            }
+            return area;
+        }
+        
+        private void SampleKeyLocations(IndoorSpace indoorSpace)
+        {
+            int validPoints = 0;
+            int totalPoints = 0;
+            
+            // 检查拣货点
+            foreach (var pickingPoint in indoorSpace.PickingPoints)
+            {
+                totalPoints++;
+                CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
+                if (cellSpace != null)
                 {
-                    List<RobotController> robots = new List<RobotController> { freeRobot };
-                    List<Order> ordersToAssign = new List<Order>(unassignedOrders);
-
-                    orderAssignmentSelector.AssignOrders(ordersToAssign, robots);
-
-                    int assignedCount = ordersToAssign.Count(o => o.AssignedRobotId == freeRobot.Id);
-                    unassignedOrders = ordersToAssign.Where(o => o.AssignedRobotId == null).ToList();
-
-                    if (assignedCount > 0)
+                    Vector3 point = new Vector3(
+                        (float)cellSpace.Space.Centroid.X,
+                        0.1f,
+                        (float)cellSpace.Space.Centroid.Y
+                    );
+                    
+                    NavMeshHit hit;
+                    if (NavMesh.SamplePosition(point, out hit, 1.0f, NavMesh.AllAreas))
                     {
-                        Debug.Log($"{assignedCount} unassigned order(s) assigned to newly freed robot {freeRobot.Id}");
+                        validPoints++;
                     }
                     else
                     {
-                        Debug.Log($"No unassigned orders could be assigned to newly freed robot {freeRobot.Id}");
+                        Debug.LogWarning($"拣货点 {pickingPoint.Id} 不在NavMesh上! 位置: {point}");
                     }
                 }
-                else
+            }
+            
+            Debug.Log($"NavMesh覆盖测试: {validPoints}/{totalPoints} 个拣货点可到达");
+        }
+        
+        private IEnumerator PeriodicNavMeshUpdate()
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(navMeshRebuildInterval);
+                
+                if (navMeshInitialized)
                 {
-                    Debug.Log($"No unassigned orders for newly freed robot {freeRobot.Id}");
+                    Debug.Log("定期更新NavMesh...");
+                    navMeshSurface.UpdateNavMesh(navMeshSurface.navMeshData);
+                    ValidateNavMesh();
                 }
             }
         }
-        # endregion
+        #endregion
 
-        #region global occupancy layer module
+        #region 占用层管理
         private void InitializeGlobalOccupancyLayer()
         {
             globalOccupancyLayer = new DynamicOccupancyLayer(
@@ -301,32 +445,27 @@ namespace CentralControl
             CleanupGlobalOccupancyLayer(windowStart);
             
             MergeRobotOccupancyLayer(robotManager);
-
-            foreach (var robot in robotManager.GetAllRobots())
-            {
-                robot.UpdateGlobalLayer(globalOccupancyLayer);
-            }
         }
 
         private void CleanupGlobalOccupancyLayer(float cleanupBeforeTime)
         {
-            globalOccupancyLayer.ClearOccupancyInTimeWindow(
-                float.MinValue,
-                cleanupBeforeTime,
-                null
-            );
+            globalOccupancyLayer.ClearOccupancyInTimeWindow(float.MinValue, cleanupBeforeTime, null);
         }
 
         private void MergeRobotOccupancyLayer(RobotManager robots)
         {
-            foreach (var robot in robots.GetAllRobots())
+            if (robots == null) return;
+            
+            var allRobots = robots.GetAllRobots();
+            foreach (var robot in allRobots)
             {
-                var robotLayer = robot.GetPersonalOccupancyLayer();
-                globalOccupancyLayer.MergeLayer(
-                    robotLayer,
-                    lastUpdateTime,
-                    Time.time
-                );
+                if (robot == null) continue;
+                
+                var personalLayer = robot.GetPersonalOccupancyLayer();
+                if (personalLayer != null)
+                {
+                    globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60);
+                }
             }
         }
 
@@ -334,9 +473,224 @@ namespace CentralControl
         {
             return globalOccupancyLayer;
         }
-        # endregion
+        #endregion
 
-        # region system check module
+        #region Order Management
+        private void GenerateInitialOrders()
+        {
+            Debug.Log("Generating initial orders...");
+            
+            int initialOrderCount = Mathf.Max(5, robotManager.TotalRobots * 2);
+            GenerateRandomOrders(initialOrderCount);
+            
+            DispatchOrders();
+        }
+        
+        public void GenerateRandomOrders(int count)
+        {
+            Debug.Log($"Start generating {count} orders...");
+            StartCoroutine(GenerateOrders(count));
+        }
+
+        private IEnumerator GenerateOrders(int count)
+        {
+            if (mapLoader == null || !mapLoader.IsMapLoaded || mapLoader.indoorSpace == null)
+            {
+                Debug.LogError("Map not loaded, cannot generate orders");
+                yield break;
+            }
+            
+            var pickingPoints = mapLoader.indoorSpace.PickingPoints;
+            if (pickingPoints == null || pickingPoints.Count == 0)
+            {
+                Debug.LogError(" No picking points found, cannot generate orders");
+                yield break;
+            }
+            
+            Debug.Log($"Find {pickingPoints.Count} picking points");
+            
+            // Temp list to store new orders
+            List<Order> newOrders = new List<Order>();
+            
+            // Generate random orders
+            for (int i = 0; i < count; i++)
+            {
+                // Randomly pick a picking point
+                int randomIndex = UnityEngine.Random.Range(0, pickingPoints.Count);
+                PickingPoint pickingPoint = pickingPoints[randomIndex];
+                
+                if (pickingPoint == null)
+                {
+                    Debug.LogWarning($"Picking point at index {randomIndex} is null, skipping order {i+1}");
+                    continue;
+                }
+                
+                // Get the corresponding CellSpace
+                CellSpace cellSpace = mapLoader.indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
+                if (cellSpace == null)
+                {
+                    Debug.LogWarning($"CellSpace for picking point {pickingPoint.Id} is null, skipping order {i+1}");
+                    continue;
+                }
+                
+                // Set the destination
+                Vector3 destination = new Vector3(
+                    (float)cellSpace.Space.Centroid.X,
+                    0.05f,
+                    (float)cellSpace.Space.Centroid.Y
+                );
+                
+                // Generate a unique order ID
+                string orderId = $"Order_{System.DateTime.Now.Ticks}_{i}";
+                
+                // Generate a random execution time
+                float executionTime = UnityEngine.Random.Range(10f, 30f);
+                Order order = new Order(orderId, destination, pickingPoint, executionTime);
+                
+                // Add the order to the list
+                newOrders.Add(order);
+                
+                // Wait for a frame to avoid blocking the main thread
+                if (i % 5 == 0) yield return null;
+            }
+            
+            // Add the new orders to the pending list
+            lock (dispatchLock)
+            {
+                pendingOrders.AddRange(newOrders);
+            }
+            
+            Debug.Log($"Generated {newOrders.Count} new orders");
+
+            // Dispatch the new orders
+            DispatchOrders();
+        }
+
+        private IEnumerator StartGeneratingOrders()
+        {
+            generatingOrders = true;
+            Debug.Log("Order generation started...");
+            
+            while (generatingOrders)
+            {
+                // Generate random orders
+                int ordersToGenerate = UnityEngine.Random.Range(1, robotManager.TotalRobots);
+                Debug.Log($"Generating {ordersToGenerate} new orders...");
+                GenerateRandomOrders(ordersToGenerate);
+                
+                // Wait for the interval
+                yield return new WaitForSeconds(interval);
+            }
+        }
+
+        private void DispatchOrders()
+        {
+            lock (dispatchLock)
+            {
+                try
+                {
+                    Debug.Log("Dispatching orders...");
+                    
+                    // Combine pending and unassigned orders
+                    List<Order> ordersToAssign = new List<Order>(pendingOrders);
+                    ordersToAssign.AddRange(unassignedOrders);
+                    
+                    if (ordersToAssign.Count == 0)
+                    {
+                        Debug.Log("No orders to dispatch");
+                        return;
+                    }
+                    
+                    // Get available robots
+                    List<RobotController> robotsToAssign = robotManager.GetAvailableRobots();
+                    
+                    if (robotsToAssign.Count == 0)
+                    {
+                        Debug.Log("No available robots to dispatch orders");
+                        unassignedOrders = ordersToAssign;
+                        pendingOrders.Clear();
+                        return;
+                    }
+                    
+                    Debug.Log($"Ready to dispatch {ordersToAssign.Count} orders to {robotsToAssign.Count} robots");
+                    
+                    // Perform order assignment
+                    if (!isInitialDispatchDone)
+                    {
+                        Debug.Log("Performing initial order distribution...");
+                        orderAssignmentSelector.InitialOrderDistribution(ordersToAssign, robotsToAssign);
+                        isInitialDispatchDone = true;
+                    }
+                    else
+                    {
+                        Debug.Log("Performing normal order distribution...");
+                        orderAssignmentSelector.AssignOrders(ordersToAssign, robotsToAssign);
+                    }
+                    
+                    // Update order lists
+                    unassignedOrders = ordersToAssign.Where(o => o.AssignedRobotId == null).ToList();
+                    pendingOrders.Clear();
+
+                    int assignedCount = ordersToAssign.Count - unassignedOrders.Count;
+                    Debug.Log($"Order dispatch completed: {assignedCount} orders assigned, {unassignedOrders.Count} orders unassigned");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error dispatching orders: {ex.Message}\n{ex.StackTrace}");
+                }
+            }
+        }
+
+        private void DispatchOrdersToFreedRobot(RobotController freeRobot)
+        {
+            if (freeRobot == null || !freeRobot.IsAvailable) return;
+            
+            lock (dispatchLock)
+            {
+                if (unassignedOrders.Count > 0)
+                {
+                    Debug.Log($"Dispatching orders to freed robot {freeRobot.Id}");
+                    
+                    // Get the nearest order
+                    Order nearestOrder = unassignedOrders
+                        .OrderBy(o => Vector3.Distance(freeRobot.transform.position, o.Destination))
+                        .FirstOrDefault();
+                    
+                    if (nearestOrder != null)
+                    {
+                        try
+                        {
+                            freeRobot.ReceiveOrder(nearestOrder);
+                            nearestOrder.AssignedRobotId = freeRobot.Id;
+                            unassignedOrders.Remove(nearestOrder);
+                            
+                            Debug.Log($"Order {nearestOrder.Id} dispatched to robot {freeRobot.Id}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"Error dispatching order to robot {freeRobot.Id}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+        }
+
+        public static void NotifyRobotFree(RobotController robot)
+        {
+            OnRobotBecameFree?.Invoke(null, new RobotStatusEventArgs(robot));
+        }
+
+        private void HandleRobotBecameFree(object sender, RobotStatusEventArgs e)
+        {
+            if (e.Robot != null && e.Robot.IsFree)
+            {
+                Debug.Log($"Robot {e.Robot.Id} became free, dispatching orders...");
+                DispatchOrdersToFreedRobot(e.Robot);
+            }
+        }
+        #endregion
+
+        #region System Check
         private IEnumerator PeriodicSystemCheck()
         {
             while (true)
@@ -348,35 +702,283 @@ namespace CentralControl
 
         private void PerformSystemCheck()
         {
-            Debug.Log($"System check - Unassigned orders: {unassignedOrders.Count}, Pending orders: {pendingOrders.Count}, Total robots: {robotManager.TotalRobots}, Busy robots: {robotManager.BusyRobots}");
-
-            if (unassignedOrders.Count > 0 || pendingOrders.Count > 0)
+            Debug.Log("Performing system check...");
+            
+            // Check order status
+            Debug.Log($"订单状态: 未分配订单: {unassignedOrders.Count}, 待处理订单: {pendingOrders.Count}");
+            
+            // 检查机器人状态
+            var robots = robotManager.GetAllRobots();
+            int freeRobots = robots.Count(r => r.IsFree);
+            int stuckRobots = robots.Count(r => r.IsStuck);
+            
+            Debug.Log($"机器人状态: 总数: {robots.Count}, 空闲: {freeRobots}, 卡住: {stuckRobots}");
+            
+            // 检查NavMesh状态
+            if (navMeshInitialized)
             {
-                Debug.Log("Attempting to dispatch orders.");
+                CheckEntitiesOnNavMesh();
+            }
+            
+            // 检查是否需要生成更多订单
+            if (unassignedOrders.Count == 0 && pendingOrders.Count == 0 && freeRobots > 0)
+            {
+                Debug.Log("系统空闲，生成新订单");
+                GenerateRandomOrders(freeRobots);
                 DispatchOrders();
             }
-
-            CheckRobotStatus();
-
-            if (pendingOrders.Count == 0 && unassignedOrders.Count == 0)
+            
+            // 重置卡住的机器人
+            if (stuckRobots > 0)
             {
-                Debug.Log("No pending or unassigned orders. Generating new orders.");
-                GenerateRandomOrders();
-                DispatchOrders();
+                Debug.Log($"重置 {stuckRobots} 个卡住的机器人");
+                robotManager.ResetStuckRobots();
             }
         }
-
-        private void CheckRobotStatus()
+        
+        private void CheckEntitiesOnNavMesh()
         {
-            foreach (var robot in robotManager.GetAllRobots())
+            int robotsOnNavMesh = 0;
+            int pickersOnNavMesh = 0;
+            
+            // 检查机器人
+            var robots = robotManager.GetAllRobots();
+            foreach (var robot in robots)
             {
-                if (robot.IsFree && !robot.IsProcessingOrders)
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(robot.transform.position, out hit, 0.5f, NavMesh.AllAreas))
                 {
-                    Debug.Log($"Robot {robot.Id} is free but not processing orders. Notifying as free.");
-                    NotifyRobotFree(robot);
+                    robotsOnNavMesh++;
+                }
+            }
+            
+            // 检查拣货员
+            var pickers = pickerManager.GetAllPickers();
+            foreach (var picker in pickers)
+            {
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(picker.transform.position, out hit, 0.5f, NavMesh.AllAreas))
+                {
+                    pickersOnNavMesh++;
+                }
+            }
+            
+            Debug.Log($"NavMesh实体检查: 机器人 {robotsOnNavMesh}/{robots.Count}, 拣货员 {pickersOnNavMesh}/{pickers.Count} 在NavMesh上");
+            
+            // 如果有实体不在NavMesh上，尝试将它们重新放置到NavMesh上
+            if (robotsOnNavMesh < robots.Count || pickersOnNavMesh < pickers.Count)
+            {
+                Debug.LogWarning("检测到实体不在NavMesh上，尝试重新定位...");
+                RepositionEntitiesOnNavMesh();
+            }
+        }
+        
+        private void RepositionEntitiesOnNavMesh()
+        {
+            // 重新定位机器人
+            var robots = robotManager.GetAllRobots();
+            foreach (var robot in robots)
+            {
+                NavMeshHit hit;
+                if (!NavMesh.SamplePosition(robot.transform.position, out hit, 0.5f, NavMesh.AllAreas))
+                {
+                    // 尝试找到附近的NavMesh点
+                    if (NavMesh.SamplePosition(robot.transform.position, out hit, 5.0f, NavMesh.AllAreas))
+                    {
+                        Debug.Log($"重新定位机器人 {robot.Id} 到NavMesh上: {hit.position}");
+                        robot.transform.position = hit.position;
+                    }
+                }
+            }
+            
+            // 重新定位拣货员
+            var pickers = pickerManager.GetAllPickers();
+            foreach (var picker in pickers)
+            {
+                NavMeshHit hit;
+                if (!NavMesh.SamplePosition(picker.transform.position, out hit, 0.5f, NavMesh.AllAreas))
+                {
+                    // 尝试找到附近的NavMesh点
+                    if (NavMesh.SamplePosition(picker.transform.position, out hit, 5.0f, NavMesh.AllAreas))
+                    {
+                        Debug.Log($"重新定位拣货员 {picker.Id} 到NavMesh上: {hit.position}");
+                        picker.transform.position = hit.position;
+                    }
                 }
             }
         }
-        # endregion
+        #endregion
+
+        #region 调试功能
+        private void HandleDebugKeys()
+        {
+            // F5键：系统诊断
+            if (Input.GetKeyDown(KeyCode.F5))
+            {
+                DiagnoseSystemState();
+            }
+            
+            // F6键：强制生成并分配订单
+            if (Input.GetKeyDown(KeyCode.F6))
+            {
+                ForceGenerateAndAssignOrders();
+            }
+            
+            // F7键：重建NavMesh
+            if (Input.GetKeyDown(KeyCode.F7))
+            {
+                RebuildNavMesh();
+            }
+        }
+
+        public void DiagnoseSystemState()
+        {
+            Debug.Log("===== 系统诊断开始 =====");
+            Debug.Log($"当前时间: {Time.time}");
+            
+            // 检查初始化状态
+            Debug.Log($"系统初始化状态: {(isSystemInitialized ? "已初始化" : "未初始化")}");
+            Debug.Log($"NavMesh状态: {(navMeshInitialized ? "已初始化" : "未初始化")}");
+            
+            // 检查订单系统
+            Debug.Log($"订单系统: 未分配订单: {unassignedOrders.Count}, 等待订单: {pendingOrders.Count}");
+            Debug.Log($"订单生成状态: {(generatingOrders ? "正在生成" : "未生成")}");
+            
+            // 检查机器人状态
+            var robots = robotManager.GetAllRobots();
+            Debug.Log($"机器人总数: {robots.Count}");
+            int freeRobots = 0;
+            int availableRobots = 0;
+            int stuckRobots = 0;
+            
+            foreach (var robot in robots)
+            {
+                if (robot.IsFree) freeRobots++;
+                if (robot.IsAvailable) availableRobots++;
+                if (robot.IsStuck) stuckRobots++;
+                
+                Debug.Log($"机器人 {robot.Id}: 空闲={robot.IsFree}, 可用={robot.IsAvailable}, " +
+                        $"移动中={robot.IsMoving}, 队列大小={robot.GetRobotOrdersQueueCount}");
+            }
+            
+            Debug.Log($"机器人状态汇总: 空闲={freeRobots}, 可用={availableRobots}, 卡住={stuckRobots}");
+            
+            // 检查拣货员状态
+            var pickers = pickerManager.GetAllPickers();
+            int idlePickers = pickers.Count(p => p.IsIdle);
+            Debug.Log($"拣货员: 总数={pickers.Count}, 空闲={idlePickers}");
+            
+            // 检查导航状态
+            if (navMeshInitialized)
+            {
+                NavMeshTriangulation triangulation = NavMesh.CalculateTriangulation();
+                Debug.Log($"NavMesh: 顶点数={triangulation.vertices.Length}, 三角形数={triangulation.indices.Length/3}");
+            }
+            
+            Debug.Log("===== 系统诊断完成 =====");
+        }
+
+        public void ForceGenerateAndAssignOrders()
+        {
+            Debug.Log("强制生成并分配订单");
+            
+            // 根据机器人数量确定订单数量
+            int robotCount = robotManager.GetAllRobots().Count;
+            int orderCount = Math.Max(5, robotCount);
+            
+            // 清除已有未分配订单
+            pendingOrders.Clear();
+            
+            // 生成新订单并等待完成
+            StartCoroutine(ForceGenerateOrdersCoroutine(orderCount));
+        }
+
+        private IEnumerator ForceGenerateOrdersCoroutine(int count)
+        {
+            Debug.Log($"强制生成{count}个订单");
+            
+            // 生成订单
+            yield return StartCoroutine(GenerateOrders(count));
+            
+            // 确保订单生成后再分配
+            if (pendingOrders.Count > 0)
+            {
+                Debug.Log($"强制分配订单，共有{pendingOrders.Count}个等待订单");
+                DispatchOrders();
+                
+                // 检查分配结果
+                yield return new WaitForSeconds(0.5f);
+                
+                if (pendingOrders.Count == 0 && unassignedOrders.Count == 0)
+                {
+                    Debug.Log("所有订单已分配完毕");
+                }
+                else
+                {
+                    Debug.LogWarning($"还有{pendingOrders.Count + unassignedOrders.Count}个订单未分配，尝试直接分配");
+                    
+                    // 尝试简单的直接分配
+                    var remainingOrders = new List<Order>(pendingOrders);
+                    remainingOrders.AddRange(unassignedOrders);
+                    var availableRobots = robotManager.GetAvailableRobots();
+                    
+                    for (int i = 0; i < Math.Min(remainingOrders.Count, availableRobots.Count); i++)
+                    {
+                        try
+                        {
+                            availableRobots[i].ReceiveOrder(remainingOrders[i]);
+                            remainingOrders[i].AssignedRobotId = availableRobots[i].Id;
+                            
+                            Debug.Log($"直接分配订单 {remainingOrders[i].Id} 给机器人 {availableRobots[i].Id}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"直接分配订单失败: {ex.Message}");
+                        }
+                    }
+                    
+                    // 更新未分配订单列表
+                    unassignedOrders = remainingOrders.Where(o => o.AssignedRobotId == null).ToList();
+                    pendingOrders.Clear();
+                }
+            }
+            else
+            {
+                Debug.LogWarning("没有生成订单，无法进行分配");
+            }
+        }
+
+        public void RebuildNavMesh()
+        {
+            Debug.Log("手动重建NavMesh...");
+            
+            if (navMeshSurface != null)
+            {
+                navMeshSurface.BuildNavMesh();
+                ValidateNavMesh();
+                Debug.Log("NavMesh重建完成");
+            }
+            else
+            {
+                Debug.LogError("NavMeshSurface为空，无法重建NavMesh");
+            }
+        }
+        #endregion
+
+        #region 事件响应
+        private void OnMapLoaded()
+        {
+            // 此方法保留以处理地图加载事件
+            // 实际初始化逻辑已移至InitializeSystemSequence
+            Debug.Log("OnMapLoaded事件触发 - 使用新的初始化流程");
+        }
+
+        private void OnRobotsInitialized()
+        {
+            // 此方法保留以处理机器人初始化事件
+            // 实际初始化逻辑已移至InitializeSystemSequence
+            Debug.Log("OnRobotsInitialized事件触发 - 使用新的初始化流程");
+        }
+        #endregion
     }
 }

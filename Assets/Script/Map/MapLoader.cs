@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.AI;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -28,6 +29,7 @@ namespace Map {
 
         private Graph graph;
         private float speed;
+        private NavMeshSurface navMeshSurface;
 
         private async void Start()
         {
@@ -48,6 +50,8 @@ namespace Map {
             this.mapGrid = SetMapGrid(width, height, length);
 
             CreateMapBoundary();
+
+            SetupNavMesh();
 
             IsMapLoaded = true;
             EventManager.Instance.TriggerMapLoaded();
@@ -159,6 +163,25 @@ namespace Map {
             }
 
             return mapGrid.GetCellSpaceGridPositions(indoorSpace);
+        }
+
+        private void SetupNavMesh()
+        {
+            // 确保在地图可视化之后调用
+            navMeshSurface = gameObject.GetComponent<NavMeshSurface>();
+            if (navMeshSurface == null)
+            {
+                navMeshSurface = gameObject.AddComponent<NavMeshSurface>();
+            }
+            
+            navMeshSurface.collectObjects = CollectObjects.All;
+            navMeshSurface.layerMask = LayerMask.GetMask("GroundLayer");
+            navMeshSurface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
+            
+            // 烘焙NavMesh
+            navMeshSurface.BuildNavMesh();
+            
+            Debug.Log("NavMesh setup complete");
         }
     }
 }

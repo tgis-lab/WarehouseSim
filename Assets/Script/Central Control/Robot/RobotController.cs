@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.AI;
 using NetTopologySuite.Geometries;
 using PathPlanning;
 using Map;
@@ -38,8 +39,8 @@ namespace CentralControl.RobotControl
         public Graph graph { get; private set; }
         public IndoorSpace indoorSpace { get; private set; }
         public MapGrid mapGrid { get; private set; }
-        public bool lastReportedAvailability { get; set; }
-        public bool lastReportedFreeStatus { get; set; }
+        public bool lastReportedAvailability { get; set; } = false;
+        public bool lastReportedFreeStatus { get; set; } = false;
         public int lastReportedOrderCount { get; set; } = -1;
         # endregion
 
@@ -74,8 +75,11 @@ namespace CentralControl.RobotControl
         public bool IsOnTask => !IsFree;
         public bool IsAvailable => ordersQueue.Count < MaxOrder;
         public bool IsProcessingOrders => isProcessingOrdersRunning;
+        public Order CurrentOrder => currentOrder;
         public int GetRobotOrdersQueueCount => ordersQueue.Count;
         public List<string> listOrdersQueue => new List<string>(ordersQueue.Select(order => order.Id));
+        private Vector3 lastPosition;
+        private float lastPositionChangeTime;
         # endregion
 
         # region Navigation System
@@ -93,6 +97,8 @@ namespace CentralControl.RobotControl
         private bool isEmergencyStopped = false;
         private float lastEmergencyStopTime = 0f;
         private const float EMERGENCY_COOLDOWN = 3.0f;
+        public LayerMask robotCollisionLayer;
+        public LayerMask pickerCollisionLayer;
         # endregion
 
         # region DWA Parameters
@@ -162,6 +168,10 @@ namespace CentralControl.RobotControl
             
             // Collision Detection
             CheckSurroundings();
+
+            // Update movement info
+            lastPosition = transform.position;
+            lastPositionChangeTime = Time.time;
             
             // Not moving if emergency stopped
             if (navigationEnabled && !isEmergencyStopped && IsMoving && !isWaitingForPicking)
@@ -199,6 +209,12 @@ namespace CentralControl.RobotControl
             this.globalOccupancyLayer = globalOccupancyLayer;
             this.intersectionManager = intersectionManager;
 
+            ConfigureNavMeshObstacle();
+
+            CreateInteractionTrigger();
+
+            StartCoroutine(ManageObstacleCarving());
+
             personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
             
             pathPlanner = new PathPlanner(graph, indoorSpace, selectedAlgorithm, selectedSearchMethod, 
@@ -210,6 +226,25 @@ namespace CentralControl.RobotControl
             
             isInitialized = true;
             Debug.Log($"Robot {Id} initialized at {transform.position}");
+        }
+
+        private void ConfigureNavMeshObstacle()
+        {
+            NavMeshObstacle obstacle = GetComponent<NavMeshObstacle>();
+            if (obstacle == null)
+            {
+                obstacle = gameObject.AddComponent<NavMeshObstacle>();
+            }
+            
+            obstacle.carving = true;
+            obstacle.carveOnlyStationary = false;
+            
+            obstacle.shape = NavMeshObstacleShape.Box;
+            obstacle.size = new Vector3(1.5f, 0.8f, 2.0f);
+            obstacle.center = new Vector3(0, 0.1f, 0.05f);
+            
+            obstacle.carvingMoveThreshold = 0.5f;
+            obstacle.carvingTimeToStationary = 0.1f;
         }
 
         public void UpdateGlobalLayer(DynamicOccupancyLayer newGlobalLayer)
@@ -227,6 +262,12 @@ namespace CentralControl.RobotControl
                 return;
             }
 
+            if (ordersQueue.Count >= MaxOrder)
+            {
+                Debug.LogError($"Robot {Id} is full ({ordersQueue.Count}/{MaxOrder}) and cannot accept more orders");
+                throw new Exception($"Robot {Id} is full and cannot accept more orders");
+            }
+            
             ordersQueue.Enqueue(order);
             Debug.Log($"Robot {Id} received order {order.Id}, queue size: {ordersQueue.Count}");
             
@@ -411,11 +452,11 @@ namespace CentralControl.RobotControl
             if (cellSpace == null) 
                 return false;
             
-            // 检查是否在包含拣货点的单元格内
+            // Check if in the cell containing the picking point
             CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(transform.position);
             if (currentCell != null && currentCell.Id == cellSpace.Id)
             {
-                // 在正确的单元格内，现在检查与拣货点中心的距离
+                // Check distance to the center of the picking point
                 float distanceToPickingPoint = Vector3.Distance(transform.position, finalDestination);
                 return distanceToPickingPoint < finalDestinationAcceptanceRadius;
             }
@@ -818,12 +859,9 @@ namespace CentralControl.RobotControl
                     lastPathRecoveryTime = Time.time;
                     
                     // Stop
-                    if (rb != null)
-                    {
-                        rb.velocity = Vector3.zero;
-                    }
+                    StopMoving();
                     
-                    // Lod
+                    // Log
                     Debug.LogWarning($"Robot {Id}: Recover path - Attempt {pathRecoveryAttempts}/{MAX_RECOVERY_ATTEMPTS}");
                     
                     // Replan path
@@ -836,6 +874,15 @@ namespace CentralControl.RobotControl
                     StartCoroutine(EmergencyRecovery());
                     needsPathRecovery = false;
                 }
+            }
+        }
+
+        private void StopMoving()
+        {
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
             }
         }
         # endregion
@@ -979,11 +1026,7 @@ namespace CentralControl.RobotControl
         private IEnumerator EmergencyRecovery()
         {
             // Stop
-            if (rb != null)
-            {
-                rb.velocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-            }
+            StopMoving();
             
             // Log error and notify central controller
             Debug.LogError($"Robot {Id}: Emergency recovery initiated");
@@ -1182,6 +1225,20 @@ namespace CentralControl.RobotControl
             }
         }
 
+        public bool IsStuck
+        {
+            get
+            {
+                if (!IsMoving || currentPath.Count != 0)
+                    return false;
+                    
+                float timeSinceLastMove = Time.time - lastPositionChangeTime;
+                float distanceMoved = Vector3.Distance(lastPosition, transform.position);
+                
+                return timeSinceLastMove > 5.0f && distanceMoved < 0.1f;
+            }
+        }
+
         public void ResetRobot()
         {
             StopAllCoroutines();
@@ -1199,6 +1256,56 @@ namespace CentralControl.RobotControl
             rb.velocity = Vector3.zero;
             
             Debug.Log($"Robot {Id} has been reset");
+        }
+
+        public void ResetPath()
+        {
+            Debug.Log($"Robot {Id}: Resetting path state");
+            
+            // 重置状态变量
+            needsPathRecovery = true;
+            pathRecoveryAttempts = 0;
+            lastPathRecoveryTime = Time.time;
+            
+            // 取消当前移动 - 使用现有方法
+            if (IsMoving)
+            {
+                StopMoving();
+                SetState(RobotState.Moving, false);
+            }
+            
+            // 短暂延迟后进行适当的恢复
+            StartCoroutine(RecoverAfterDelay(1.0f));
+        }
+
+        private IEnumerator RecoverAfterDelay(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            
+            // 重置状态
+            needsPathRecovery = false;
+            
+            // 根据当前状态决定如何恢复
+            if (currentOrder != null)
+            {
+                // 有订单，重新规划路径
+                Debug.Log($"Robot {Id}: Recovering with replanning path");
+                StartCoroutine(ReplanPath());
+            }
+            else if (finalDestination != Vector3.zero) // 使用已有的finalDestination变量
+            {
+                // 没有订单但有目标，恢复导航
+                Debug.Log($"Robot {Id}: Recovering by resuming navigation to existing destination");
+                navigationEnabled = true;
+                
+                UpdateTargetIndicator();
+            }
+            else
+            {
+                // 没有订单也没有目标，简单恢复导航能力
+                Debug.Log($"Robot {Id}: Recovering navigation capability only");
+                navigationEnabled = true;
+            }
         }
         # endregion
 
@@ -1544,22 +1651,89 @@ namespace CentralControl.RobotControl
         }
         #endregion
 
+        # region Interaction with Picker
+        // 添加创建交互触发器的方法
+        private void CreateInteractionTrigger()
+        {
+            // 检查是否已存在交互触发器
+            Transform existingTrigger = transform.Find("InteractionTrigger");
+            if (existingTrigger != null)
+            {
+                return; // 已存在，不需要重复创建
+            }
+            
+            // 创建触发器对象
+            GameObject triggerObj = new GameObject("InteractionTrigger");
+            triggerObj.transform.SetParent(transform);
+            triggerObj.transform.localPosition = Vector3.zero;
+            
+            // 添加球形触发器，范围大于NavMeshObstacle
+            SphereCollider interactionTrigger = triggerObj.AddComponent<SphereCollider>();
+            interactionTrigger.radius = 2.0f; // 大范围，便于拣货员检测
+            interactionTrigger.center = new Vector3(0, 0.5f, 0);
+            interactionTrigger.isTrigger = true; // 设置为触发器
+            
+            // 添加交互处理组件
+            RobotInteractionZone interactionZone = triggerObj.AddComponent<RobotInteractionZone>();
+            interactionZone.robotController = this;
+            
+            Debug.Log($"Robot {Id}: 创建了交互触发区域");
+        }
+
+        // 添加动态管理NavMeshObstacle的协程
+        private IEnumerator ManageObstacleCarving()
+        {
+            NavMeshObstacle obstacle = GetComponent<NavMeshObstacle>();
+            if (obstacle == null) yield break;
+            
+            Vector3 normalSize = obstacle.size;
+            Vector3 movingSize = new Vector3(
+                normalSize.x * 0.8f, 
+                normalSize.y, 
+                normalSize.z * 0.8f
+            );
+            
+            while (true)
+            {
+                // 获取当前速度
+                float currentSpeed = 0;
+                if (rb != null)
+                {
+                    currentSpeed = rb.velocity.magnitude;
+                }
+                
+                // 当机器人快速移动时，缩小障碍物
+                if (currentSpeed > 0.5f)
+                {
+                    obstacle.size = movingSize;
+                }
+                else
+                {
+                    // 静止或慢速移动时使用正常尺寸
+                    obstacle.size = normalSize;
+                }
+                
+                yield return new WaitForSeconds(0.5f);
+            }
+        }
+        # endregion
+
         # region Visualization
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying) return;
             
-            // Visualize detection radius
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, detectionRadius);
+            // // Visualize detection radius
+            // Gizmos.color = Color.yellow;
+            // Gizmos.DrawWireSphere(transform.position, detectionRadius);
             
-            // Visualize detection coverage
-            Gizmos.color = new Color(1, 1, 0, 0.1f); 
-            Gizmos.DrawSphere(transform.position, detectionRadius);
+            // // Visualize detection coverage
+            // Gizmos.color = new Color(1, 1, 0, 0.1f); 
+            // Gizmos.DrawSphere(transform.position, detectionRadius);
             
-            // Display robot ID and state
-            UnityEditor.Handles.Label(transform.position + Vector3.up * 2, 
-                $"Robot {Id}\nState: {(IsMoving ? "Moving" : IsPicking ? "Picking" : "Idle")}\nOrders: {ordersQueue.Count}");
+            // // Display robot ID and state
+            // UnityEditor.Handles.Label(transform.position + Vector3.up * 2, 
+            //     $"Robot {Id}\nState: {(IsMoving ? "Moving" : IsPicking ? "Picking" : "Idle")}\nOrders: {ordersQueue.Count}");
             
             // Visualize velocity
             if (rb != null)
@@ -1568,12 +1742,12 @@ namespace CentralControl.RobotControl
                 Gizmos.DrawLine(transform.position, transform.position + rb.velocity * 0.5f);
             }
             
-            // Visualize target indicator
-            if (currentOrder != null && finalDestination != Vector3.zero)
-            {
-                Gizmos.color = Color.red;
-                Gizmos.DrawRay(transform.position, (finalDestination - transform.position).normalized);
-            }
+            // // Visualize target indicator
+            // if (currentOrder != null && finalDestination != Vector3.zero)
+            // {
+            //     Gizmos.color = Color.red;
+            //     Gizmos.DrawRay(transform.position, (finalDestination - transform.position).normalized);
+            // }
             
             // Visualize path
             if (currentPath != null && currentPath.Count > 0)

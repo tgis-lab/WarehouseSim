@@ -6,7 +6,7 @@ TagManager:
   tags:
   - Robot
   - Shelf
-  - Layer
+  - Picker
   layers:
   - Default
   - TransparentFX
@@ -19,7 +19,7 @@ TagManager:
   - GroundLayer
   - BoundaryWall
   - PickerLayer
-  - 
+  - NavigableArea
   - 
   - 
   - 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -61,7 +62,7 @@ namespace CentralControl.RobotControl
         {
             for (int attempts = 0; attempts < 10; attempts++)
             {
-                Vector3 initialPosition = new Vector3(Random.Range(0, mapGrid.width), mapGrid.height + 0.05f, Random.Range(0, mapGrid.length));
+                Vector3 initialPosition = new Vector3(UnityEngine.Random.Range(0, mapGrid.width), mapGrid.height + 0.05f, UnityEngine.Random.Range(0, mapGrid.length));
                 CellSpace cellSpace = indoorSpace.GetCellSpaceFromCoordinates(initialPosition);
                 if (cellSpace != null && cellSpace.IsNavigable())
                 {
@@ -112,6 +113,37 @@ namespace CentralControl.RobotControl
             else
             {
                 Debug.LogError($"Failed to get RobotController component for robot {id}");
+            }
+        }
+
+        public void ForceCreateRobots(List<Vector3> positions)
+        {
+            Debug.Log($"强制创建机器人: 请求创建{positions.Count}个机器人");
+            
+            int initialCount = robots.Count;
+            
+            try
+            {
+                for (int i = 0; i < positions.Count; i++)
+                {
+                    int robotId = robots.Count + 1; // 从1开始编号，避免ID冲突
+                    Debug.Log($"尝试创建机器人 {robotId} 在位置 {positions[i]}");
+                    CreateRobot(robotId, positions[i]);
+                }
+                
+                int createdCount = robots.Count - initialCount;
+                Debug.Log($"强制创建完成: 成功创建了{createdCount}个机器人");
+                
+                if (createdCount > 0)
+                {
+                    // 通知机器人已初始化
+                    EventManager.Instance?.TriggerRobotsInitialized();
+                    Debug.Log("触发RobotsInitialized事件");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"强制创建机器人时出错: {ex.Message}");
             }
         }
 

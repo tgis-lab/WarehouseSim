@@ -5,16 +5,16 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638551741970000000
-    m_Hash: 1717451295
+      ticks: 638773803640000000
+    m_Hash: 452038523
   m_LockFileStatus:
     m_FilePath: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Packages/packages-lock.json
     m_PathExists: 1
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638765941890000000
-    m_Hash: 705496754
+      ticks: 638773803640000000
+    m_Hash: 706865529
 m_EmbeddedPackageManifests:
   m_ManifestsStatus: {}
 m_LocalPackages:
@@ -22,6 +22,57 @@ m_LocalPackages:
 m_ProjectPath: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Packages
 m_EditorVersion: 2021.3.32f1c1 (fa19b96eeab7)
 m_ResolvedPackages:
+- packageId: com.unity.ai.navigation.components@https://github.com/Unity-Technologies/NavMeshComponents.git#package
+  testable: 0
+  isDirectDependency: 1
+  version: 0.1.0-preview.2
+  source: 5
+  resolvedPath: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Library/PackageCache/com.unity.ai.navigation.components@0fc6f532e4
+  assetPath: Packages/com.unity.ai.navigation.components
+  name: com.unity.ai.navigation.components
+  displayName: NavMesh Components
+  author:
+    name: Unity Technologies
+    email: 
+    url: 
+  category: 
+  type: 
+  description: High-level NavMesh components for building and using NavMeshes at
+    runtime and at edit time.
+  status: 0
+  errors: []
+  versions:
+    all: []
+    compatible: []
+    verified: 
+  dependencies:
+  - name: com.unity.modules.ai
+    version: 1.0.0
+  resolvedDependencies:
+  - name: com.unity.modules.ai
+    version: 1.0.0
+  keywords: []
+  registry:
+    id: main
+    name: 
+    url: https://packages.unity.cn
+    scopes: []
+    isDefault: 1
+    capabilities: 7
+    configSource: 0
+  hideInEditor: 1
+  isAssetStorePackage: 0
+  datePublishedTicks: 0
+  documentationUrl: 
+  hasRepository: 1
+  repository:
+    type: git
+    url: https://github.com/Unity-Technologies/NavMeshComponents.git
+    revision: 0c64cbdedc3056a332d85c141df89c606fec9e8c
+    path: 
+  unityLifecycle:
+    version: 
+    nextVersion: 
 - packageId: com.unity.collab-proxy@2.2.0
   testable: 0
   isDirectDependency: 1
@@ -772,6 +823,7 @@ m_ResolvedPackages:
     - 3.2.0-pre.9
     - 3.2.0-pre.10
     - 3.2.0-pre.11
+    - 3.2.0-pre.12
     - 4.0.0-pre.1
     - 4.0.0-pre.2
     compatible:
@@ -790,6 +842,7 @@ m_ResolvedPackages:
     - 3.2.0-pre.9
     - 3.2.0-pre.10
     - 3.2.0-pre.11
+    - 3.2.0-pre.12
     verified: 3.0.9
   dependencies:
   - name: com.unity.ugui
@@ -927,6 +980,7 @@ m_ResolvedPackages:
     - 1.7.4
     - 1.7.5
     - 1.7.6
+    - 1.7.7
     - 1.8.0
     - 1.8.1
     - 1.8.2
@@ -947,6 +1001,7 @@ m_ResolvedPackages:
     - 1.7.4
     - 1.7.5
     - 1.7.6
+    - 1.7.7
     - 1.8.0
     - 1.8.1
     - 1.8.2
@@ -1121,12 +1176,14 @@ m_ResolvedPackages:
     - 1.9.2
     - 1.9.4
     - 1.9.5
+    - 1.9.6
     compatible:
     - 1.9.1
     - 1.9.2
     - 1.9.4
     - 1.9.5
-    verified: 1.9.5
+    - 1.9.6
+    verified: 1.9.6
   dependencies:
   - name: com.unity.ugui
     version: 1.0.0

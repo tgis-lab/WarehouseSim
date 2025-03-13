@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 using System.Collections.Generic;
 using System.Linq;
 using Map;
@@ -61,6 +62,23 @@ namespace CentralControl.PickerControl
 
                 Vector3 basePosition = basePositions[i];
                 int pickerId = i + 1;
+
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(basePosition, out hit, 3.0f, NavMesh.AllAreas))
+                {
+                    basePosition = hit.position;
+                }
+                else
+                {
+                    Debug.LogWarning($"Picker {i+1}初始位置不在NavMesh上，尝试寻找替代位置");
+                    basePosition = GetValidPositionOnNavMesh();
+                    
+                    if (basePosition == Vector3.zero)
+                    {
+                        Debug.LogError($"无法为Picker {i+1}找到有效的NavMesh位置");
+                        continue;
+                    }
+                }
                 
                 // Create a container object for the picker
                 GameObject pickerContainer = new GameObject($"Picker_{pickerId}_Container");
@@ -89,13 +107,23 @@ namespace CentralControl.PickerControl
                 rb.drag = 10f; // Increase drag to simulate human-like movement
                 rb.angularDrag = 0.05f;
                 rb.collisionDetectionMode = CollisionDetectionMode.Continuous; // More accurate collision detection
-                
-                // Add a PickerController component to the container
-                PickerController picker = pickerContainer.AddComponent<PickerController>();
+
+                NavMeshAgent navAgent = pickerContainer.AddComponent<NavMeshAgent>();
+                navAgent.radius = 0.4f;
+                navAgent.height = 1.8f;
+                navAgent.speed = 3.0f; // 使用你的movementSpeed
+                navAgent.angularSpeed = 120f;
+                navAgent.acceleration = 8f;
+                navAgent.stoppingDistance = 0.1f;
+                navAgent.avoidancePriority = 50;
+                navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
                 
                 // Add a ModelSynchronizer component to the container
                 ModelSynchronizer synchronizer = pickerContainer.AddComponent<ModelSynchronizer>();
                 synchronizer.pickerModel = pickerModel;
+
+                // Add a PickerController component to the container
+                PickerController picker = pickerContainer.AddComponent<PickerController>();
                 
                 if (picker != null)
                 {
@@ -107,6 +135,27 @@ namespace CentralControl.PickerControl
                     Debug.LogError($"Failed to add PickerController component for picker {pickerId}");
                 }
             }
+        }
+
+        private Vector3 GetValidPositionOnNavMesh()
+        {
+            // 尝试多次寻找有效位置
+            for (int attempts = 0; attempts < 30; attempts++)
+            {
+                Vector3 testPosition = new Vector3(
+                    UnityEngine.Random.Range(5f, mapGrid.width - 5f),
+                    0.1f,
+                    UnityEngine.Random.Range(5f, mapGrid.length - 5f)
+                );
+                
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(testPosition, out hit, 5.0f, NavMesh.AllAreas))
+                {
+                    return hit.position;
+                }
+            }
+            
+            return Vector3.zero; // 失败
         }
 
         private List<Vector3> CalculatePickerBasePositions()

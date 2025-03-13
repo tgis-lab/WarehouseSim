@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.AI;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -37,6 +38,7 @@ namespace CentralControl.PickerControl
         private HashSet<PickerState> currentStates = new HashSet<PickerState>();
         private Vector3 currentPosition;
         private List<PickingPoint> assignedPickingPoints = new List<PickingPoint>();
+        private NavMeshAgent navAgent;
         #endregion
 
         #region State Properties
@@ -55,19 +57,11 @@ namespace CentralControl.PickerControl
 
         public PickerController()
         {
-            // 确保默认ID不为0
             _id = -1;
         }
 
         private void Awake()
         {
-            // 如果ID为0，给出警告
-            if (_id == 0)
-            {
-                Debug.LogWarning($"警告: Picker的ID为0，这可能导致问题。GameObject: {gameObject.name}");
-            }
-            
-            // 确保不会有未初始化就注册的事件处理器
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.OnRobotReadyForPicking -= HandleRobotReadyForPicking;
@@ -90,6 +84,23 @@ namespace CentralControl.PickerControl
             this.Id = id;
             this.indoorSpace = indoorSpace;
             this.mapGrid = mapGrid;
+
+            navAgent = gameObject.GetComponent<NavMeshAgent>();
+            if (navAgent == null)
+            {
+                navAgent = gameObject.AddComponent<NavMeshAgent>();
+                navAgent.radius = 0.4f;
+                navAgent.height = 1.8f;
+                navAgent.speed = movementSpeed;
+                navAgent.angularSpeed = 120f;
+                navAgent.acceleration = 8f;
+                navAgent.stoppingDistance = 0.1f;
+                navAgent.areaMask = NavMesh.AllAreas;
+                
+                // Avoidance settings
+                navAgent.avoidancePriority = 50; // The lower the value, the higher the priority
+                navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
+            }
             
             if (workAreaRadius <= 0f)
             {
@@ -211,15 +222,8 @@ namespace CentralControl.PickerControl
             }
             Debug.Log($"Picker {Id}: Picking point {args.PickingPoint.Id} is in range, adding to queue");
 
-            // Add task to queue
-            pickingQueue.Enqueue(args);
-            Debug.Log($"Picker {Id} received picking request from Robot {args.RobotId} at position {args.Location}");
-
-            // Process tasks if not already processing
-            if (!isProcessingTasks)
-            {
-                StartCoroutine(ProcessPickingTask());
-            }
+            // 启动协程处理拣货请求
+            StartCoroutine(HandlePickingRequest(args));
         }
 
         private IEnumerator ProcessPickingTask()
@@ -230,15 +234,75 @@ namespace CentralControl.PickerControl
             {
                 PickingEventArgs currentTask = pickingQueue.Peek();
                 Debug.Log($"Picker {Id}: Processing picking task for Robot {currentTask.RobotId}");
-
-                yield return StartCoroutine(HandlePickingRequest(currentTask));
-
+                
+                // 找到合适的拣货位置 - 靠近机器人但避免碰撞
+                GameObject robotObj = GameObject.Find($"Robot_{currentTask.RobotId}");
+                Vector3 targetPosition = currentTask.Location;
+                
+                if (robotObj != null)
+                {
+                    // 使用NavMesh找到靠近机器人的可达位置
+                    Vector3 robotPosition = robotObj.transform.position;
+                    
+                    // 在机器人周围采样几个点，找到最佳位置
+                    Vector3[] sampleOffsets = new Vector3[]
+                    {
+                        new Vector3(1.2f, 0, 0),
+                        new Vector3(-1.2f, 0, 0),
+                        new Vector3(0, 0, 1.2f),
+                        new Vector3(0, 0, -1.2f),
+                        new Vector3(0.85f, 0, 0.85f),
+                        new Vector3(-0.85f, 0, 0.85f),
+                        new Vector3(0.85f, 0, -0.85f),
+                        new Vector3(-0.85f, 0, -0.85f)
+                    };
+                    
+                    bool foundValidPosition = false;
+                    
+                    foreach (Vector3 offset in sampleOffsets)
+                    {
+                        Vector3 samplePoint = robotPosition + offset;
+                        NavMeshHit hit;
+                        
+                        // 找到最近的NavMesh点
+                        if (NavMesh.SamplePosition(samplePoint, out hit, 1.0f, NavMesh.AllAreas))
+                        {
+                            targetPosition = hit.position;
+                            foundValidPosition = true;
+                            Debug.Log($"Picker {Id}: 找到靠近机器人 {currentTask.RobotId} 的有效位置: {targetPosition}");
+                            break;
+                        }
+                    }
+                    
+                    if (!foundValidPosition)
+                    {
+                        Debug.LogWarning($"Picker {Id}: 无法找到靠近机器人的有效位置，使用原始位置");
+                    }
+                }
+                
+                // 移动到拣货位置
+                SetState(PickerState.Moving, true);
+                Debug.Log($"Picker {Id} moving to robot {currentTask.RobotId} at {targetPosition}");
+                yield return StartCoroutine(MoveToPosition(targetPosition));
+                SetState(PickerState.Moving, false);
+                
+                // 执行拣货
+                SetState(PickerState.Picking, true);
+                Debug.Log($"Picker {Id} starting picking operation");
+                yield return new WaitForSeconds(pickingTime);
+                SetState(PickerState.Picking, false);
+                
+                // 通知系统拣货完成
                 if (EventManager.Instance != null)
                 {
                     EventManager.Instance.TriggerPickingCompleted(currentTask.RobotId, currentTask.PickingPoint, currentTask.Location);
                     Debug.Log($"Picker {Id}: Notified robot {currentTask.RobotId} of picking completion");
                 }
-
+                
+                // 准备下一个任务
+                SetState(PickerState.Idle, true);
+                Debug.Log($"Picker {Id} completed picking operation for Robot {currentTask.RobotId}");
+                
                 pickingQueue.Dequeue();
                 Debug.Log($"Picker {Id}: Completed task for Robot {currentTask.RobotId}. Remaining tasks: {pickingQueue.Count}");
             }
@@ -249,28 +313,16 @@ namespace CentralControl.PickerControl
 
         public IEnumerator HandlePickingRequest(PickingEventArgs args)
         {
-            // Move to picking location
-            SetState(PickerState.Moving, true);
-            Debug.Log($"Picker {Id} moving to robot {args.RobotId}");
-            yield return StartCoroutine(MoveToPosition(args.Location));
-            SetState(PickerState.Moving, false);
+            // 加入队列并启动处理（如果尚未启动）
+            pickingQueue.Enqueue(args);
+            Debug.Log($"Picker {Id} received picking request from Robot {args.RobotId} at position {args.Location}");
+            
+            if (!isProcessingTasks)
+            {
+                StartCoroutine(ProcessPickingTask());
+            }
 
-            // Perform picking
-            SetState(PickerState.Picking, true);
-            Debug.Log($"Picker {Id} starting picking operation");
-            yield return new WaitForSeconds(pickingTime);
-            SetState(PickerState.Picking, false);
-
-            // Signal completion
-            EventManager.Instance.TriggerPickingCompleted(args.RobotId, args.PickingPoint, args.Location);
-            Debug.Log($"Picker {Id} completed picking for robot {args.RobotId}");
-
-            // Prepare for next task
-            SetState(PickerState.Idle, true);
-
-            // After completing picking
-            EventManager.Instance.TriggerPickingCompleted(args.RobotId, args.PickingPoint, args.Location);
-            Debug.Log($"Picker {Id} completed picking operation for Robot {args.RobotId}");
+            yield break;
         }
 
         private void HandlePickingCompleted(object sender, PickingEventArgs args)
@@ -297,22 +349,63 @@ namespace CentralControl.PickerControl
         #region Movement
         public IEnumerator MoveToPosition(Vector3 targetPosition)
         {
-            float startTime = Time.time;
-            Vector3 startPosition = transform.position;
+            // 保存MoveToPosition被调用前的状态
+            bool wasMoving = IsMoving;
             
-            while (Vector3.Distance(transform.position, targetPosition) > 0.1f)
+            // 确保NavMeshAgent可用
+            if (navAgent == null)
             {
-                transform.position = Vector3.MoveTowards(
-                    transform.position,
-                    targetPosition,
-                    movementSpeed * Time.deltaTime
-                );
+                Debug.LogError($"Picker {Id}: NavMeshAgent未初始化！");
+                yield break;
+            }
+            
+            // 检查NavMesh可达性
+            NavMeshPath path = new NavMeshPath();
+            if (!navAgent.CalculatePath(targetPosition, path) || path.status != NavMeshPathStatus.PathComplete)
+            {
+                Debug.LogWarning($"Picker {Id}: 无法找到到 {targetPosition} 的完整路径");
                 
+                // 尝试找到最近的可导航点
+                NavMeshHit hit;
+                if (NavMesh.SamplePosition(targetPosition, out hit, 5f, NavMesh.AllAreas))
+                {
+                    targetPosition = hit.position;
+                    Debug.Log($"Picker {Id}: 找到替代目标位置 {targetPosition}");
+                }
+                else
+                {
+                    Debug.LogError($"Picker {Id}: 无法找到可达的替代位置");
+                    yield break;
+                }
+            }
+            
+            // 设置状态 - 仅当之前未在移动时
+            if (!wasMoving)
+            {
+                SetState(PickerState.Moving, true);
+            }
+            
+            // 设置目标
+            navAgent.SetDestination(targetPosition);
+            
+            // 等待到达目标
+            while (!navAgent.pathPending && navAgent.remainingDistance > navAgent.stoppingDistance)
+            {
+                // 更新当前位置 - 与现有代码保持兼容
+                currentPosition = transform.position;
                 yield return null;
             }
             
-            transform.position = targetPosition;
-            Debug.Log($"Picker {Id} reached target position {targetPosition}");
+            // 完成移动
+            if (!wasMoving)
+            {
+                SetState(PickerState.Moving, false);
+            }
+            
+            // 更新当前位置到最终位置
+            currentPosition = transform.position;
+            
+            Debug.Log($"Picker {Id}: 已到达目标位置附近 {transform.position}");
         }
         #endregion
 
@@ -331,19 +424,19 @@ namespace CentralControl.PickerControl
         {
             if (baseLocation != null)
             {
-                // Draw work area
-                Gizmos.color = Color.green;
-                Gizmos.DrawWireSphere(baseLocation.position, workAreaRadius);
+                // // Draw work area
+                // Gizmos.color = Color.green;
+                // Gizmos.DrawWireSphere(baseLocation.position, workAreaRadius);
 
-                // Draw current state
-                if (IsIdle)
-                    Gizmos.color = Color.gray;
-                else if (IsPicking)
-                    Gizmos.color = Color.yellow;
-                else if (IsMoving)
-                    Gizmos.color = Color.blue;
+                // // Draw current state
+                // if (IsIdle)
+                //     Gizmos.color = Color.gray;
+                // else if (IsPicking)
+                //     Gizmos.color = Color.yellow;
+                // else if (IsMoving)
+                //     Gizmos.color = Color.blue;
 
-                Gizmos.DrawWireSphere(transform.position, 0.5f);
+                // Gizmos.DrawWireSphere(transform.position, 0.5f);
 
                 // Draw line to target position
                 if (IsMoving)
