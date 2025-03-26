@@ -5,16 +5,16 @@ m_ProjectFiles:
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638773803640000000
-    m_Hash: 452038523
+      ticks: 638785706220000000
+    m_Hash: 1478841224
   m_LockFileStatus:
     m_FilePath: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Packages/packages-lock.json
     m_PathExists: 1
     m_ContentTrackingEnabled: 1
     m_ModificationDate:
       serializedVersion: 2
-      ticks: 638773803640000000
-    m_Hash: 706865529
+      ticks: 638785706220000000
+    m_Hash: 840850093
 m_EmbeddedPackageManifests:
   m_ManifestsStatus: {}
 m_LocalPackages:
@@ -22,6 +22,54 @@ m_LocalPackages:
 m_ProjectPath: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Packages
 m_EditorVersion: 2021.3.32f1c1 (fa19b96eeab7)
 m_ResolvedPackages:
+- packageId: com.github-glitchenzo.nugetforunity@https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity
+  testable: 0
+  isDirectDependency: 1
+  version: 4.3.0
+  source: 5
+  resolvedPath: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/Library/PackageCache/com.github-glitchenzo.nugetforunity@fe31ad0904
+  assetPath: Packages/com.github-glitchenzo.nugetforunity
+  name: com.github-glitchenzo.nugetforunity
+  displayName: NuGetForUnity
+  author:
+    name: 
+    email: 
+    url: 
+  category: 
+  type: 
+  description: A NuGet Package Manager for Unity
+  status: 0
+  errors: []
+  versions:
+    all: []
+    compatible: []
+    verified: 
+  dependencies: []
+  resolvedDependencies: []
+  keywords:
+  - nuget
+  - unity
+  registry:
+    id: main
+    name: 
+    url: https://packages.unity.cn
+    scopes: []
+    isDefault: 1
+    capabilities: 7
+    configSource: 0
+  hideInEditor: 1
+  isAssetStorePackage: 0
+  datePublishedTicks: 0
+  documentationUrl: https://github.com/GlitchEnzo/NuGetForUnity
+  hasRepository: 0
+  repository:
+    type: 
+    url: 
+    revision: 
+    path: 
+  unityLifecycle:
+    version: 
+    nextVersion: 
 - packageId: com.unity.ai.navigation.components@https://github.com/Unity-Technologies/NavMeshComponents.git#package
   testable: 0
   isDirectDependency: 1
@@ -42,8 +90,10 @@ m_ResolvedPackages:
   status: 0
   errors: []
   versions:
-    all: []
-    compatible: []
+    all:
+    - 1.0.0-exp.1
+    compatible:
+    - 1.0.0-exp.1
     verified: 
   dependencies:
   - name: com.unity.modules.ai
@@ -373,6 +423,7 @@ m_ResolvedPackages:
     - 3.0.28
     - 3.0.31
     - 3.0.34
+    - 3.0.35
     compatible:
     - 3.0.25
     - 3.0.26
@@ -380,7 +431,8 @@ m_ResolvedPackages:
     - 3.0.28
     - 3.0.31
     - 3.0.34
-    verified: 3.0.34
+    - 3.0.35
+    verified: 3.0.35
   dependencies:
   - name: com.unity.ext.nunit
     version: 1.0.6

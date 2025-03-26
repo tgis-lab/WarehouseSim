@@ -124,6 +124,14 @@ namespace CentralControl.RobotControl
         private float lastCollisionClearTime = 0f;
         # endregion
 
+        # region Event
+        public event EventHandler<RobotPathEventArgs> OnPathPlanned;
+        protected virtual void RaisePathPlannedEvent(List<ConnectionPoint> path, List<float> times, string planId)
+        {
+            OnPathPlanned?.Invoke(this, new RobotPathEventArgs(Id.ToString(), planId, path, times));
+        }
+        # endregion
+
         # region Unity Lifecycle Methods
         private void Awake()
         {
@@ -150,7 +158,7 @@ namespace CentralControl.RobotControl
             }
             
             detectionRadius = baseDetectionRadius;
-            obstacleLayer = LayerMask.GetMask("RobotLayer", "ObstacleLayer");
+            obstacleLayer = LayerMask.GetMask("RobotLayer", "PickerLayer", "CollisionLayer", "BoundaryWall");
             
             recentCollisions = new List<GameObject>();
             lastCollisionClearTime = Time.time;
@@ -331,8 +339,9 @@ namespace CentralControl.RobotControl
                 SetState(RobotState.Moving, false);
                 yield break;
             }
-            
+
             currentPlanId = result.planId;
+            RaisePathPlannedEvent(result.path, result.times, currentPlanId);
             UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
             
             // Wait until destination reached or timeout
@@ -480,21 +489,7 @@ namespace CentralControl.RobotControl
         private void MoveTowards(Vector3 target)
         {
             // Different movement parameters based on navigation phase
-            float dwaActivationDistance;
-            float lookAheadDistance;
-            
-            if (currentNavigationPhase == NavigationPhase.FollowingPath)
-            {
-                // Parameters for path following phase
-                dwaActivationDistance = 1.8f;
-                lookAheadDistance = 2.5f;
-            }
-            else
-            {
-                // Params for final approaching phase
-                dwaActivationDistance = 1.0f;
-                lookAheadDistance = 1.2f;
-            }
+            float dwaActivationDistance = currentNavigationPhase == NavigationPhase.FollowingPath ? 2.5f : 1.5f;
             
             // Active DWA only when needed
             bool shouldUseDWA = ShouldActivateDWA(dwaActivationDistance);
@@ -511,17 +506,25 @@ namespace CentralControl.RobotControl
                 
                 var (velocity, needReplan) = dwaPlanner.CalculateVelocity(transform.position, rb.velocity, target);
                 
-                Vector3 targetVelocity = velocity.normalized * 
-                    Mathf.Min(velocity.magnitude, currentNavigationPhase == NavigationPhase.FollowingPath ? defaultSpeed : defaultSpeed * 0.7f);
-                
-                if (targetVelocity.magnitude < 0.1f && Vector3.Distance(transform.position, target) > 1.0f)
+                if (velocity.magnitude < 0.1f && Vector3.Distance(transform.position, target) > 1.0f)
                 {
                     Debug.LogWarning($"Robot {Id}: DWA failed to find valid velocity, using basic movement");
                     
-                    targetVelocity = (target - transform.position).normalized * defaultSpeed * 0.3f;
+                    velocity = (target - transform.position).normalized * defaultSpeed * 0.3f;
                 }
                 
+                float maxAllowedSpeed = currentNavigationPhase == NavigationPhase.FollowingPath ? 
+                                    defaultSpeed : defaultSpeed * 0.7f;
+                                    
+                Vector3 targetVelocity = Vector3.ClampMagnitude(velocity, maxAllowedSpeed);
+                
                 rb.velocity = Vector3.Lerp(rb.velocity, targetVelocity, 0.3f);
+                
+                if (rb.velocity.magnitude > 0.1f)
+                {
+                    Quaternion targetRotation = Quaternion.LookRotation(rb.velocity.normalized);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 5f);
+                }
                 
                 // If DWA reports need to replan path
                 if (needReplan && Time.time - lastReplanTime > replanInterval)
@@ -533,11 +536,11 @@ namespace CentralControl.RobotControl
             else
             {
                 // Path following with heading correction
-                DirectPathFollow(target, lookAheadDistance);
+                DirectPathFollow(target);
             }
         }
 
-        private void DirectPathFollow(Vector3 target, float lookAheadDistance)
+        private void DirectPathFollow(Vector3 target)
         {
             if (rb == null)
             {
@@ -707,7 +710,7 @@ namespace CentralControl.RobotControl
                             return;
                         }
                         break;
-                        
+
                     default:
                         return;
                 }
@@ -719,7 +722,7 @@ namespace CentralControl.RobotControl
                 }
                 else
                 {
-                    DirectPathFollow(currentTarget, 2.0f);
+                    DirectPathFollow(currentTarget);
                 }
                 
                 // Path deviation
@@ -890,135 +893,133 @@ namespace CentralControl.RobotControl
         # region DWA Control
         private bool ShouldActivateDWA(float activationDistance)
         {
-            // Force DWA if in emergency state
             if (isEmergencyStopped || needsPathRecovery)
                 return true;
             
-            // Check if obstacle ahead
-            bool obstacleAhead = IsObstacleAhead(activationDistance);
+            // Check if obstacle detected
+            bool obstacleDetected = IsAnyObstacleDetected(activationDistance);
             
-            // Check if near intersection
-            bool nearIntersection = false;
-            if (intersectionManager != null)
-            {
-                nearIntersection = intersectionManager.IsNearIntersection(transform.position, activationDistance);
-            }
+            // Check if in special area
+            bool inSpecialArea = IsInIntersection();
             
+            // DWA activation logic
+            bool shouldActivate = obstacleDetected || inSpecialArea;
             
-            // Check if near recently collided object
-            bool nearRecentCollision = false;
-            foreach (var collisionObj in recentCollisions)
-            {
-                if (collisionObj != null && Vector3.Distance(transform.position, collisionObj.transform.position) < activationDistance * 1.5f)
-                {
-                    nearRecentCollision = true;
-                    break;
-                }
-            }
-            
-            bool shouldActivate = obstacleAhead || nearIntersection || nearRecentCollision;
-            
-            // Cool down
+            // Cooldown period after state change
             if (isDWAEnabled && Time.time - lastDWAStateChangeTime < DWA_STATE_COOLDOWN)
                 return true;
             
-            // Record time if state changed
+            // Update DWA state
             if (shouldActivate != isDWAEnabled)
             {
                 lastDWAStateChangeTime = Time.time;
                 isDWAEnabled = shouldActivate;
                 
+                // Adjust DWA parameters
                 if (shouldActivate)
                 {
-                    if (obstacleAhead)
-                    {
-                        float obstacleDistance = GetForwardObstacleDistance();
-                        float distanceFactor = Mathf.Clamp01(obstacleDistance / (activationDistance * 1.5f));
-                        
-                        dwaPlanner.HeadingWeight = Mathf.Lerp(0.2f, 0.4f, distanceFactor);
-                        dwaPlanner.ObstacleWeight = Mathf.Lerp(0.5f, 0.3f, distanceFactor);
-                        dwaPlanner.MaxSpeed = defaultSpeed * Mathf.Lerp(0.5f, 0.8f, distanceFactor);
-                    }
-                    else if (nearRecentCollision)
-                    {
-                        dwaPlanner.HeadingWeight = 0.3f;
-                        dwaPlanner.ObstacleWeight = 0.4f;
-                        dwaPlanner.MaxSpeed = defaultSpeed * 0.7f;
-                    }
-                    else
-                    {
-                        dwaPlanner.HeadingWeight = 0.5f;
-                        dwaPlanner.ObstacleWeight = 0.25f;
-                        dwaPlanner.MaxSpeed = defaultSpeed * 0.9f;
-                    }
-                }
-                else
-                {
-                    dwaPlanner.HeadingWeight = 0.6f;
-                    dwaPlanner.ObstacleWeight = 0.15f;
-                    dwaPlanner.MaxSpeed = defaultSpeed;
+                    ConfigureDWAParameters(obstacleDetected, inSpecialArea);
                 }
             }
             
             return shouldActivate;
         }
 
-        private bool IsObstacleAhead(float distance)
+        private bool IsAnyObstacleDetected(float distance)
         {
-            // Get forward direction
-            Vector3 forwardDirection = rb.velocity.magnitude > 0.1f ? 
-                rb.velocity.normalized : transform.forward;
+            // 扇形区域检测 - 覆盖前方和侧面
+            float detectionAngle = 120f; // ±60度范围
+            int numberOfRays = 9; // 发射更多射线
             
-            // Detect obstacles in front
-            bool obstacleDetected = false;
-            float fanAngle = 90f;
-            int rayCount = 5;
-            
-            for (int i = 0; i < rayCount; i++)
+            // 1. 射线检测 - 远距离检测
+            for (int i = 0; i < numberOfRays; i++)
             {
-                float angle = (i - (rayCount - 1) / 2f) * (fanAngle / (rayCount - 1));
-                Vector3 rayDirection = Quaternion.Euler(0, angle, 0) * forwardDirection;
+                float angle = -detectionAngle/2 + detectionAngle * i / (numberOfRays - 1);
+                Quaternion rayRotation = Quaternion.Euler(0, angle, 0);
+                Vector3 rayDirection = rayRotation * transform.forward;
                 
-                // 绘制调试射线
-                Debug.DrawRay(transform.position, rayDirection * distance, Color.yellow, 0.1f);
+                // 绘制检测射线
+                Debug.DrawRay(transform.position, rayDirection * distance, Color.yellow);
                 
-                if (Physics.Raycast(transform.position, rayDirection, out RaycastHit hit, distance, obstacleLayer))
+                RaycastHit hit;
+                if (Physics.Raycast(transform.position, rayDirection, out hit, distance, obstacleLayer))
                 {
-                    if (hit.collider.gameObject == this.gameObject)
-                        continue;
-                        
-                    Debug.DrawRay(transform.position, rayDirection * hit.distance, Color.red, 0.1f);
-                    obstacleDetected = true;
+                    // 检测到障碍物
+                    Debug.DrawLine(transform.position, hit.point, Color.red);
+                    Debug.Log($"Robot {Id}: 射线检测到障碍物 {hit.collider.name}，距离 {hit.distance}");
+                    return true;
                 }
             }
             
-            return obstacleDetected;
+            // 2. 盒体检测 - 更接近实际形状的检测
+            Vector3 boxExtents = new Vector3(0.4f, 0.4f, 0.6f); // 根据机器人实际形状调整
+            Vector3 boxCenter = transform.position + transform.forward * boxExtents.z;
+            
+            if (Physics.BoxCast(boxCenter, boxExtents, transform.forward, out RaycastHit boxHit, 
+                            transform.rotation, distance, obstacleLayer))
+            {
+                Debug.DrawLine(transform.position, boxHit.point, Color.red);
+                Debug.Log($"Robot {Id}: 盒体检测到障碍物 {boxHit.collider.name}，距离 {boxHit.distance}");
+                return true;
+            }
+            
+            // 3. 球体检测 - 周围环境检测
+            Collider[] nearbyObjects = Physics.OverlapSphere(transform.position, distance * 0.7f, obstacleLayer);
+            
+            if (nearbyObjects.Length > 0)
+            {
+                foreach (var obj in nearbyObjects)
+                {
+                    // 忽略自身
+                    if (obj.gameObject == this.gameObject) continue;
+                    
+                    Vector3 dirToObj = (obj.transform.position - transform.position).normalized;
+                    float angleToForward = Vector3.Angle(transform.forward, dirToObj);
+                    
+                    // 只考虑前方180度范围内的物体
+                    if (angleToForward <= 90f)
+                    {
+                        Debug.DrawLine(transform.position, obj.transform.position, Color.red);
+                        Debug.Log($"Robot {Id}: 周围检测到障碍物 {obj.name}，角度 {angleToForward}°");
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
         }
 
-        private float GetForwardObstacleDistance()
+        private bool IsInIntersection()
         {
-            Vector3 forwardDirection = rb.velocity.magnitude > 0.1f ? 
-                rb.velocity.normalized : transform.forward;
-            
-            float minDistance = float.MaxValue;
-            float fanAngle = 90f;
-            int rayCount = 7;
-            
-            for (int i = 0; i < rayCount; i++)
+            if (intersectionManager != null)
             {
-                float angle = (i - (rayCount - 1) / 2f) * (fanAngle / (rayCount - 1));
-                Vector3 rayDirection = Quaternion.Euler(0, angle, 0) * forwardDirection;
-                
-                if (Physics.Raycast(transform.position, rayDirection, out RaycastHit hit, detectionRadius * 2, obstacleLayer))
-                {
-                    if (hit.collider.gameObject == this.gameObject)
-                        continue;
-                        
-                    minDistance = Mathf.Min(minDistance, hit.distance);
-                }
+                return intersectionManager.IsRobotInIntersection(Id);
             }
-            
-            return minDistance < float.MaxValue ? minDistance : detectionRadius * 2;
+            return false;
+        }
+
+        private void ConfigureDWAParameters(bool obstacleDetected, bool inSpecialArea)
+        {
+            if (obstacleDetected || inSpecialArea)
+            {
+                // 有障碍物时，提高避障权重
+                dwaPlanner.ObstacleWeight = 0.7f;
+                dwaPlanner.HeadingWeight = 0.2f;
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.7f;
+                dwaPlanner.PredictionTime = 2.5f;
+                dwaPlanner.VelocitySamples = 20;
+                dwaPlanner.AngleSamples = 24;
+                
+                Debug.Log($"Robot {Id}: DWA配置为障碍物避让模式");
+            }
+            else
+            {
+                // 正常模式
+                dwaPlanner.ObstacleWeight = 0.4f;
+                dwaPlanner.HeadingWeight = 0.4f;
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.8f;
+                dwaPlanner.PredictionTime = 1.5f;
+            }
         }
         # endregion
 
@@ -1091,6 +1092,7 @@ namespace CentralControl.RobotControl
             if (result.path != null && result.path.Count > 0)
             {
                 currentPlanId = result.planId;
+                RaisePathPlannedEvent(result.path, result.times, currentPlanId);
                 UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                 
                 // Force DWA activation
@@ -1158,6 +1160,7 @@ namespace CentralControl.RobotControl
             if (result.path != null && result.path.Count > 0)
             {
                 currentPlanId = result.planId;
+                RaisePathPlannedEvent(result.path, result.times, currentPlanId);
                 UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                 currentPathIndex = 0;
                 
@@ -1182,6 +1185,7 @@ namespace CentralControl.RobotControl
                     if (result.path != null && result.path.Count > 0)
                     {
                         currentPlanId = result.planId;
+                        RaisePathPlannedEvent(result.path, result.times, currentPlanId);
                         UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                         currentPathIndex = 0;
                         finalDestination = intermediateTarget;
@@ -1722,7 +1726,7 @@ namespace CentralControl.RobotControl
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying) return;
-            
+
             // // Visualize detection radius
             // Gizmos.color = Color.yellow;
             // Gizmos.DrawWireSphere(transform.position, detectionRadius);

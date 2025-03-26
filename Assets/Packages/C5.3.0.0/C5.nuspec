@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>C5</id>
+    <version>3.0.0</version>
+    <authors>C5</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>icon.png</icon>
+    <readme>README.md</readme>
+    <projectUrl>https://www.itu.dk/research/c5/</projectUrl>
+    <description>The C5 Generic Collection Library for C# and CLI is a comprehensive collection library supporting lists, sets, bags, dictionaries, priority queues, (FIFO) queues, and (LIFO) stacks. C5 runs on everything supporting .NET Standard 2.0: .NET Core 2.0+, .NET 4.6.1+, Mono, Xamarin, Universal Windows Platform, and Unity.</description>
+    <releaseNotes>Release 3.0.0 of 2024-06-05
+
+        - C5 now targets .NET Standard 2.0, .NET 6.0 and .NET 8.0.
+        - Breaking change: Rec&lt;T1, T2, ...&gt; type removed.
+        - Breaking change: All public readonly fields are now properties.
+        - Breaking change: EventTypeEnum is now EventType.
+        - Breaking change: custom KeyValuePair&lt;K, V&gt; has been replaced by the standard System.Collections.Generic.KeyValue&lt;TKey, TValue&gt; for better compatibility.
+        - Breaking change: EnumerationDirection is now Direction.
+        - Breaking change: Serializable attribute removed.</releaseNotes>
+    <copyright>Copyright © Niels Kokholm, Peter Sestoft, and Rasmus Lystrøm 2003-2024</copyright>
+    <tags>Generics Collections Heap TreeSet PriorityQueue</tags>
+    <repository type="git" url="https://github.com/sestoft/C5" commit="2422b335e68ad36b9a1ad7b48c02bab903879997" />
+    <dependencies>
+      <group targetFramework="net6.0" />
+      <group targetFramework="net8.0" />
+      <group targetFramework=".NETStandard2.0" />
+    </dependencies>
+  </metadata>
+</package>

@@ -14,61 +14,67 @@ namespace CentralControl
     public class CentralController : MonoBehaviour
     {
         #region Inspector Fields
-        [Header("组件引用")]
+        [Header("Components")]
         public OrderManager orderManager;
         public RobotManager robotManager;
         public PickerManager pickerManager;
         public MapLoader mapLoader;
         public IntersectionAreaManager intersectionAreaManager;
         
-        [Header("地图设置")]
+        [Header("Map Settings")]
         public float width, length;
         
-        [Header("订单生成设置")]
+        [Header("Order Generation")]
         public float interval = 5f;
         public int orderCount = 10;
         
-        [Header("导航设置")]
+        [Header("Navigation Settings")]
         public float correctionFactor = 0.1f;
         public float dynamicUpdateInterval = 0.5f;
         public float windowDuration = 300f;
         public float timeStep = 0.1f;
         
-        [Header("NavMesh设置")]
+        [Header("NavMesh Settings")]
         public bool autoRebuildNavMesh = true;
         public float navMeshRebuildInterval = 60f;
         public NavMeshSurface navMeshSurface;
         #endregion
 
-        #region 私有变量
-        // 系统状态
+        #region Private Fields
+        // System status
         private bool isSystemInitialized = false;
+        private bool isFullyInitialized = false;
         private bool isInitialDispatchDone = false;
         private bool generatingOrders = false;
         
-        // 导航相关
+        // Navigation
         private Graph graph;
         private DynamicOccupancyLayer globalOccupancyLayer;
         private bool navMeshInitialized = false;
         private float lastUpdateTime;
         
-        // 订单相关
+        // Order management
         private OrderAssignmentSelector orderAssignmentSelector;
         private List<Order> pendingOrders = new List<Order>();
         private List<Order> unassignedOrders = new List<Order>();
         private readonly object dispatchLock = new object();
         
-        // 协程引用
+        // Coroutines
         private Coroutine systemCheckCoroutine;
         private Coroutine navMeshUpdateCoroutine;
         private Coroutine orderGenerationCoroutine;
+
+        [SerializeField]
+        private BoundaryConflictDetector boundaryConflictDetector;
+        private Dictionary<string, List<PathConflictInfo>> detectedConflicts = new Dictionary<string, List<PathConflictInfo>>();
+        private bool hasNewConflicts = false;
         #endregion
 
-        #region 事件
+        #region Events
         public static event EventHandler<RobotStatusEventArgs> OnRobotBecameFree;
         #endregion
 
-        #region Unity生命周期
+        #region Unity Lifecycle
         private void Start()
         {
             Debug.Log("CentralController启动...");
@@ -85,8 +91,15 @@ namespace CentralControl
 
         private void Update()
         {
+            // 确保只有在完全初始化后才执行更新
+            if (!isFullyInitialized)
+                return;
+            
             // 调试快捷键
             HandleDebugKeys();
+
+            // 更新冲突检测
+            UpdateConflictDetection();
         }
 
         private void OnDestroy()
@@ -99,7 +112,7 @@ namespace CentralControl
         }
         #endregion
 
-        #region 初始化流程
+        #region Initialization
         private void RegisterEvents()
         {
             if (EventManager.Instance != null)
@@ -175,6 +188,12 @@ namespace CentralControl
             // 如果系统就绪，启动运行时循环
             if (isSystemInitialized)
             {
+                Debug.Log("初始化碰撞检测系统...");
+                InitializeConflictDetector();
+                
+                // 标记为完全初始化
+                isFullyInitialized = true;
+                
                 StartRuntimeCycles();
             }
             else
@@ -289,7 +308,7 @@ namespace CentralControl
         }
         #endregion
         
-        #region NavMesh管理
+        #region NavMesh Management
         private IEnumerator InitializeNavMeshCoroutine()
         {
             if (navMeshSurface == null)
@@ -418,7 +437,7 @@ namespace CentralControl
         }
         #endregion
 
-        #region 占用层管理
+        #region Global Occupancy Layer
         private void InitializeGlobalOccupancyLayer()
         {
             globalOccupancyLayer = new DynamicOccupancyLayer(
@@ -444,7 +463,7 @@ namespace CentralControl
 
             CleanupGlobalOccupancyLayer(windowStart);
             
-            MergeRobotOccupancyLayer(robotManager);
+            MergeRobotOccupancyLayer();
         }
 
         private void CleanupGlobalOccupancyLayer(float cleanupBeforeTime)
@@ -452,12 +471,9 @@ namespace CentralControl
             globalOccupancyLayer.ClearOccupancyInTimeWindow(float.MinValue, cleanupBeforeTime, null);
         }
 
-        private void MergeRobotOccupancyLayer(RobotManager robots)
+        private void MergeRobotOccupancyLayer()
         {
-            if (robots == null) return;
-            
-            var allRobots = robots.GetAllRobots();
-            foreach (var robot in allRobots)
+            foreach (var robot in robotManager.GetAllRobots())
             {
                 if (robot == null) continue;
                 
@@ -473,6 +489,307 @@ namespace CentralControl
         {
             return globalOccupancyLayer;
         }
+        #endregion
+
+        #region Conflict Detection
+        // 初始化碰撞检测器
+        private void InitializeConflictDetector()
+        {
+            if (boundaryConflictDetector == null)
+            {
+                boundaryConflictDetector = new BoundaryConflictDetector();
+            }
+            
+            // 注册事件监听
+            if (robotManager != null)
+            {
+                foreach (var robot in robotManager.GetAllRobots())
+                {
+                    robot.OnPathPlanned += HandleRobotPathPlanned;
+                }
+            }
+        }
+        
+        // 检测指定路径的碰撞
+        public bool DetectPathConflicts(string robotId, List<ConnectionPoint> path, List<float> times, string planId = null)
+        {
+            if (path == null || path.Count < 2 || times == null || times.Count < path.Count)
+            {
+                Debug.LogWarning($"无效的路径数据: 路径点{path?.Count ?? 0}, 时间点{times?.Count ?? 0}");
+                return false;
+            }
+            
+            MergeRobotOccupancyLayer();
+
+            try
+            {
+                // 解析边界ID
+                List<string> boundaryIds = path.Select(cp => cp.Id).ToList();
+                
+                // 使用BoundaryConflictDetector检测冲突
+                bool hasConflict = false;
+                Dictionary<string, List<TimeOccupancy>> conflicts = new Dictionary<string, List<TimeOccupancy>>();
+                
+                // 检查每个边界的冲突
+                for (int i = 0; i < boundaryIds.Count; i++)
+                {
+                    string boundaryId = boundaryIds[i];
+                    float entryTime = times[i];
+                    float exitTime = (i < boundaryIds.Count - 1) ? times[i + 1] : entryTime + 1.0f; // 最后一个点估计1秒
+                    
+                    // 检查边界冲突
+                    var boundaryConflicts = globalOccupancyLayer.CheckBoundaryConflict(
+                        boundaryId, entryTime, exitTime, robotId);
+                    
+                    if (boundaryConflicts.Count > 0)
+                    {
+                        hasConflict = true;
+                        conflicts[boundaryId] = boundaryConflicts;
+                    }
+                }
+                
+                if (hasConflict)
+                {
+                    // 记录冲突信息
+                    RecordConflict(robotId, planId, boundaryIds, times, conflicts);
+                    return true;
+                }
+                
+                // 如果没有冲突，预留路径占用
+                ReservePath(robotId, planId, boundaryIds, times);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"检测路径冲突时发生错误: {ex.Message}\n{ex.StackTrace}");
+                return false;
+            }
+        }
+        
+        // 记录路径冲突信息
+        private void RecordConflict(string robotId, string planId, List<string> boundaryIds, 
+                                   List<float> times, Dictionary<string, List<TimeOccupancy>> conflicts)
+        {
+            if (!detectedConflicts.ContainsKey(robotId))
+            {
+                detectedConflicts[robotId] = new List<PathConflictInfo>();
+            }
+            
+            var conflictInfo = new PathConflictInfo
+            {
+                RobotId = robotId,
+                PlanId = planId,
+                DetectionTime = Time.time,
+                BoundaryConflicts = new Dictionary<string, List<BoundaryConflictInfo>>()
+            };
+            
+            foreach (var entry in conflicts)
+            {
+                string boundaryId = entry.Key;
+                var boundaryConflicts = new List<BoundaryConflictInfo>();
+                
+                int boundaryIndex = boundaryIds.IndexOf(boundaryId);
+                float entryTime = (boundaryIndex >= 0 && boundaryIndex < times.Count) ? times[boundaryIndex] : 0;
+                float exitTime = (boundaryIndex >= 0 && boundaryIndex + 1 < times.Count) ? times[boundaryIndex + 1] : entryTime + 1.0f;
+                
+                foreach (var occupancy in entry.Value)
+                {
+                    var conflict = new BoundaryConflictInfo
+                    {
+                        BoundaryId = boundaryId,
+                        ConflictRobotId = occupancy.Occupier.RobotId,
+                        ConflictPlanId = occupancy.Occupier.PlanId,
+                        ConflictType = DetermineConflictType(entryTime, exitTime, occupancy.StartTime, occupancy.EndTime),
+                        MyEntryTime = entryTime,
+                        MyExitTime = exitTime,
+                        TheirEntryTime = occupancy.StartTime,
+                        TheirExitTime = occupancy.EndTime,
+                        OverlapDuration = CalculateOverlapDuration(entryTime, exitTime, occupancy.StartTime, occupancy.EndTime)
+                    };
+                    
+                    boundaryConflicts.Add(conflict);
+                }
+                
+                conflictInfo.BoundaryConflicts[boundaryId] = boundaryConflicts;
+            }
+            
+            detectedConflicts[robotId].Add(conflictInfo);
+            hasNewConflicts = true;
+            
+            // 日志输出冲突信息
+            LogConflictInfo(conflictInfo);
+        }
+        
+        // 计算重叠持续时间
+        private float CalculateOverlapDuration(float t1Start, float t1End, float t2Start, float t2End)
+        {
+            float overlapStart = Mathf.Max(t1Start, t2Start);
+            float overlapEnd = Mathf.Min(t1End, t2End);
+            return Mathf.Max(0, overlapEnd - overlapStart);
+        }
+        
+        // 确定冲突类型
+        private ConflictType DetermineConflictType(float myEntryTime, float myExitTime, float theirEntryTime, float theirExitTime)
+        {
+            // 简单分类：基于进入/离开时间判断
+            // 更复杂的分类可以考虑机器人移动方向
+            
+            // 同时进入 (±0.1秒容差)
+            if (Mathf.Abs(myEntryTime - theirEntryTime) < 0.1f)
+            {
+                return ConflictType.HeadOn;
+            }
+            
+            // 我先进入，对方后进入
+            if (myEntryTime < theirEntryTime)
+            {
+                // 我离开前对方就进入 -> 追尾冲突
+                if (myExitTime > theirEntryTime)
+                {
+                    return ConflictType.BeingOvertaken;
+                }
+            }
+            // 对方先进入，我后进入
+            else
+            {
+                // 对方离开前我就进入 -> 追尾冲突
+                if (theirExitTime > myEntryTime)
+                {
+                    return ConflictType.Overtaking;
+                }
+            }
+            
+            // 其他类型冲突
+            return ConflictType.General;
+        }
+        
+        // 日志输出冲突信息
+        private void LogConflictInfo(PathConflictInfo conflictInfo)
+        {
+            Debug.LogWarning($"===== 检测到路径冲突 =====");
+            Debug.LogWarning($"机器人: {conflictInfo.RobotId}, 计划: {conflictInfo.PlanId}, 时间: {conflictInfo.DetectionTime:F2}");
+            
+            foreach (var entry in conflictInfo.BoundaryConflicts)
+            {
+                string boundaryId = entry.Key;
+                var conflicts = entry.Value;
+                
+                Debug.LogWarning($"边界 {boundaryId} 存在 {conflicts.Count} 个冲突:");
+                
+                foreach (var conflict in conflicts)
+                {
+                    Debug.LogWarning($"  与机器人 {conflict.ConflictRobotId} 发生 {conflict.ConflictType} 类型冲突");
+                    Debug.LogWarning($"  我方时间: {conflict.MyEntryTime:F2}-{conflict.MyExitTime:F2}, " +
+                                    $"对方时间: {conflict.TheirEntryTime:F2}-{conflict.TheirExitTime:F2}, " +
+                                    $"重叠: {conflict.OverlapDuration:F2}秒");
+                }
+            }
+            
+            Debug.LogWarning($"========================");
+        }
+        
+        // 预留路径占用
+        private void ReservePath(string robotId, string planId, List<string> boundaryIds, List<float> times)
+        {
+            if (string.IsNullOrEmpty(planId))
+            {
+                planId = $"Plan_{robotId}_{DateTime.Now.Ticks}";
+            }
+            
+            // 清除之前的计划
+            globalOccupancyLayer.ClearPlannedOccupancy(robotId, planId, Time.time);
+            
+            // 添加新的计划占用
+            for (int i = 0; i < boundaryIds.Count - 1; i++)
+            {
+                string boundaryId = boundaryIds[i];
+                float entryTime = times[i];
+                float exitTime = times[i + 1];
+                
+                globalOccupancyLayer.SetBoundaryPlannedOccupancy(boundaryId, entryTime, exitTime, robotId, planId);
+            }
+            
+            // 最后一个边界点
+            if (boundaryIds.Count > 0)
+            {
+                string lastBoundaryId = boundaryIds[boundaryIds.Count - 1];
+                float lastEntryTime = times[times.Count - 1];
+                float lastExitTime = lastEntryTime + 1.0f; // 估计停留1秒
+                
+                globalOccupancyLayer.SetBoundaryPlannedOccupancy(lastBoundaryId, lastEntryTime, lastExitTime, robotId, planId);
+            }
+            
+            Debug.Log($"为机器人 {robotId} 预留了路径，计划ID: {planId}");
+        }
+        
+        // 处理机器人路径规划完成事件
+        private void HandleRobotPathPlanned(object sender, RobotPathEventArgs e)
+        {
+            if (e.Path == null || e.Path.Count < 2 || e.Times == null || e.Times.Count < e.Path.Count)
+            {
+                Debug.LogWarning($"收到无效的路径规划事件: 机器人 {e.RobotId}");
+                return;
+            }
+            
+            // 检测路径冲突
+            bool hasConflict = DetectPathConflicts(e.RobotId, e.Path, e.Times, e.PlanId);
+            
+            if (hasConflict)
+            {
+                Debug.LogWarning($"机器人 {e.RobotId} 的路径存在冲突");
+                // 在此可以触发事件通知机器人重新规划
+                // 或者执行其他冲突处理策略
+            }
+            else
+            {
+                Debug.Log($"机器人 {e.RobotId} 的路径已被接受");
+            }
+        }
+        
+        // 定期更新并处理冲突
+        private void UpdateConflictDetection()
+        {
+            // 更新占用层时间
+            globalOccupancyLayer.UpdateTime(Time.time);
+            
+            // 清理过期的冲突记录
+            CleanupConflicts();
+            
+            // 如果有新的冲突，可以触发相应事件
+            if (hasNewConflicts)
+            {
+                // 触发冲突处理事件
+                // OnConflictsDetected?.Invoke(detectedConflicts);
+                hasNewConflicts = false;
+            }
+        }
+        
+        /// 清理过期的冲突记录
+        private void CleanupConflicts()
+        {
+            float expiryTime = Time.time - 300f; // 5分钟过期
+            
+            foreach (var robotId in new List<string>(detectedConflicts.Keys))
+            {
+                detectedConflicts[robotId].RemoveAll(c => c.DetectionTime < expiryTime);
+                
+                if (detectedConflicts[robotId].Count == 0)
+                {
+                    detectedConflicts.Remove(robotId);
+                }
+            }
+        }
+        
+        /// 获取指定机器人的冲突记录
+        public List<PathConflictInfo> GetRobotConflicts(string robotId)
+        {
+            if (detectedConflicts.TryGetValue(robotId, out var conflicts))
+            {
+                return new List<PathConflictInfo>(conflicts);
+            }
+            return new List<PathConflictInfo>();
+        }
+        
         #endregion
 
         #region Order Management
@@ -544,7 +861,8 @@ namespace CentralControl
                 string orderId = $"Order_{System.DateTime.Now.Ticks}_{i}";
                 
                 // Generate a random execution time
-                float executionTime = UnityEngine.Random.Range(10f, 30f);
+                // float executionTime = UnityEngine.Random.Range(10f, 30f);
+                float executionTime = 5.0f;
                 Order order = new Order(orderId, destination, pickingPoint, executionTime);
                 
                 // Add the order to the list
@@ -809,7 +1127,7 @@ namespace CentralControl
         }
         #endregion
 
-        #region 调试功能
+        #region Debugging
         private void HandleDebugKeys()
         {
             // F5键：系统诊断
@@ -965,7 +1283,7 @@ namespace CentralControl
         }
         #endregion
 
-        #region 事件响应
+        #region Event Handlers
         private void OnMapLoaded()
         {
             // 此方法保留以处理地图加载事件
@@ -979,6 +1297,77 @@ namespace CentralControl
             // 实际初始化逻辑已移至InitializeSystemSequence
             Debug.Log("OnRobotsInitialized事件触发 - 使用新的初始化流程");
         }
+
+        private void OnEnable()
+        {
+            // 订阅EventManager中的事件
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotPathPlanned += HandleRobotPathPlanned;
+            }
+        }
+
+        private void OnDisable()
+        {
+            // 取消订阅事件
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
+            }
+        }
         #endregion
+    }
+
+    // 冲突类型
+    public enum ConflictType
+    {
+        // 头对头冲突 - 两机器人相向而行
+        HeadOn,
+        // 超车冲突 - 我方想超越前车
+        Overtaking,
+        //被超车冲突 - 后车想超越我方
+        BeingOvertaken,
+        // 一般冲突 - 其他类型冲突
+        General
+    }
+    
+    // 边界冲突信息
+    public class BoundaryConflictInfo
+    {
+        public string BoundaryId { get; set; }
+        public string ConflictRobotId { get; set; }
+        public string ConflictPlanId { get; set; }
+        public ConflictType ConflictType { get; set; }
+        public float MyEntryTime { get; set; }
+        public float MyExitTime { get; set; }
+        public float TheirEntryTime { get; set; }
+        public float TheirExitTime { get; set; }
+        public float OverlapDuration { get; set; }
+    }
+    
+    /// 路径冲突信息
+    public class PathConflictInfo
+    {
+        public string RobotId { get; set; }
+        public string PlanId { get; set; }
+        public float DetectionTime { get; set; }
+        public Dictionary<string, List<BoundaryConflictInfo>> BoundaryConflicts { get; set; }
+    }
+    
+    // 机器人路径事件参数
+    public class RobotPathEventArgs : EventArgs
+    {
+        public string RobotId { get; set; }
+        public string PlanId { get; set; }
+        public List<ConnectionPoint> Path { get; set; }
+        public List<float> Times { get; set; }
+        
+        public RobotPathEventArgs(string robotId, string planId, List<ConnectionPoint> path, List<float> times)
+        {
+            RobotId = robotId;
+            PlanId = planId;
+            Path = path;
+            Times = times;
+        }
     }
 }

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.AI;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,7 +27,7 @@ namespace CentralControl.PickerControl
                 gameObject.name = $"Picker_{value}";
             } 
         }
-        public float pickingTime = 10f;
+        public float pickingTime = 5f;
         public float movementSpeed = 3f;
         public float workAreaRadius = 10f;
         #endregion
@@ -98,8 +99,11 @@ namespace CentralControl.PickerControl
                 navAgent.areaMask = NavMesh.AllAreas;
                 
                 // Avoidance settings
-                navAgent.avoidancePriority = 50; // The lower the value, the higher the priority
+                navAgent.avoidancePriority = 50 - Id % 10;
                 navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
+
+                navAgent.autoRepath = true;
+                navAgent.autoBraking = true;
             }
             
             if (workAreaRadius <= 0f)
@@ -215,6 +219,7 @@ namespace CentralControl.PickerControl
         private void HandleRobotReadyForPicking(object sender, PickingEventArgs args)
         {
             Debug.Log($"Picker {Id} received event: Robot {args.RobotId} at {args.Location}");
+            
             if (!IsPickingPointInRange(args.PickingPoint))
             {
                 Debug.Log($"Picker {Id}: Picking point {args.PickingPoint.Id} is NOT in range");
@@ -222,71 +227,55 @@ namespace CentralControl.PickerControl
             }
             Debug.Log($"Picker {Id}: Picking point {args.PickingPoint.Id} is in range, adding to queue");
 
-            // 启动协程处理拣货请求
             StartCoroutine(HandlePickingRequest(args));
         }
 
         private IEnumerator ProcessPickingTask()
         {
             isProcessingTasks = true;
-
+            
             while (pickingQueue.Count > 0)
             {
-                PickingEventArgs currentTask = pickingQueue.Peek();
+                // 安全地获取队列首元素而不移除它
+                PickingEventArgs currentTask = null;
+                
+                lock (pickingQueue) // 使用锁确保线程安全
+                {
+                    if (pickingQueue.Count > 0)
+                    {
+                        currentTask = pickingQueue.Peek();
+                    }
+                    else
+                    {
+                        break; // 队列为空，退出循环
+                    }
+                }
+                
+                if (currentTask == null)
+                {
+                    yield return null;
+                    continue;
+                }
+                
                 Debug.Log($"Picker {Id}: Processing picking task for Robot {currentTask.RobotId}");
                 
-                // 找到合适的拣货位置 - 靠近机器人但避免碰撞
+                // 找到合适的拣货位置
                 GameObject robotObj = GameObject.Find($"Robot_{currentTask.RobotId}");
                 Vector3 targetPosition = currentTask.Location;
                 
                 if (robotObj != null)
                 {
-                    // 使用NavMesh找到靠近机器人的可达位置
                     Vector3 robotPosition = robotObj.transform.position;
-                    
-                    // 在机器人周围采样几个点，找到最佳位置
-                    Vector3[] sampleOffsets = new Vector3[]
-                    {
-                        new Vector3(1.2f, 0, 0),
-                        new Vector3(-1.2f, 0, 0),
-                        new Vector3(0, 0, 1.2f),
-                        new Vector3(0, 0, -1.2f),
-                        new Vector3(0.85f, 0, 0.85f),
-                        new Vector3(-0.85f, 0, 0.85f),
-                        new Vector3(0.85f, 0, -0.85f),
-                        new Vector3(-0.85f, 0, -0.85f)
-                    };
-                    
-                    bool foundValidPosition = false;
-                    
-                    foreach (Vector3 offset in sampleOffsets)
-                    {
-                        Vector3 samplePoint = robotPosition + offset;
-                        NavMeshHit hit;
-                        
-                        // 找到最近的NavMesh点
-                        if (NavMesh.SamplePosition(samplePoint, out hit, 1.0f, NavMesh.AllAreas))
-                        {
-                            targetPosition = hit.position;
-                            foundValidPosition = true;
-                            Debug.Log($"Picker {Id}: 找到靠近机器人 {currentTask.RobotId} 的有效位置: {targetPosition}");
-                            break;
-                        }
-                    }
-                    
-                    if (!foundValidPosition)
-                    {
-                        Debug.LogWarning($"Picker {Id}: 无法找到靠近机器人的有效位置，使用原始位置");
-                    }
+                    targetPosition = CalculateUniquePickingPosition(robotPosition, currentTask.PickingPoint);
                 }
                 
-                // 移动到拣货位置
+                // 移动到目标位置
                 SetState(PickerState.Moving, true);
                 Debug.Log($"Picker {Id} moving to robot {currentTask.RobotId} at {targetPosition}");
                 yield return StartCoroutine(MoveToPosition(targetPosition));
                 SetState(PickerState.Moving, false);
                 
-                // 执行拣货
+                // 拣货操作
                 SetState(PickerState.Picking, true);
                 Debug.Log($"Picker {Id} starting picking operation");
                 yield return new WaitForSeconds(pickingTime);
@@ -296,53 +285,79 @@ namespace CentralControl.PickerControl
                 if (EventManager.Instance != null)
                 {
                     EventManager.Instance.TriggerPickingCompleted(currentTask.RobotId, currentTask.PickingPoint, currentTask.Location);
-                    Debug.Log($"Picker {Id}: Notified robot {currentTask.RobotId} of picking completion");
                 }
                 
-                // 准备下一个任务
-                SetState(PickerState.Idle, true);
-                Debug.Log($"Picker {Id} completed picking operation for Robot {currentTask.RobotId}");
+                // 等待事件处理完成，确保HandlePickingCompleted有时间处理
+                yield return null;
                 
-                pickingQueue.Dequeue();
-                Debug.Log($"Picker {Id}: Completed task for Robot {currentTask.RobotId}. Remaining tasks: {pickingQueue.Count}");
+                // 安全地移除任务(如果仍然是队列头部的任务)
+                // 注意：这部分代码只是一个额外的安全保障，通常由HandlePickingCompleted处理
+                lock (pickingQueue)
+                {
+                    if (pickingQueue.Count > 0 && pickingQueue.Peek().RobotId == currentTask.RobotId)
+                    {
+                        try
+                        {
+                            pickingQueue.Dequeue();
+                            Debug.Log($"Picker {Id}: 任务已从队列移除: {currentTask.RobotId}");
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            Debug.LogWarning($"Picker {Id}: 无法移除任务，队列可能为空");
+                        }
+                    }
+                }
             }
-
+            
             isProcessingTasks = false;
             Debug.Log($"Picker {Id}: All tasks completed");
         }
 
-        public IEnumerator HandlePickingRequest(PickingEventArgs args)
-        {
-            // 加入队列并启动处理（如果尚未启动）
-            pickingQueue.Enqueue(args);
-            Debug.Log($"Picker {Id} received picking request from Robot {args.RobotId} at position {args.Location}");
-            
-            if (!isProcessingTasks)
-            {
-                StartCoroutine(ProcessPickingTask());
-            }
-
-            yield break;
-        }
-
         private void HandlePickingCompleted(object sender, PickingEventArgs args)
         {
-            if (pickingQueue.Count > 0 && pickingQueue.Peek().RobotId == args.RobotId)
+            lock (pickingQueue) // 使用锁确保线程安全
             {
-                Debug.Log($"Picker {Id}: Finished robot {args.RobotId}'s picking task");
-                
-                SetState(PickerState.Idle, true);
-                
-                if (pickingQueue.Count > 0)
+                if (pickingQueue.Count > 0 && pickingQueue.Peek().RobotId == args.RobotId)
                 {
-                    pickingQueue.Dequeue();
+                    Debug.Log($"Picker {Id}: Finished robot {args.RobotId}'s picking task");
+                    
+                    SetState(PickerState.Idle, true);
+                    
+                    try
+                    {
+                        pickingQueue.Dequeue(); // 安全移除任务
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        Debug.LogWarning($"Picker {Id}: 尝试移除任务失败，队列可能为空");
+                        // 继续执行，不抛出异常
+                    }
                 }
                 
+                // 检查是否有更多任务需要处理
                 if (pickingQueue.Count > 0 && !isProcessingTasks)
                 {
                     StartCoroutine(ProcessPickingTask());
                 }
             }
+        }
+
+        public IEnumerator HandlePickingRequest(PickingEventArgs args)
+        {
+            lock (pickingQueue) // 使用锁确保线程安全
+            {
+                // 加入队列
+                pickingQueue.Enqueue(args);
+                Debug.Log($"Picker {Id} received picking request from Robot {args.RobotId} at position {args.Location}");
+                
+                // 如果没有正在处理任务，启动处理
+                if (!isProcessingTasks)
+                {
+                    StartCoroutine(ProcessPickingTask());
+                }
+            }
+
+            yield break;
         }
         # endregion
 
@@ -406,6 +421,50 @@ namespace CentralControl.PickerControl
             currentPosition = transform.position;
             
             Debug.Log($"Picker {Id}: 已到达目标位置附近 {transform.position}");
+        }
+
+        private Vector3 CalculateUniquePickingPosition(Vector3 robotPosition, PickingPoint pickingPoint)
+        {
+            Vector3[] basePositions = new Vector3[]
+            {
+                new Vector3(0.8f, 0, 0.8f),   // 右前
+                new Vector3(-0.8f, 0, 0.8f),  // 左前
+                new Vector3(0.8f, 0, -0.8f),  // 右后
+                new Vector3(-0.8f, 0, -0.8f), // 左后
+                new Vector3(1.2f, 0, 0),      // 右侧
+                new Vector3(-1.2f, 0, 0),     // 左侧
+                new Vector3(0, 0, 1.2f),      // 前方
+                new Vector3(0, 0, -1.2f)      // 后方
+            };
+            
+            // 根据Picker ID选择不同位置
+            int positionIndex = Id % basePositions.Length;
+            Vector3 offset = basePositions[positionIndex];
+            
+            // 计算目标位置
+            Vector3 targetPosition = robotPosition + offset;
+            
+            // 确保位置在NavMesh上
+            NavMeshHit hit;
+            if (NavMesh.SamplePosition(targetPosition, out hit, 2.0f, NavMesh.AllAreas))
+            {
+                return hit.position;
+            }
+            
+            // 如果找不到有效位置，尝试其他位置
+            for (int i = 0; i < basePositions.Length; i++)
+            {
+                if (i == positionIndex) continue; // 跳过已尝试的位置
+                
+                Vector3 alternatePosition = robotPosition + basePositions[i];
+                if (NavMesh.SamplePosition(alternatePosition, out hit, 2.0f, NavMesh.AllAreas))
+                {
+                    return hit.position;
+                }
+            }
+            
+            // 如果所有位置都无效，返回机器人位置
+            return robotPosition;
         }
         #endregion
 

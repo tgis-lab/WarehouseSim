@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using System.Collections.Generic;
 using Map;
 using CentralControl.RobotControl;
 using CentralControl.PickerControl;
@@ -30,6 +31,9 @@ namespace CentralControl
         // Picking-related events
         public event EventHandler<PickingEventArgs> OnRobotReadyForPicking;
         public event EventHandler<PickingEventArgs> OnPickingCompleted;
+
+        // Path-related events
+        public event EventHandler<RobotPathEventArgs> OnRobotPathPlanned;
 
         private void Awake()
         {
@@ -87,6 +91,12 @@ namespace CentralControl
         public void TriggerPickingCompleted(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
             OnPickingCompleted?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
+        }
+
+        public void TriggerRobotPathPlanned(string robotId, string planId, List<ConnectionPoint> path, List<float> times)
+        {
+            Debug.Log($"EventManager: Robot {robotId} planned a path with {path.Count} points");
+            OnRobotPathPlanned?.Invoke(this, new RobotPathEventArgs(robotId, planId, path, times));
         }
     }
 }
