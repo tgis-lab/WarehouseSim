@@ -20,6 +20,7 @@ namespace CentralControl.RobotControl
         private DynamicOccupancyLayer globalOccupancyLayer;
         private IntersectionAreaManager intersectionAreaManager;
         private List<RobotController> robots = new List<RobotController>();
+        private HashSet<string> usedSpawnPointIds = new HashSet<string>();
 
         public int TotalRobots => robots.Count;
         public int BusyRobots => robots.Count(r => !r.IsFree);
@@ -60,17 +61,52 @@ namespace CentralControl.RobotControl
 
         private Vector3 GetValidInitialPosition()
         {
-            for (int attempts = 0; attempts < 10; attempts++)
+            // Use a list of cell IDs for spawn points
+            List<string> spawnPointCellIds = new List<string> {"c132", "c133", "c357", "c358", "c139", "c140", "c364", "c365", "c146", "c147", "c371", "c372"};
+            
+            // Filter out used spawn points
+            List<string> availableSpawnPointIds = spawnPointCellIds.Where(id => !usedSpawnPointIds.Contains(id)).ToList();
+            
+            // If no available spawn points, log a warning and return zero vector
+            if (availableSpawnPointIds.Count == 0)
             {
-                Vector3 initialPosition = new Vector3(UnityEngine.Random.Range(0, mapGrid.width), mapGrid.height + 0.05f, UnityEngine.Random.Range(0, mapGrid.length));
-                CellSpace cellSpace = indoorSpace.GetCellSpaceFromCoordinates(initialPosition);
-                if (cellSpace != null && cellSpace.IsNavigable())
-                {
-                    Point point = (Point)cellSpace.Node;
-                    return new Vector3((float)point.X, mapGrid.height + 0.05f, (float)point.Y);
-                }
+                Debug.LogWarning("No available spawn points found.");
+                return Vector3.zero;
             }
+            
+            // Pick a random spawn point from the available list
+            string selectedCellId = availableSpawnPointIds[UnityEngine.Random.Range(0, availableSpawnPointIds.Count)];
+            
+            // Mark the selected spawn point as used
+            usedSpawnPointIds.Add(selectedCellId);
+            
+            // Get the center point of the selected cell space
+            var cellSpace = indoorSpace.GetCellSpaceFromId(selectedCellId);
+            if (cellSpace != null)
+            {
+                Point cellSpaceCenterPoint = (Point)cellSpace.Node;
+                Vector3 cellSpacePosition = new Vector3((float)cellSpaceCenterPoint.X, mapGrid.height + 0.05f, (float)cellSpaceCenterPoint.Y);
+                
+                Debug.Log($"Robot spawn point selected: {selectedCellId} at position {cellSpacePosition}");
+                return cellSpacePosition;
+            }
+            
+            Debug.LogWarning($"Failed to find cell space for spawn point {selectedCellId}");
             return Vector3.zero;
+        }
+
+        public void ResetSpawnPoints()
+        {
+            usedSpawnPointIds.Clear();
+        }
+
+        public void ReleaseSpawnPoint(string cellId)
+        {
+            if (usedSpawnPointIds.Contains(cellId))
+            {
+                usedSpawnPointIds.Remove(cellId);
+                Debug.Log($"Spawn point {cellId} released.");
+            }
         }
 
         private void CreateRobot(int id, Vector3 position)
