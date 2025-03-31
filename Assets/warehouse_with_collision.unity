@@ -364,6 +364,12 @@ MonoBehaviour:
   maxAcceleration: 2
   maxDeceleration: 3
   MaxOrder: 20
+  robotCollisionLayer:
+    serializedVersion: 2
+    m_Bits: 0
+  pickerCollisionLayer:
+    serializedVersion: 2
+    m_Bits: 0
 --- !u!4 &732838027
 Transform:
   m_ObjectHideFlags: 0
@@ -470,6 +476,9 @@ MonoBehaviour:
   dynamicUpdateInterval: 1
   windowDuration: 60
   timeStep: 0.2
+  autoRebuildNavMesh: 1
+  navMeshRebuildInterval: 60
+  navMeshSurface: {fileID: 0}
 --- !u!4 &1051107022
 Transform:
   m_ObjectHideFlags: 0
@@ -683,7 +692,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1ddf819c19b0e4ef69fa8db8072590c9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mapWidth: 25
+  mapWidth: 27
   mapLength: 20
   wallHeight: 2
   wallThickness: 0
@@ -827,11 +836,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 57385e235f8d94f4789d7f6aa8639f4d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  jsonFile: {fileID: 4900000, guid: 380f9842717a94809999360bd47626ae, type: 3}
+  jsonFile: {fileID: 4900000, guid: 440f54ad509474105b6d635c668eff68, type: 3}
   mapVisualizer: {fileID: 1668055372}
   mapBoundaryPrefab: {fileID: 1477745115}
   height: 0
-  width: 25
+  width: 27
   length: 20
 --- !u!4 &1765155606
 Transform:

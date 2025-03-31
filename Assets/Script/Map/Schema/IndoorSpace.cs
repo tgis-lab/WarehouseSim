@@ -15,6 +15,8 @@ namespace Map {
         private List<Container> _containers = new List<Container>();
 
         private List<PickingPoint> _pickingPoints = new List<PickingPoint>();
+        private List<PackingPoint> _packingPoints = new List<PackingPoint>();
+        private List<QueueArea> _queueAreas = new List<QueueArea>();
         private List<CellSpace> _businessPoints = new List<CellSpace>();
 
         [JsonProperty("properties")]
@@ -70,6 +72,19 @@ namespace Map {
             }
         }
 
+        public void AddPackingPoint(CellSpace cellSpace)
+        {
+            if (cellSpace.IsPackingPoint())
+            {
+                List<string> boundings = cellSpace.GetBoundings();
+                if (boundings != null)
+                {
+                    PackingPoint packingPoint = new PackingPoint(cellSpace.Id, boundings);
+                    _packingPoints.Add(packingPoint);
+                }
+            }
+        }
+
         public void AddBusinessPoint(CellSpace cellSpace)
         {
             if (cellSpace.IsBusinesspoint())
@@ -79,14 +94,29 @@ namespace Map {
             }
         }
 
+        public void AddQueueArea(CellSpace cellSpace)
+        {
+            if (cellSpace.IsQueue())
+            {
+                List<string> boundings = cellSpace.GetBoundings();
+                if (boundings != null)
+                {
+                    QueueArea queueArea = new QueueArea(cellSpace.Id, boundings);
+                    _queueAreas.Add(queueArea);
+                }
+            }
+        }
+
         public void LoadProperties()
         {
             foreach (var cellSpace in _cellSpaces)
             {
                 AddPickingPoint(cellSpace);
+                AddPackingPoint(cellSpace);
                 AddBusinessPoint(cellSpace);
+                AddQueueArea(cellSpace);
             }
-            Debug.Log($"Picking Points: {PickingPoints.Count}, Business Points: {BusinessPoints.Count}");
+            Debug.Log($"Picking Points: {PickingPoints.Count}, Packing Points: {PickingPoints.Count}, Business Points: {BusinessPoints.Count}");
         }
 
         public PickingPoint GetPickingPointFromBusinessPoint(CellSpace cellSpace)
@@ -156,6 +186,37 @@ namespace Map {
             }
             Debug.Log("CellSpace not found");
             return null;
+        }
+
+        public List<CellSpace> GetCellSpaceFromLayerId(string layerId)
+        {
+            List<CellSpace> cellSpaces = new List<CellSpace>();
+            List<Layer> layers = GetAllLayers();
+            foreach (var layer in layers)
+            {
+                if (layer.Id == layerId)
+                {
+                    foreach (var cellSpaceId in layer.CellSpaces)
+                    {
+                        cellSpaces.Add(GetCellSpaceFromId(cellSpaceId));
+                    }
+                }
+            }
+            return cellSpaces;
+        }
+
+        public List<CellSpace> GetCellSpaceFromLayerType(string type)
+        {
+            List<CellSpace> cellSpaces = new List<CellSpace>();
+            List<Layer> layers = GetLayerFromType(type);
+            foreach (var layer in layers)
+            {
+                foreach (var cellSpaceId in layer.CellSpaces)
+                {
+                    cellSpaces.Add(GetCellSpaceFromId(cellSpaceId));
+                }
+            }
+            return cellSpaces;
         }
 
         public CellBoundary GetCellBoundaryFromId(string id)

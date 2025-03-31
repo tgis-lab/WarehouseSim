@@ -13,92 +13,69 @@ namespace Map {
             this.graph = graph;
         }
 
-        public bool ValidateGraphConnectivity()
+        public bool CheckConnectivityUsingFloydWarshall()
         {
-            if (graph.RoutePoints.Count == 0)
+            int n = graph.RoutePoints.Count;
+            bool[,] reachable = new bool[n, n];
+            
+            // 创建节点到索引的映射
+            Dictionary<string, int> nodeToIndex = new Dictionary<string, int>();
+            for (int i = 0; i < n; i++)
             {
-                Debug.LogError("Graph is empty");
-                return false;
+                nodeToIndex[graph.RoutePoints[i].ConnectionPoint.Id] = i;
             }
-
-            HashSet<RoutePoint> visited = new HashSet<RoutePoint>();
-            Queue<RoutePoint> queue = new Queue<RoutePoint>();
-            Dictionary<string, int> inDegree = new Dictionary<string, int>();
-            HashSet<string> reportedEdges = new HashSet<string>();
-
+            
+            // 初始化可达矩阵
+            for (int i = 0; i < n; i++)
+            {
+                for (int j = 0; j < n; j++)
+                {
+                    reachable[i, j] = (i == j); // 自己到自己可达
+                }
+            }
+            
+            // 填充直接连接
             foreach (var point in graph.RoutePoints)
             {
-                inDegree[point.ConnectionPoint.Id] = 0;
-            }
-
-            foreach (var point in graph.RoutePoints)
-            {
+                int i = nodeToIndex[point.ConnectionPoint.Id];
                 foreach (var child in point.Children)
                 {
                     var childPoint = graph.GetRoutePointFormConnectionPoint(child);
                     if (childPoint != null)
                     {
-                        inDegree[childPoint.ConnectionPoint.Id]++;
+                        int j = nodeToIndex[childPoint.ConnectionPoint.Id];
+                        reachable[i, j] = true;
                     }
                 }
             }
-
-            RoutePoint startPoint = graph.RoutePoints[0];
-            queue.Enqueue(startPoint);
-            visited.Add(startPoint);
-
-            while (queue.Count > 0)
+            
+            // Floyd-Warshall核心算法
+            for (int k = 0; k < n; k++)
             {
-                var current = queue.Dequeue();
-                foreach (var child in current.Children)
+                for (int i = 0; i < n; i++)
                 {
-                    var childRoutePoint = graph.GetRoutePointFormConnectionPoint(child);
-                    if (childRoutePoint != null)
+                    for (int j = 0; j < n; j++)
                     {
-                        string edgeKey = $"{current.ConnectionPoint.Id}->{childRoutePoint.ConnectionPoint.Id}";
-                        if (!visited.Contains(childRoutePoint))
-                        {
-                            visited.Add(childRoutePoint);
-                            queue.Enqueue(childRoutePoint);
-                            // Debug.Log($"Visiting new point: {childRoutePoint.ConnectionPoint.Id}");
-                        }
-                        else if (!reportedEdges.Contains(edgeKey))
-                        {
-                            // Debug.Log($"Revisiting point: {childRoutePoint.ConnectionPoint.Id} from {current.ConnectionPoint.Id}");
-                            reportedEdges.Add(edgeKey);
-                        }
-                    }
-                    else
-                    {
-                        Debug.LogError($"Invalid connection: {current.ConnectionPoint.Id} -> null");
+                        reachable[i, j] = reachable[i, j] || (reachable[i, k] && reachable[k, j]);
                     }
                 }
             }
-
-            bool isFullyConnected = visited.Count == graph.RoutePoints.Count;
-            Debug.Log($"Graph connectivity check: {(isFullyConnected ? "Fully connected" : "Disconnected")}. " +
-                    $"Visited: {visited.Count}, Total: {graph.RoutePoints.Count}");
-
-            var unreachedPoints = graph.RoutePoints.Where(rp => !visited.Contains(rp)).ToList();
-            Debug.Log($"Unreached points: {unreachedPoints.Count}");
-            foreach (var point in unreachedPoints)
+            
+            // 检查是否所有点对都相互可达
+            bool allReachable = true;
+            for (int i = 0; i < n && allReachable; i++)
             {
-                Debug.Log($"Unreached point: {point.ConnectionPoint.Id}, " +
-                        $"Position: {point.ConnectionPoint.Point}, " +
-                        $"In-degree: {inDegree[point.ConnectionPoint.Id]}");
+                for (int j = 0; j < n && allReachable; j++)
+                {
+                    if (!reachable[i, j])
+                    {
+                        Debug.LogWarning($"Node {graph.RoutePoints[i].ConnectionPoint.Id} cannot reach {graph.RoutePoints[j].ConnectionPoint.Id}");
+                        allReachable = false;
+                    }
+                }
             }
-
-            var zeroInDegreePoints = graph.RoutePoints.Where(rp => inDegree[rp.ConnectionPoint.Id] == 0).ToList();
-            Debug.Log($"Points with zero in-degree: {zeroInDegreePoints.Count}");
-            foreach (var point in zeroInDegreePoints)
-            {
-                Debug.Log($"Zero in-degree point: {point.ConnectionPoint.Id}, Position: {point.ConnectionPoint.Point}");
-            }
-
-            // Debug.Log($"Total edges reported: {reportedEdges.Count}");
-            // Debug.Log($"Average in-degree: {inDegree.Values.Average():F2}");
-
-            return isFullyConnected;
+            
+            return allReachable;
         }
     }
 }

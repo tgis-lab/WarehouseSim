@@ -63,6 +63,16 @@ namespace Map {
             return false;
         }
 
+        public bool IsQueue()
+        {
+            return HasFunctionOfType("queue area");
+        }
+
+        public bool IsPackingPoint()
+        {
+            return HasFunctionOfType("packing point");
+        }
+
         public CellSpaceStatus GetStatus()
         {
             return this.Status;

@@ -55,6 +55,15 @@ namespace Map {
             return false;
         }
 
+        public bool IsQueue()
+        {
+            if (this.Properties["type"].Equals("queue"))
+            {
+                return true;
+            }
+            return false;
+        }
+
         public string ToJson()
         {
             var settings = new JsonSerializerSettings

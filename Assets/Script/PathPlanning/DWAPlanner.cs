@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System.Diagnostics;
 
 namespace PathPlanning
 {
@@ -22,49 +23,64 @@ namespace PathPlanning
         public int VelocitySamples { get; set; } = 7;    // 速度采样数
         public int AngleSamples { get; set; } = 15;      // 角度采样数
         public float ObstacleInflation { get; set; } = 0.2f; // 障碍物膨胀系数
+        public float TurningObstacleWeight { get; set; } = 0.7f;
+        public float TurningHeadingWeight { get; set; } = 0.3f;
+        public float TurningPredictionTime { get; set; } = 2.5f;
+        public int TurningVelocitySamples { get; set; } = 9;
+        public int TurningAngleSamples { get; set; } = 20;
+        public float MinTurningRadius { get; set; } = 0.8f;
 
         private Vector3 previousBestVelocity = Vector3.zero;
         private bool hasPreviousVelocity = false;
 
-        public (Vector3 velocity, bool needReplan) CalculateVelocity(
-            Vector3 currentPosition, 
-            Vector3 currentVelocity, 
-            Vector3 goalPosition)
+        public (Vector3, bool) CalculateVelocity(Vector3 currentPosition, Vector3 currentVelocity, Vector3 goalPosition, bool specialAvoidanceMode = false)
         {
-            // Initialize the best score to the current velocity
-            Vector3 bestVelocity = currentVelocity;
-            float bestScore = float.MinValue;
-            bool needReplan = false;
-
-            // Calculate the current speed
-            float currentSpeed = currentVelocity.magnitude;
+            // 保存原始参数，在函数结束时恢复
+            float originalObstacleWeight = ObstacleWeight;
+            float originalHeadingWeight = HeadingWeight;
+            float originalPredictionTime = PredictionTime;
+            int originalVelocitySamples = VelocitySamples;
+            int originalAngleSamples = AngleSamples;
             
-            // Calculate the min and max available speeds
-            float minSpeed = Mathf.Max(MinSpeed, currentSpeed - MaxAccel * Time.deltaTime);
-            float maxSpeed = Mathf.Min(MaxSpeed, currentSpeed + MaxAccel * Time.deltaTime);
+            // 如果是特殊避障模式（转弯处），应用特殊参数
+            if (specialAvoidanceMode)
+            {
+                ObstacleWeight = TurningObstacleWeight;
+                HeadingWeight = TurningHeadingWeight;
+                PredictionTime = TurningPredictionTime;
+                VelocitySamples = TurningVelocitySamples;
+                AngleSamples = TurningAngleSamples;
+            }
             
-            // Use variable resolution
-            float speedStep = (maxSpeed - minSpeed) / Mathf.Max(1, VelocitySamples - 1);
-            float angleStep = (MaxRotSpeed * 2) / Mathf.Max(1, AngleSamples - 1);
-            
-            // Record the time spent on sampling
-            System.Diagnostics.Stopwatch samplingTimer = new System.Diagnostics.Stopwatch();
+            // 计时（用于性能分析）
+            var samplingTimer = new Stopwatch();
             samplingTimer.Start();
             
-            // Sample velocities
+            bool needReplan = false;
+            
+            Vector3 bestVelocity = Vector3.zero;
+            float bestScore = -float.MaxValue;
+            
+            // Speed sampling
             for (int i = 0; i < VelocitySamples; i++)
             {
-                float speed = minSpeed + i * speedStep;
+                float speed = Mathf.Lerp(MinSpeed, MaxSpeed, i / (float)(VelocitySamples - 1));
                 
+                // Rotation sampling
                 for (int j = 0; j < AngleSamples; j++)
                 {
-                    float angle = -MaxRotSpeed + j * angleStep;
+                    float angle = Mathf.Lerp(-MaxRotSpeed, MaxRotSpeed, j / (float)(AngleSamples - 1));
                     
-                    // Calculate the sampled velocity
-                    Vector3 sampledVelocity = CalculateSampledVelocity(currentPosition, goalPosition, speed, angle);
+                    Vector3 sampledVelocity = CalculateSampledVelocity(currentVelocity, speed, angle);
                     
-                    // Check if the velocity is safe
-                    bool isSafe = IsVelocitySafe(currentPosition, sampledVelocity, ObstacleLayer);
+                    // Check if velocity is safe (obstacle avoidance)
+                    bool isSafe = IsSafeVelocity(currentPosition, sampledVelocity, ObstacleLayer);
+                    
+                    // 在特殊避障模式下增加对转弯半径的检查
+                    if (specialAvoidanceMode)
+                    {
+                        isSafe = isSafe && CheckTurningRadius(sampledVelocity, angle);
+                    }
                     
                     if (isSafe)
                     {
@@ -75,8 +91,16 @@ namespace PathPlanning
                         if (hasPreviousVelocity)
                         {
                             float smoothingScore = Vector3.Dot(sampledVelocity.normalized, previousBestVelocity.normalized);
-                            smoothingScore = Mathf.Pow(smoothingScore, 2) * 0.1f; // 平滑权重
+                            smoothingScore = Mathf.Pow(smoothingScore, 2) * 0.1f;
                             score += smoothingScore;
+                        }
+                        
+                        // 特殊避障模式下额外考虑转弯平滑性
+                        if (specialAvoidanceMode)
+                        {
+                            // 计算转弯半径奖励
+                            float radiusBonus = EvaluateTurningRadius(sampledVelocity, angle);
+                            score += radiusBonus * 0.2f;
                         }
                         
                         // Update the best score
@@ -92,7 +116,7 @@ namespace PathPlanning
             samplingTimer.Stop();
             if (samplingTimer.ElapsedMilliseconds > 10)
             {
-                Debug.Log($"DWA sampling cost: {samplingTimer.ElapsedMilliseconds}ms, sample count: {VelocitySamples * AngleSamples}");
+                UnityEngine.Debug.Log($"DWA sampling cost: {samplingTimer.ElapsedMilliseconds}ms, sample count: {VelocitySamples * AngleSamples}");
             }
             
             // If the best score is lower than the threshold, replan
@@ -118,33 +142,72 @@ namespace PathPlanning
             previousBestVelocity = bestVelocity;
             hasPreviousVelocity = true;
             
+            // 恢复原始参数
+            ObstacleWeight = originalObstacleWeight;
+            HeadingWeight = originalHeadingWeight;
+            PredictionTime = originalPredictionTime;
+            VelocitySamples = originalVelocitySamples;
+            AngleSamples = originalAngleSamples;
+            
             return (bestVelocity, needReplan);
         }
-
-        private Vector3 CalculateSampledVelocity(Vector3 currentPosition, Vector3 goalPosition, float speed, float rotation)
+        
+        private bool CheckTurningRadius(Vector3 velocity, float angularVelocity)
         {
-            // Calculate the direction to the goal
-            Vector3 directionToGoal = (goalPosition - currentPosition).normalized;
+            if (Mathf.Abs(angularVelocity) < 0.001f)
+                return true;
             
-            // Rotate
-            return Quaternion.Euler(0, rotation * Mathf.Rad2Deg, 0) * directionToGoal * speed;
+            // 计算转弯半径 R = V/ω
+            float turningRadius = velocity.magnitude / Mathf.Abs(angularVelocity);
+            
+            // 如果转弯半径小于最小要求，认为不安全
+            return turningRadius >= MinTurningRadius;
+        }
+        
+        private float EvaluateTurningRadius(Vector3 velocity, float angularVelocity)
+        {
+            // 只对有转向的情况评估
+            if (Mathf.Abs(angularVelocity) < 0.001f)
+                return 0;
+            
+            // 计算转弯半径
+            float turningRadius = velocity.magnitude / Mathf.Abs(angularVelocity);
+            
+            // 转弯半径越大越好，但有上限
+            float idealRadius = MinTurningRadius * 2.0f;
+            float maxRadius = MinTurningRadius * 4.0f;
+            
+            if (turningRadius < MinTurningRadius)
+                return 0; // 低于最小半径，零分
+            else if (turningRadius <= idealRadius)
+                return Mathf.Lerp(0.5f, 1.0f, (turningRadius - MinTurningRadius) / (idealRadius - MinTurningRadius));
+            else if (turningRadius <= maxRadius)
+                return Mathf.Lerp(1.0f, 0.5f, (turningRadius - idealRadius) / (maxRadius - idealRadius));
+            else
+                return 0.5f; // 太大的半径也不理想
         }
 
-        private bool IsVelocitySafe(Vector3 currentPosition, Vector3 velocity, LayerMask obstacleLayer)
+        private Vector3 CalculateSampledVelocity(Vector3 currentVelocity, float speed, float angle)
         {
-            float speed = velocity.magnitude;
+            // 计算旋转后的方向
+            float currentAngle = Mathf.Atan2(currentVelocity.x, currentVelocity.z);
+            float targetAngle = currentAngle + angle * Time.deltaTime;
+            
+            // 创建新的速度向量
+            return new Vector3(Mathf.Sin(targetAngle), 0, Mathf.Cos(targetAngle)) * speed;
+        }
 
-            // Calculate angular velocity
-            float angularVelocity = Mathf.Atan2(velocity.x, velocity.z) / Time.deltaTime;
+        private bool IsSafeVelocity(Vector3 currentPosition, Vector3 velocity, LayerMask obstacleLayer)
+        {
+            // 预测轨迹
+            Vector3[] trajectory = PredictTrajectory(currentPosition, velocity, velocity.magnitude, Mathf.Atan2(velocity.x, velocity.z) / Time.deltaTime);
             
-            // Predict the trajectory to see if it is safe
-            Vector3[] trajectory = PredictTrajectory(currentPosition, velocity, speed, angularVelocity);
-            
-            // Check each point on the trajectory
-            for (int i = 0; i < trajectory.Length; i++)
+            // 检查轨迹是否安全
+            foreach (Vector3 point in trajectory)
             {
-                // Check with a larger radius to consider the actual size of the robot and obstacle inflation
-                if (Physics.CheckSphere(trajectory[i], 0.5f + ObstacleInflation, obstacleLayer))
+                // 检查附近是否有障碍物
+                Collider[] obstacles = Physics.OverlapSphere(point, ObstacleInflation, obstacleLayer);
+                if (obstacles.Length > 0)
                 {
                     return false;
                 }
@@ -156,22 +219,20 @@ namespace PathPlanning
         // 更精确的轨迹预测，考虑转向动态特性
         private Vector3[] PredictTrajectory(Vector3 startPos, Vector3 startVelocity, float speed, float angularVelocity)
         {
-            int steps = 15; // 增加预测点数
+            int steps = 20;
             Vector3[] trajectory = new Vector3[steps];
             
-            // 初始状态
             Vector3 position = startPos;
-            Vector3 forward = startVelocity.normalized;
-            float timeStep = PredictionTime / steps;
+            Vector3 velocity = startVelocity;
+            float deltaTime = PredictionTime / steps;
             
-            // 模拟运动学模型
             for (int i = 0; i < steps; i++)
             {
-                // 更新位置
-                position += forward * speed * timeStep;
+                position += velocity * deltaTime;
                 
-                // 更新朝向
-                forward = Quaternion.Euler(0, angularVelocity * timeStep * Mathf.Rad2Deg, 0) * forward;
+                // 简单模拟转向
+                float angle = Mathf.Atan2(velocity.x, velocity.z) + angularVelocity * deltaTime;
+                velocity = new Vector3(Mathf.Sin(angle), 0, Mathf.Cos(angle)) * speed;
                 
                 trajectory[i] = position;
             }
@@ -179,50 +240,29 @@ namespace PathPlanning
             return trajectory;
         }
 
+
         private float EvaluateVelocity(Vector3 currentPosition, Vector3 velocity, Vector3 goalPosition, LayerMask obstacleLayer)
         {
-            // Predict the target position
-            Vector3 predictedPosition = currentPosition + velocity * PredictionTime;
+            // 方向评分：速度方向与目标方向的匹配度
+            float headingScore = Vector3.Dot((goalPosition - currentPosition).normalized, velocity.normalized);
+            headingScore = Mathf.Max(0, headingScore); // 确保不为负
             
-            // 1. heading score
-            Vector3 dirToGoal = (goalPosition - predictedPosition).normalized;
-            float headingScore = Vector3.Dot(velocity.normalized, dirToGoal);
-            headingScore = Mathf.Pow(headingScore, 2);
+            // 距离评分：鼓励接近目标
+            float distScore = 1.0f / (1.0f + Vector3.Distance(
+                currentPosition + velocity.normalized * PredictionTime, 
+                goalPosition));
             
-            // 2. Distance score
-            float distance = Vector3.Distance(predictedPosition, goalPosition);
-            float distanceScore = 1.0f / (1.0f + distance);
+            // 速度评分：鼓励保持较高速度
+            float velocityScore = velocity.magnitude / MaxSpeed;
             
-            // 3. Speed score
-            float normalizedSpeed = velocity.magnitude / MaxSpeed;
-            float velocityScore = normalizedSpeed;
-            
-            // Improve the score for straight-line motion
-            if (Mathf.Abs(velocity.x) < 0.2f * velocity.magnitude)
-            {
-                velocityScore *= 1.2f;
-            }
-            
-            // Improve the score for high speed
-            if (normalizedSpeed > 0.75f)
-            {
-                velocityScore *= 1.3f;
-            }
-            else if (normalizedSpeed < 0.3f)
-            {
-                velocityScore *= 0.5f;
-            }
-            
-            velocityScore = Mathf.Min(velocityScore, 1.0f);
-            
-            // 4. Obstacle score
+            // 障碍物评分：远离障碍物
             float obstacleScore = EvaluateObstacleDistance(currentPosition, velocity, obstacleLayer);
             
-            // Combine the scores
+            // 总分
             return HeadingWeight * headingScore + 
-                DistanceWeight * distanceScore + 
-                VelocityWeight * velocityScore + 
-                ObstacleWeight * obstacleScore;
+                   DistanceWeight * distScore + 
+                   VelocityWeight * velocityScore + 
+                   ObstacleWeight * obstacleScore;
         }
 
         private float EvaluateObstacleDistance(Vector3 currentPosition, Vector3 velocity, LayerMask obstacleLayer)

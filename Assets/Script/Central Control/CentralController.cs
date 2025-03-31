@@ -49,6 +49,7 @@ namespace CentralControl
         
         // Navigation
         private Graph graph;
+        private GraphConnectivityChecker graphConnectivityChecker;
         private DynamicOccupancyLayer globalOccupancyLayer;
         private bool navMeshInitialized = false;
         private float lastUpdateTime;
@@ -151,6 +152,15 @@ namespace CentralControl
             }
             
             Debug.Log("地图已加载，初始化NavMesh...");
+
+            // 检查地图连接性
+            graph = mapLoader.GetGraph();
+            graphConnectivityChecker = new GraphConnectivityChecker(graph);
+            if (!graphConnectivityChecker.CheckConnectivityUsingFloydWarshall())
+            {
+                Debug.LogError("地图连接性验证失败，请检查地图数据");
+                yield break;
+            }
             
             // 初始化和构建NavMesh
             yield return StartCoroutine(InitializeNavMeshCoroutine());

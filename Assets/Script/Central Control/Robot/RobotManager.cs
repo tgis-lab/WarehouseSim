@@ -20,7 +20,7 @@ namespace CentralControl.RobotControl
         private DynamicOccupancyLayer globalOccupancyLayer;
         private IntersectionAreaManager intersectionAreaManager;
         private List<RobotController> robots = new List<RobotController>();
-        private HashSet<string> usedSpawnPointIds = new HashSet<string>();
+        private HashSet<CellSpace> usedSpawnPoints = new HashSet<CellSpace>();
 
         public int TotalRobots => robots.Count;
         public int BusyRobots => robots.Count(r => !r.IsFree);
@@ -61,52 +61,41 @@ namespace CentralControl.RobotControl
 
         private Vector3 GetValidInitialPosition()
         {
-            // Use a list of cell IDs for spawn points
-            List<string> spawnPointCellIds = new List<string> {"c132", "c133", "c357", "c358", "c139", "c140", "c364", "c365", "c146", "c147", "c371", "c372"};
+            List<CellSpace> spawnPoints = indoorSpace.GetCellSpaceFromLayerType("aisle");
             
-            // Filter out used spawn points
-            List<string> availableSpawnPointIds = spawnPointCellIds.Where(id => !usedSpawnPointIds.Contains(id)).ToList();
-            
-            // If no available spawn points, log a warning and return zero vector
-            if (availableSpawnPointIds.Count == 0)
+            if (spawnPoints.Count == 0)
             {
                 Debug.LogWarning("No available spawn points found.");
                 return Vector3.zero;
             }
             
-            // Pick a random spawn point from the available list
-            string selectedCellId = availableSpawnPointIds[UnityEngine.Random.Range(0, availableSpawnPointIds.Count)];
+            // 过滤出未使用的生成点
+            List<CellSpace> availableSpawnPoints = spawnPoints.Where(sp => !usedSpawnPoints.Contains(sp)).ToList();
             
-            // Mark the selected spawn point as used
-            usedSpawnPointIds.Add(selectedCellId);
-            
-            // Get the center point of the selected cell space
-            var cellSpace = indoorSpace.GetCellSpaceFromId(selectedCellId);
-            if (cellSpace != null)
+            // 如果没有可用的生成点，记录警告并返回零向量
+            if (availableSpawnPoints.Count == 0)
             {
-                Point cellSpaceCenterPoint = (Point)cellSpace.Node;
-                Vector3 cellSpacePosition = new Vector3((float)cellSpaceCenterPoint.X, mapGrid.height + 0.05f, (float)cellSpaceCenterPoint.Y);
-                
-                Debug.Log($"Robot spawn point selected: {selectedCellId} at position {cellSpacePosition}");
-                return cellSpacePosition;
+                Debug.LogWarning("All spawn points are already in use.");
+                return Vector3.zero;
             }
             
-            Debug.LogWarning($"Failed to find cell space for spawn point {selectedCellId}");
-            return Vector3.zero;
+            // 从可用的生成点中随机选择一个
+            CellSpace selectedCellSpace = availableSpawnPoints[UnityEngine.Random.Range(0, availableSpawnPoints.Count)];
+            
+            // 标记选择的生成点为已使用
+            usedSpawnPoints.Add(selectedCellSpace);
+            
+            // 获取选定CellSpace的中心点
+            Point cellSpaceCenterPoint = (Point)selectedCellSpace.Node;
+            Vector3 cellSpacePosition = new Vector3((float)cellSpaceCenterPoint.X, mapGrid.height + 0.05f, (float)cellSpaceCenterPoint.Y);
+            
+            Debug.Log($"Robot spawn point selected: {selectedCellSpace.Id} at position {cellSpacePosition}");
+            return cellSpacePosition;
         }
 
         public void ResetSpawnPoints()
         {
-            usedSpawnPointIds.Clear();
-        }
-
-        public void ReleaseSpawnPoint(string cellId)
-        {
-            if (usedSpawnPointIds.Contains(cellId))
-            {
-                usedSpawnPointIds.Remove(cellId);
-                Debug.Log($"Spawn point {cellId} released.");
-            }
+            usedSpawnPoints.Clear();
         }
 
         private void CreateRobot(int id, Vector3 position)

@@ -110,6 +110,15 @@ namespace CentralControl.RobotControl
         private string currentIntersectionId;
         # endregion
 
+        # region Path Smoothing
+        private List<ConnectionPoint> originalPath = new List<ConnectionPoint>();
+        private List<Vector3> smoothPositions = new List<Vector3>();
+        private List<float> smoothTimes = new List<float>();
+        private List<float> smoothSpeeds = new List<float>();
+        private List<bool> isAuxiliaryPoint = new List<bool>();
+        private int smoothPathIndex = 0;
+        # endregion
+
         # region Path Correction
         private bool needsPathRecovery = false;
         private int pathRecoveryAttempts = 0;
@@ -151,10 +160,10 @@ namespace CentralControl.RobotControl
             
             if (GetComponent<Collider>() == null)
             {
-                CapsuleCollider collider = gameObject.AddComponent<CapsuleCollider>();
-                collider.radius = 0.5f;
-                collider.height = 1.5f;
-                collider.center = new Vector3(0, 0.75f, 0);
+                BoxCollider collider = gameObject.AddComponent<BoxCollider>();
+                
+                collider.size = new Vector3(2.5f, 0.8f, 5.4f); // AGV size
+                collider.center = new Vector3(0, 0.1f, 0.05f); // Adjust collider position
             }
             
             detectionRadius = baseDetectionRadius;
@@ -496,7 +505,36 @@ namespace CentralControl.RobotControl
             
             if (shouldUseDWA)
             {
-                dwaPlanner.PredictionTime = currentNavigationPhase == NavigationPhase.FollowingPath ? 2.0f : 1.2f;
+                // 设置DWA参数 - 根据导航阶段和点类型
+                if (currentNavigationPhase == NavigationPhase.FollowingPath)
+                {
+                    dwaPlanner.PredictionTime = 2.0f;
+                    
+                    // 如果是平滑点，增强障碍物避让
+                    if (smoothPathIndex < smoothPositions.Count && isAuxiliaryPoint[smoothPathIndex])
+                    {
+                        dwaPlanner.ObstacleWeight = 0.6f;
+                        dwaPlanner.HeadingWeight = 0.3f;
+                        
+                        // 检查是否是转弯处
+                        if (IsCornerPoint(smoothPathIndex))
+                        {
+                            dwaPlanner.PredictionTime = 2.5f; // 转弯处使用更长的预测时间
+                        }
+                    }
+                    else
+                    {
+                        // 普通路径点
+                        dwaPlanner.ObstacleWeight = 0.4f;
+                        dwaPlanner.HeadingWeight = 0.4f;
+                    }
+                }
+                else // ApproachingTarget
+                {
+                    dwaPlanner.PredictionTime = 1.2f;
+                    dwaPlanner.ObstacleWeight = 0.7f;
+                    dwaPlanner.HeadingWeight = 0.2f;
+                }
                 
                 if (rb == null)
                 {
@@ -504,22 +542,40 @@ namespace CentralControl.RobotControl
                     return;
                 }
                 
-                var (velocity, needReplan) = dwaPlanner.CalculateVelocity(transform.position, rb.velocity, target);
+                // 根据当前点类型决定是否启用特殊避障模式
+                bool useSpecialAvoidance = smoothPathIndex < smoothPositions.Count && 
+                                        (isAuxiliaryPoint[smoothPathIndex] || IsCornerPoint(smoothPathIndex));
+                                        
+                var (velocity, needReplan) = dwaPlanner.CalculateVelocity(
+                    transform.position, 
+                    rb.velocity, 
+                    target, 
+                    useSpecialAvoidance);
                 
+                // 失败保护：如果DWA无法找到有效速度但距离目标还远，使用基础移动
                 if (velocity.magnitude < 0.1f && Vector3.Distance(transform.position, target) > 1.0f)
                 {
                     Debug.LogWarning($"Robot {Id}: DWA failed to find valid velocity, using basic movement");
-                    
                     velocity = (target - transform.position).normalized * defaultSpeed * 0.3f;
                 }
                 
+                // 限制最大速度
                 float maxAllowedSpeed = currentNavigationPhase == NavigationPhase.FollowingPath ? 
                                     defaultSpeed : defaultSpeed * 0.7f;
                                     
+                // 如果是辅助点或转弯点，进一步降低速度
+                if (smoothPathIndex < smoothPositions.Count && 
+                    (isAuxiliaryPoint[smoothPathIndex] || IsCornerPoint(smoothPathIndex)))
+                {
+                    maxAllowedSpeed *= 0.85f; // 转弯处降低到85%速度
+                }
+                
                 Vector3 targetVelocity = Vector3.ClampMagnitude(velocity, maxAllowedSpeed);
                 
+                // 平滑应用速度
                 rb.velocity = Vector3.Lerp(rb.velocity, targetVelocity, 0.3f);
                 
+                // 更新朝向
                 if (rb.velocity.magnitude > 0.1f)
                 {
                     Quaternion targetRotation = Quaternion.LookRotation(rb.velocity.normalized);
@@ -658,9 +714,7 @@ namespace CentralControl.RobotControl
         {
             // If navigation is disabled or emergency stopped, do not move
             if (!navigationEnabled || isEmergencyStopped) return;
-            
-            if (currentPath == null || currentPath.Count == 0 || isWaitingForPicking)
-                return;
+            if (currentPath == null || currentPath.Count == 0 || isWaitingForPicking) return;
 
             try
             {
@@ -671,24 +725,87 @@ namespace CentralControl.RobotControl
                 switch (currentNavigationPhase)
                 {
                     case NavigationPhase.FollowingPath:
+                        // 检查是否到达路径终点
                         if (currentPathIndex >= currentPath.Count)
                         {
                             SwitchToApproachingTarget();
                             return;
                         }
 
-                        // Next connectionPoint
-                        currentTarget = GetPointVector3((Point)currentPath[currentPathIndex].Point);
-                        acceptanceRadius = pathPointAcceptanceRadius;
-
-                        // Check if reached current connectionPoint
-                        if (Vector3.Distance(transform.position, currentTarget) < acceptanceRadius)
+                        // 使用平滑路径或原始路径点
+                        if (smoothPathIndex < smoothPositions.Count)
                         {
-                            // Move to next point
-                            currentPathIndex++;
+                            // 使用平滑路径点
+                            currentTarget = smoothPositions[smoothPathIndex];
                             
-                            // Switch to approaching target phase
-                            if (currentPathIndex >= currentPath.Count)
+                            // 根据点类型设置接受半径
+                            acceptanceRadius = isAuxiliaryPoint[smoothPathIndex] ? 
+                                (pathPointAcceptanceRadius * 0.6f) : pathPointAcceptanceRadius;
+                            
+                            // 检查是否到达当前点
+                            if (Vector3.Distance(transform.position, currentTarget) < acceptanceRadius)
+                            {
+                                // 移动到下一个平滑点
+                                smoothPathIndex++;
+                                
+                                // 如果到达了原始点，也更新原始路径索引
+                                if (smoothPathIndex < smoothPositions.Count && !isAuxiliaryPoint[smoothPathIndex])
+                                {
+                                    // 查找对应的原始点
+                                    UpdateOriginalPathIndex();
+                                    
+                                    // 检查是否完成了全部原始点
+                                    if (currentPathIndex >= currentPath.Count)
+                                    {
+                                        SwitchToApproachingTarget();
+                                        return;
+                                    }
+                                }
+                                
+                                // 如果所有平滑点都用完了
+                                if (smoothPathIndex >= smoothPositions.Count)
+                                {
+                                    // 检查原始路径是否也完成
+                                    if (currentPathIndex >= currentPath.Count)
+                                    {
+                                        SwitchToApproachingTarget();
+                                        return;
+                                    }
+                                    else
+                                    {
+                                        // 继续使用原始路径点
+                                        currentTarget = GetPointVector3((Point)currentPath[currentPathIndex].Point);
+                                    }
+                                }
+                                
+                                return; // 已经处理完这一帧的移动
+                            }
+                        }
+                        else
+                        {
+                            // 如果没有平滑路径或平滑路径用完，使用原始路径点
+                            if (currentPathIndex < currentPath.Count)
+                            {
+                                currentTarget = GetPointVector3((Point)currentPath[currentPathIndex].Point);
+                                acceptanceRadius = pathPointAcceptanceRadius;
+                                
+                                // 检查是否到达当前连接点
+                                if (Vector3.Distance(transform.position, currentTarget) < acceptanceRadius)
+                                {
+                                    // 移动到下一个点
+                                    currentPathIndex++;
+                                    
+                                    // 检查是否到了路径终点
+                                    if (currentPathIndex >= currentPath.Count)
+                                    {
+                                        SwitchToApproachingTarget();
+                                        return;
+                                    }
+                                    
+                                    return; // 已经处理完这一帧的移动
+                                }
+                            }
+                            else
                             {
                                 SwitchToApproachingTarget();
                                 return;
@@ -718,6 +835,20 @@ namespace CentralControl.RobotControl
                 // Move according to current navigation phase
                 if (isDWAEnabled)
                 {
+                    // 根据当前阶段和点类型配置DWA
+                    bool isSpecialPoint = false;
+                    
+                    if (currentNavigationPhase == NavigationPhase.FollowingPath && 
+                        smoothPathIndex < smoothPositions.Count)
+                    {
+                        // 检查是否是辅助点或转弯点
+                        isSpecialPoint = isAuxiliaryPoint[smoothPathIndex] || IsCornerPoint(smoothPathIndex);
+                    }
+                    
+                    // 针对不同点类型配置DWA
+                    ConfigureDWAParameters(false, false, isSpecialPoint);
+                    
+                    // 使用DWA进行移动
                     MoveTowards(currentTarget);
                 }
                 else
@@ -725,7 +856,7 @@ namespace CentralControl.RobotControl
                     DirectPathFollow(currentTarget);
                 }
                 
-                // Path deviation
+                // Path deviation check
                 if (IsOffPath() && currentNavigationPhase == NavigationPhase.FollowingPath)
                 {
                     CorrectPathDeviation();
@@ -737,6 +868,47 @@ namespace CentralControl.RobotControl
                 Debug.LogError($"Robot {Id}: UpdateMovement error - {ex.Message}\n{ex.StackTrace}");
                 needsPathRecovery = true;
             }
+        }
+
+        private void UpdateOriginalPathIndex()
+        {
+            if (smoothPathIndex >= smoothPositions.Count) return;
+            
+            // 如果是辅助点，不更新原始索引
+            if (isAuxiliaryPoint[smoothPathIndex])
+                return;
+                
+            // 获取当前平滑点
+            Vector3 currentSmoothPos = smoothPositions[smoothPathIndex];
+            
+            // 在原始路径中找到匹配点
+            for (int i = currentPathIndex; i < currentPath.Count; i++)
+            {
+                Vector3 origPos = GetPointVector3((Point)currentPath[i].Point);
+                
+                // 如果距离很近，认为是同一个点
+                if (Vector3.Distance(currentSmoothPos, origPos) < 0.1f)
+                {
+                    currentPathIndex = i;
+                    return;
+                }
+            }
+        }
+
+        private bool IsCornerPoint(int index)
+        {
+            if (index <= 0 || index >= smoothPositions.Count - 1)
+                return false;
+                
+            Vector3 prev = smoothPositions[index - 1];
+            Vector3 current = smoothPositions[index];
+            Vector3 next = smoothPositions[index + 1];
+            
+            Vector3 dir1 = (current - prev).normalized;
+            Vector3 dir2 = (next - current).normalized;
+            
+            float angle = Vector3.Angle(dir1, dir2);
+            return angle > 30f;
         }
 
         private bool IsOffPath()
@@ -918,7 +1090,7 @@ namespace CentralControl.RobotControl
                 // Adjust DWA parameters
                 if (shouldActivate)
                 {
-                    ConfigureDWAParameters(obstacleDetected, inSpecialArea);
+                    ConfigureDWAParameters(obstacleDetected, inSpecialArea, false);
                 }
             }
             
@@ -998,7 +1170,7 @@ namespace CentralControl.RobotControl
             return false;
         }
 
-        private void ConfigureDWAParameters(bool obstacleDetected, bool inSpecialArea)
+        private void ConfigureDWAParameters(bool obstacleDetected=false, bool inSpecialArea=false, bool isSpecialpoint=false)
         {
             if (obstacleDetected || inSpecialArea)
             {
@@ -1011,6 +1183,15 @@ namespace CentralControl.RobotControl
                 dwaPlanner.AngleSamples = 24;
                 
                 Debug.Log($"Robot {Id}: DWA配置为障碍物避让模式");
+            }
+            else if (isSpecialpoint)
+            {
+                dwaPlanner.ObstacleWeight = 0.6f;
+                dwaPlanner.HeadingWeight = 0.3f;
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.8f;
+                dwaPlanner.PredictionTime = 2.0f;
+                
+                Debug.Log($"Robot {Id}: DWA配置为转弯模式");
             }
             else
             {
