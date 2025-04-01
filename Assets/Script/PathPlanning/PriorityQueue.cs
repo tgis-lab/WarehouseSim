@@ -1,66 +1,152 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using System.Collections;
+
+/// <summary>
+/// 优先队列实现
+/// </summary>
 
 namespace PathPlanning
 {
-    public class PriorityQueue<TElement, TPriority> where TPriority : IComparable<TPriority>
+    /// <summary>
+    /// 优先队列实现
+    /// </summary>
+    public class PriorityQueue<T>
     {
-        private List<(TElement Element, TPriority Priority)> _elements = new List<(TElement, TPriority)>();
-
-        public int Count => _elements.Count;
-
-        public void Enqueue(TElement element, TPriority priority)
+        private List<(T Item, float Priority)> elements = new List<(T, float)>();
+        private Dictionary<T, int> indexMap = new Dictionary<T, int>();
+        
+        public int Count => elements.Count;
+        
+        public void Enqueue(T item, float priority)
         {
-            _elements.Add((element, priority));
-            int ci = _elements.Count - 1;
-            while (ci > 0)
-            {
-                int pi = (ci - 1) / 2;
-                if (_elements[ci].Priority.CompareTo(_elements[pi].Priority) >= 0)
-                    break;
-                var tmp = _elements[ci];
-                _elements[ci] = _elements[pi];
-                _elements[pi] = tmp;
-                ci = pi;
-            }
+            elements.Add((item, priority));
+            indexMap[item] = elements.Count - 1;
+            BubbleUp(elements.Count - 1);
         }
-
-        public bool TryDequeue(out TElement element, out TPriority priority)
+        
+        public T Dequeue()
         {
-            if (_elements.Count == 0)
+            if (elements.Count == 0)
+                throw new InvalidOperationException("Queue is empty");
+                
+            T item = elements[0].Item;
+            
+            // 将最后一个元素移到顶部
+            int lastIndex = elements.Count - 1;
+            elements[0] = elements[lastIndex];
+            elements.RemoveAt(lastIndex);
+            
+            // 更新索引映射
+            indexMap.Remove(item);
+            
+            if (elements.Count > 0)
             {
-                element = default;
+                indexMap[elements[0].Item] = 0;
+                BubbleDown(0);
+            }
+            
+            return item;
+        }
+        
+        public bool TryDequeue(out T item, out float priority)
+        {
+            if (elements.Count == 0)
+            {
+                item = default;
                 priority = default;
                 return false;
             }
-
-            element = _elements[0].Element;
-            priority = _elements[0].Priority;
-
-            int li = _elements.Count - 1;
-            _elements[0] = _elements[li];
-            _elements.RemoveAt(li);
-
-            li--;
-            int pi = 0;
+            
+            item = elements[0].Item;
+            priority = elements[0].Priority;
+            
+            // 将最后一个元素移到顶部
+            int lastIndex = elements.Count - 1;
+            elements[0] = elements[lastIndex];
+            elements.RemoveAt(lastIndex);
+            
+            // 更新索引映射
+            indexMap.Remove(item);
+            
+            if (elements.Count > 0)
+            {
+                indexMap[elements[0].Item] = 0;
+                BubbleDown(0);
+            }
+            
+            return true;
+        }
+        
+        public bool Contains(T item)
+        {
+            return indexMap.ContainsKey(item);
+        }
+        
+        public void UpdatePriority(T item, float newPriority)
+        {
+            if (!indexMap.TryGetValue(item, out int index))
+                throw new ArgumentException("Item not found in queue");
+                
+            float oldPriority = elements[index].Priority;
+            elements[index] = (item, newPriority);
+            
+            if (newPriority < oldPriority)
+                BubbleUp(index);
+            else if (newPriority > oldPriority)
+                BubbleDown(index);
+        }
+        
+        private void BubbleUp(int index)
+        {
+            while (index > 0)
+            {
+                int parentIndex = (index - 1) / 2;
+                
+                if (elements[index].Priority >= elements[parentIndex].Priority)
+                    break;
+                    
+                Swap(index, parentIndex);
+                index = parentIndex;
+            }
+        }
+        
+        private void BubbleDown(int index)
+        {
+            int lastIndex = elements.Count - 1;
+            
             while (true)
             {
-                int ci = pi * 2 + 1;
-                if (ci > li) break;
-                int rc = ci + 1;
-                if (rc <= li && _elements[rc].Priority.CompareTo(_elements[ci].Priority) < 0)
-                    ci = rc;
-                if (_elements[pi].Priority.CompareTo(_elements[ci].Priority) <= 0)
+                int leftChildIndex = 2 * index + 1;
+                int rightChildIndex = 2 * index + 2;
+                int smallestIndex = index;
+                
+                // 找出三个节点中优先级最小的
+                if (leftChildIndex <= lastIndex && elements[leftChildIndex].Priority < elements[smallestIndex].Priority)
+                    smallestIndex = leftChildIndex;
+                    
+                if (rightChildIndex <= lastIndex && elements[rightChildIndex].Priority < elements[smallestIndex].Priority)
+                    smallestIndex = rightChildIndex;
+                    
+                if (smallestIndex == index)
                     break;
-                var tmp = _elements[ci];
-                _elements[ci] = _elements[pi];
-                _elements[pi] = tmp;
-                pi = ci;
+                    
+                Swap(index, smallestIndex);
+                index = smallestIndex;
             }
-
-            return true;
+        }
+        
+        private void Swap(int i, int j)
+        {
+            var temp = elements[i];
+            elements[i] = elements[j];
+            elements[j] = temp;
+            
+            // 更新索引映射
+            indexMap[elements[i].Item] = i;
+            indexMap[elements[j].Item] = j;
         }
     }
 }

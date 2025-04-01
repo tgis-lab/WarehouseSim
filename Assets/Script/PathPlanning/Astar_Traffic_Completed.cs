@@ -1,42 +1,28 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Map;
-using System.Diagnostics;
 using NetTopologySuite.Geometries;
-using PointLocation = Map.Graph.PointLocation;
+using System.Diagnostics;
 
 namespace PathPlanning
 {
+    /// <summary>
+    /// Smooth Path Point information
+    /// </summary>
     public class SmoothPathPoint
     {
-        public ConnectionPoint ConnectionPoint;
-        public Vector3 Position;
-        public float Time;
-        public float Speed;
-        public bool IsAuxiliary;
-        
-        public SmoothPathPoint(ConnectionPoint point, float time, float speed, bool isAuxiliary = false)
-        {
-            ConnectionPoint = point;
-            Position = new Vector3((float)((Point)point.Point).X, 0, (float)((Point)point.Point).Y);
-            Time = time;
-            Speed = speed;
-            IsAuxiliary = isAuxiliary;
-        }
-        
-        public SmoothPathPoint(ConnectionPoint relatedPoint, Vector3 position, float time, float speed)
-        {
-            ConnectionPoint = relatedPoint;
-            Position = position;
-            Time = time;
-            Speed = speed;
-            IsAuxiliary = true;
-        }
+        public ConnectionPoint ConnectionPoint { get; set; }
+        public Vector3 Position { get; set; }
+        public float Time { get; set; }
+        public float Speed { get; set; }
+        public bool IsAuxiliary { get; set; }
     }
 
+    /// <summary>
+    /// Robot Smooth Path information
+    /// </summary>
     public class RobotSmoothPathInfo
     {
         public long Timestamp { get; set; }
@@ -47,9 +33,80 @@ namespace PathPlanning
         public List<bool> IsAuxiliary { get; set; }
     }
     
+    /// <summary>
+    /// Path Segment information
+    /// </summary>
+    public class PathSegment
+    {
+        public ConnectionPoint From { get; set; }
+        public ConnectionPoint To { get; set; }
+        public float StartTime { get; set; }  // Departure time from From
+        public float EndTime { get; set; }    // Arrival time at To
+        public float Speed { get; set; }      // Speed during the segment
+        
+        public PathSegment(ConnectionPoint from, ConnectionPoint to, float startTime, float endTime, float speed)
+        {
+            From = from;
+            To = to;
+            StartTime = startTime;
+            EndTime = endTime;
+            Speed = speed;
+        }
+    }
+    
+    /// <summary>
+    /// Time-Space Path information
+    /// </summary>
+    public class TimeSpacePath
+    {
+        public List<PathSegment> Segments { get; private set; }
+        public List<ConnectionPoint> Points { get; private set; }
+        
+        public TimeSpacePath()
+        {
+            Segments = new List<PathSegment>();
+            Points = new List<ConnectionPoint>();
+        }
+        
+        public void AddSegment(PathSegment segment)
+        {
+            Segments.Add(segment);
+            
+            // Maintain the list of points
+            if (Points.Count == 0 || Points[Points.Count-1].Id != segment.From.Id)
+            {
+                Points.Add(segment.From);
+            }
+            Points.Add(segment.To);
+        }
+        
+        public void AddTerminalPoint(ConnectionPoint point, float arrivalTime)
+        {
+            // For terminal points, we only add the point if it's not already present
+            if (Points.Count == 0 || Points[Points.Count-1].Id != point.Id)
+            {
+                Points.Add(point);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// A* Search Result information
+    /// </summary>
+    public class AStarSearchResult
+    {
+        public bool success;
+        public Dictionary<RoutePoint, Tuple<RoutePoint, float, float>> previous;
+    }
+    
     public class Astar_Traffic
     {
         private static Dictionary<string, List<RobotSmoothPathInfo>> robotSmoothPaths = new Dictionary<string, List<RobotSmoothPathInfo>>();
+        
+        // Time delay and retry attempts for smart avoidance
+        private const int MAX_RETRY_ATTEMPTS = 3;
+        private const float TIME_DELAY_INCREMENT = 0.5f;
+        
         public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId) AstarAlgorithm(
             Graph graph, 
             IndoorSpace indoorSpace,
@@ -65,445 +122,725 @@ namespace PathPlanning
             float maxDeceleration,
             SearchMethod searchMethod)
         {
-            // Input validation
-            if (graph == null)
+            if (graph == null || indoorSpace == null || startPosition == null || endPosition == null)
             {
-                UnityEngine.Debug.LogError("Graph is null");
+                UnityEngine.Debug.LogError($"Robot {robotId}: Invalid parameters for path planning");
                 return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
             }
-
-            if (startPosition == null || endPosition == null)
-            {
-                UnityEngine.Debug.LogError("Start position or end position is null");
-                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
-            }
-
-            if (startPosition.ConnectionPoint == null || endPosition.ConnectionPoint == null)
-            {
-                UnityEngine.Debug.LogError("Start or end ConnectionPoint is null");
-                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
-            }
-
-            UnityEngine.Debug.Log($"Starting A* algorithm from {startPosition.ConnectionPoint.Id} to {endPosition.ConnectionPoint.Id}");
-
+            
+            // Create a new traffic rule knowledge base
+            TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
+            
+            // Create a new plan ID
+            string newPlanId = $"Plan_{robotId}_{DateTime.Now.Ticks}";
+            
+            // If there is a current plan ID, clear the previous plan occupancy
             if (!string.IsNullOrEmpty(currentPlanId))
             {
-                ClearUnusedReservations(personalOccupancyLayer, robotId, currentPlanId, startTime);
-            }
-
-            string newPlanId;
-            if (string.IsNullOrEmpty(currentPlanId))
-            {
-                // If it's a new plan, generate a new ID with timestamp
-                newPlanId = $"Robot_{robotId}_Plan_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
-            }
-            else
-            {
-                // If it's a replan, append timestamp to the current plan ID
-                string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-                newPlanId = $"{currentPlanId}_Replan_{timestamp}";
+                personalOccupancyLayer.ClearPlannedOccupancy(robotId, currentPlanId, startTime);
+                globalOccupancyLayer.ClearPlannedOccupancy(robotId, currentPlanId, startTime);
             }
             
+            // Smart Avoidance Strategy: Try multiple path planning attempts
+            for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++)
+            {
+                // Calculate the current start time
+                float currentStartTime = startTime + attempt * TIME_DELAY_INCREMENT;
+                
+                if (attempt > 0)
+                {
+                    UnityEngine.Debug.Log($"Robot {robotId}: Path planning retry #{attempt}, dalay: {TIME_DELAY_INCREMENT * attempt:F2} seconds.");
+                }
+                
+                // A* Search
+                var searchResult = AstarSearch(
+                    graph, 
+                    indoorSpace, 
+                    globalOccupancyLayer, 
+                    startPosition, 
+                    endPosition, 
+                    robotId, 
+                    trafficRules,
+                    currentStartTime, 
+                    defaultSpeed, 
+                    maxAcceleration, 
+                    maxDeceleration, 
+                    searchMethod);
+                
+                // Check if the search was successful
+                if (searchResult.success)
+                {
+                    // Rebuild the time-space path
+                    var timeSpacePath = RebuildTimeSpacePath(
+                        endPosition, 
+                        searchResult.previous, 
+                        currentStartTime, 
+                        defaultSpeed
+                    );
+                    
+                    // Generate smooth path
+                    var smoothPath = GenerateSmoothPath(timeSpacePath);
+                    
+                    // Save the smooth path for the robot
+                    SaveSmoothPathForRobot(robotId, smoothPath);
+                    
+                    // Reserve the path occupancy
+                    ReservePathOccupancyPrecise(
+                        graph, 
+                        indoorSpace, 
+                        personalOccupancyLayer, 
+                        timeSpacePath, 
+                        robotId, 
+                        newPlanId
+                    );
+                    
+                    var (path, times, speeds) = ConvertTimeSpacePathToLists(timeSpacePath);
+                    
+                    // UnityEngine.Debug.Log($"Robot {robotId}: 成功找到路径，点数: {path.Count}, 时间点数: {times.Count}, 速度点数: {speeds.Count}");
+                    return (path, times, speeds, newPlanId);
+                }
+            }
+            
+            // All attempts failed
+            UnityEngine.Debug.LogError($"Robot {robotId}: path planning failed, attempting to give up after {MAX_RETRY_ATTEMPTS} attempts.");
+            return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
+        }
+        
+        /// <summary>
+        /// A* Search algorithm implementation
+        /// </summary>
+        private static AStarSearchResult AstarSearch(
+            Graph graph, 
+            IndoorSpace indoorSpace, 
+            DynamicOccupancyLayer globalOccupancyLayer, 
+            RoutePoint startPosition, 
+            RoutePoint endPosition, 
+            string robotId,
+            TrafficRuleKnowledge trafficRules,
+            float startTime, 
+            float defaultSpeed, 
+            float maxAcceleration, 
+            float maxDeceleration, 
+            SearchMethod searchMethod)
+        {
             var stopwatch = new Stopwatch();
             stopwatch.Start();
-            float lastSpeed = defaultSpeed;
-            Dictionary<RoutePoint, float> gScore = new Dictionary<RoutePoint, float>();
-            Dictionary<RoutePoint, float> fScore = new Dictionary<RoutePoint, float>();
-            Dictionary<RoutePoint, Tuple<RoutePoint, float, float>> previous = new Dictionary<RoutePoint, Tuple<RoutePoint, float, float>>();
-            Dictionary<RoutePoint, float> timeAtNode = new Dictionary<RoutePoint, float>();
-            var openSet = new PriorityQueue<RoutePoint, float>();
             
-            foreach (var node in graph.RoutePoints)
+            var result = new AStarSearchResult
             {
-                gScore[node] = float.PositiveInfinity;
-                fScore[node] = float.PositiveInfinity;
-                timeAtNode[node] = startTime;
-            }
-
-            gScore[startPosition] = 0;
-            fScore[startPosition] = HeuristicCostEstimate(personalOccupancyLayer, startPosition, endPosition, defaultSpeed, searchMethod);
-            openSet.Enqueue(startPosition, fScore[startPosition]);
-            timeAtNode[startPosition] = startTime;
-
-            while (openSet.TryDequeue(out RoutePoint current, out float currentPriority))
+                success = false,
+                previous = new Dictionary<RoutePoint, Tuple<RoutePoint, float, float>>()
+            };
+            
+            var openSet = new PriorityQueue<RoutePoint>();
+            var closedSet = new HashSet<RoutePoint>();
+            
+            var g_score = new Dictionary<RoutePoint, float>();
+            g_score[startPosition] = 0;
+            
+            var previous = new Dictionary<RoutePoint, Tuple<RoutePoint, float, float>>();
+            
+            float h_score = CalculateHeuristic(startPosition, endPosition, searchMethod, defaultSpeed);
+            
+            float f_score = g_score[startPosition] + h_score;
+            
+            openSet.Enqueue(startPosition, f_score);
+            
+            var current_speed = new Dictionary<RoutePoint, float>();
+            current_speed[startPosition] = defaultSpeed;
+            
+            var arrival_time = new Dictionary<RoutePoint, float>();
+            arrival_time[startPosition] = startTime;
+            
+            while (openSet.Count > 0)
             {
-                if (current == null || current.ConnectionPoint == null)
+                RoutePoint current;
+                float currentPriority;
+                
+                if (!openSet.TryDequeue(out current, out currentPriority))
                 {
-                    UnityEngine.Debug.LogError("Encountered null RoutePoint or ConnectionPoint");
-                    continue;
+                    break;
                 }
-
+                
                 if (current == endPosition)
                 {
                     stopwatch.Stop();
                     UnityEngine.Debug.Log($"A* Algorithm Execution Time: {stopwatch.ElapsedMilliseconds}ms");
-                    var rawPath = new List<ConnectionPoint>();
-                    var rawTimes = new List<float>();
-                    var rawSpeeds = new List<float>();
                     
-                    // Reconstruct path
-                    RoutePoint currentRoutePoint = endPosition;
-                    while (currentRoutePoint != null)
+                    result.success = true;
+                    result.previous = previous;
+                    
+                    return result;
+                }
+                
+                closedSet.Add(current);
+                
+                foreach (var neighborConnectionPoint in current.Children)
+                {
+                    var neighbor = graph.GetRoutePointFormConnectionPoint(neighborConnectionPoint);
+                    
+                    if (neighbor == null || closedSet.Contains(neighbor))
                     {
-                        if (currentRoutePoint.ConnectionPoint == null)
-                        {
-                            UnityEngine.Debug.LogError($"Encountered RoutePoint with null ConnectionPoint while reconstructing path");
-                            break;
-                        }
-
-                        rawPath.Add(currentRoutePoint.ConnectionPoint);
-                        
-                        if (!previous.TryGetValue(currentRoutePoint, out var previousInfo))
-                        {
-                            break;
-                        }
-
-                        // 使用ModifySpeed计算的速度和时间
-                        rawSpeeds.Add(previousInfo.Item2);
-                        rawTimes.Add(previousInfo.Item3);
-                        currentRoutePoint = previousInfo.Item1;
+                        continue;
                     }
-
-                    // 反转得到正向路径
-                    rawPath.Reverse();
-                    rawTimes.Reverse();
-                    rawSpeeds.Reverse();
-
-                    // 修复时间列表 - 添加起点到达时间到开头
-                    if (rawPath.Count > 0 && rawTimes.Count == rawPath.Count - 1)
+                    
+                    float distance = CalculateDistance(current, neighbor);
+                    
+                    float currentSpeed = current_speed[current];
+                    float currentTime = arrival_time[current];
+                    
+                    RoutePoint prevPoint = null;
+                    if (previous.TryGetValue(current, out var prevInfo))
                     {
-                        UnityEngine.Debug.Log("Add arrival time at start point...");
-                        rawTimes.Insert(0, startTime);  // 起点的到达时间是startTime
+                        prevPoint = prevInfo.Item1;
                     }
-
-                    // 修复速度列表 - 添加终点速度到末尾
-                    if (rawPath.Count > 0 && rawSpeeds.Count == rawPath.Count - 1)
+                    
+                    var (newSpeed, travelTime) = trafficRules.ModifySpeed(
+                        current,
+                        neighbor,
+                        currentSpeed,
+                        defaultSpeed,
+                        distance,
+                        maxAcceleration,
+                        maxDeceleration,
+                        prevPoint);
+                    
+                    float tentative_g_score = g_score[current] + travelTime;
+                    float arrivalTime = currentTime + travelTime;
+                    
+                    bool hasConflict = CheckConflict(
+                        neighbor.ConnectionPoint,
+                        arrivalTime,
+                        globalOccupancyLayer,
+                        robotId);
+                    
+                    if (hasConflict)
                     {
-                        UnityEngine.Debug.Log("Add speed arriving end point...");
+                        tentative_g_score += 2.0f;
+                    }
+                    
+                    if (!g_score.ContainsKey(neighbor) || tentative_g_score < g_score[neighbor])
+                    {
+                        previous[neighbor] = new Tuple<RoutePoint, float, float>(current, newSpeed, arrivalTime);
+                        g_score[neighbor] = tentative_g_score;
+                        current_speed[neighbor] = newSpeed;
+                        arrival_time[neighbor] = arrivalTime;
                         
-                        if (rawSpeeds.Count > 0)
+                        float new_h_score = CalculateHeuristic(neighbor, endPosition, searchMethod, newSpeed);
+                        float new_f_score = g_score[neighbor] + new_h_score;
+                        
+                        if (openSet.Contains(neighbor))
                         {
-                            // 使用前一个点的速度作为终点速度（或其他合适的值）
-                            rawSpeeds.Add(lastSpeed);
+                            openSet.UpdatePriority(neighbor, new_f_score);
                         }
                         else
                         {
-                            // 如果速度列表为空，使用默认速度
-                            rawSpeeds.Add(defaultSpeed);
-                        }
-                    }
-                    
-                    // 如果路径无效，返回空结果
-                    if (rawPath.Count < 2)
-                    {
-                        return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), newPlanId);
-                    }
-                    
-                    // 生成平滑路径
-                    var smoothPath = GenerateSmoothPath(rawPath, rawTimes, rawSpeeds, maxAcceleration, maxDeceleration);
-                    
-                    // 从平滑路径中提取原始点路径（用于返回）
-                    var finalPath = new List<ConnectionPoint>();
-                    var finalTimes = new List<float>();
-                    var finalSpeeds = new List<float>();
-                    
-                    foreach (var point in smoothPath)
-                    {
-                        // 只添加非辅助点
-                        if (!point.IsAuxiliary)
-                        {
-                            finalPath.Add(point.ConnectionPoint);
-                            finalTimes.Add(point.Time);
-                            finalSpeeds.Add(point.Speed);
-                        }
-                    }
-                    
-                    // 保存完整平滑路径到RobotController
-                    SaveSmoothPathForRobot(robotId, smoothPath);
-                    
-                    ReservePathOccupancy(graph, indoorSpace, personalOccupancyLayer, finalPath, finalTimes, finalSpeeds, robotId, newPlanId);
-
-                    // 返回原始点路径（不含辅助点）
-                    return (finalPath, finalTimes, finalSpeeds, newPlanId);
-                }
-
-                foreach (var neighborConnection in current.Children)
-                {
-                    RoutePoint neighbor = graph.GetRoutePointFormConnectionPoint(neighborConnection);
-                    if (neighbor == null) continue;
-                    
-                    Layer layerOfNeighbor = graph.GetLayerFromConnectionPoint(neighborConnection, false);
-                    float currentSpeed = ModifySpeed(graph, current.ConnectionPoint, neighborConnection, defaultSpeed, lastSpeed, 
-                                                    layerOfNeighbor, Time.deltaTime, maxAcceleration, maxDeceleration);
-                    float distance = (float)current.ConnectionPoint.Point.Distance(neighborConnection.Point);
-                    float timeToReachNeighbor = distance / currentSpeed;
-                    float arrivalTimeAtNeighbor = timeAtNode[current] + timeToReachNeighbor;
-
-                    CellSpace neighborCellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(neighborConnection);
-                    if (neighborCellSpace != null)
-                    {
-                        var personalOccupancies = personalOccupancyLayer.GetOccupancies(
-                            neighborCellSpace.Id, 
-                            arrivalTimeAtNeighbor, 
-                            arrivalTimeAtNeighbor + timeToReachNeighbor
-                        );
-                        
-                        var globalOccupancies = globalOccupancyLayer.GetOccupancies(
-                            neighborCellSpace.Id,
-                            arrivalTimeAtNeighbor,
-                            arrivalTimeAtNeighbor + timeToReachNeighbor
-                        );
-                        bool isOccupied = personalOccupancies.Any() || globalOccupancies.Any();
-
-                        float occupancyPenalty = isOccupied ? float.PositiveInfinity : 0f;
-
-                        float tentativeGScore = gScore[current] + (distance / currentSpeed) + occupancyPenalty;
-
-                        if (tentativeGScore < gScore[neighbor])
-                        {
-                            previous[neighbor] = new Tuple<RoutePoint, float, float>(current, currentSpeed, arrivalTimeAtNeighbor);
-                            gScore[neighbor] = tentativeGScore;
-                            timeAtNode[neighbor] = arrivalTimeAtNeighbor;
-                            float f = gScore[neighbor] + HeuristicCostEstimate(personalOccupancyLayer, neighbor, endPosition, currentSpeed, searchMethod);
-                            fScore[neighbor] = f;
-                            openSet.Enqueue(neighbor, f);
-                            lastSpeed = currentSpeed;
+                            openSet.Enqueue(neighbor, new_f_score);
                         }
                     }
                 }
             }
-
-            UnityEngine.Debug.LogWarning($"No path found from {startPosition.ConnectionPoint.Id} to {endPosition.ConnectionPoint.Id}");
-            return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
+            
+            stopwatch.Stop();
+            UnityEngine.Debug.Log($"A* search failed: {stopwatch.ElapsedMilliseconds}ms");
+            return result;
         }
-
-        private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ReconstructPath(
-            Dictionary<RoutePoint, Tuple<RoutePoint, float, float>> cameFrom, 
-            RoutePoint current, 
-            float initialSpeed)
+        
+        /// <summary>
+        /// Rebuild the time-space path from the end position to the start position
+        /// </summary>
+        private static TimeSpacePath RebuildTimeSpacePath(
+            RoutePoint endPosition, 
+            Dictionary<RoutePoint, Tuple<RoutePoint, float, float>> previous,
+            float startTime,
+            float defaultSpeed)
+        {
+            var timeSpacePath = new TimeSpacePath();
+            
+            List<RoutePoint> reversedPath = new List<RoutePoint>();
+            RoutePoint currentPoint = endPosition;
+            
+            while (currentPoint != null)
+            {
+                reversedPath.Add(currentPoint);
+                
+                if (!previous.TryGetValue(currentPoint, out var previousInfo))
+                {
+                    break;
+                }
+                
+                currentPoint = previousInfo.Item1;
+            }
+            
+            reversedPath.Reverse();
+            
+            if (reversedPath.Count <= 1)
+            {
+                if (reversedPath.Count == 1)
+                {
+                    timeSpacePath.AddTerminalPoint(reversedPath[0].ConnectionPoint, startTime);
+                }
+                return timeSpacePath;
+            }
+            
+            float currentTime = startTime;
+            
+            for (int i = 0; i < reversedPath.Count - 1; i++)
+            {
+                RoutePoint fromPoint = reversedPath[i];
+                RoutePoint toPoint = reversedPath[i + 1];
+                
+                float segmentSpeed;
+                float arrivalTime;
+                
+                // Trace back the path to find the previous point and its speed
+                if (previous.TryGetValue(toPoint, out var info) && info.Item1 == fromPoint)
+                {
+                    segmentSpeed = info.Item2;
+                    arrivalTime = info.Item3;
+                }
+                else
+                {
+                    // Backup: if no record is found, use default speed and calculate distance
+                    float distance = CalculateDistance(fromPoint, toPoint);
+                    segmentSpeed = defaultSpeed;
+                    arrivalTime = currentTime + (distance / segmentSpeed);
+                    UnityEngine.Debug.LogWarning($"Cannot find the info from {fromPoint.ConnectionPoint.Id} to {toPoint.ConnectionPoint.Id}, using estimated speed and time.");
+                }
+                
+                var segment = new PathSegment(
+                    fromPoint.ConnectionPoint,
+                    toPoint.ConnectionPoint,
+                    currentTime,
+                    arrivalTime,
+                    segmentSpeed
+                );
+                
+                timeSpacePath.AddSegment(segment);
+                
+                // Update the current time for the next segment
+                currentTime = arrivalTime;
+            }
+            
+            return timeSpacePath;
+        }
+        
+        /// <summary>
+        /// Convert the time-space path to lists of points, times, and speeds
+        /// </summary>
+        private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ConvertTimeSpacePathToLists(TimeSpacePath timeSpacePath)
         {
             var path = new List<ConnectionPoint>();
             var times = new List<float>();
             var speeds = new List<float>();
-            float speed = initialSpeed;
-
-            while (current != null)
+            
+            // Convert the path points to a list
+            foreach (var point in timeSpacePath.Points)
             {
-                if (current.ConnectionPoint == null)
-                {
-                    UnityEngine.Debug.LogError($"Encountered RoutePoint with null ConnectionPoint while reconstructing path");
-                    break;
-                }
-
-                path.Add(current.ConnectionPoint);
-                speeds.Add(speed);
-
-                if (!cameFrom.TryGetValue(current, out var previousInfo))
-                {
-                    break;
-                }
-
-                times.Add(previousInfo.Item3);
-                speed = previousInfo.Item2;
-                current = previousInfo.Item1;
+                path.Add(point);
             }
-
-            path.Reverse();
-            times.Reverse();
-            speeds.Reverse();
-
-            if (times.Count < path.Count)
+            
+            // Convert the time-space path segments to lists of times and speeds
+            if (timeSpacePath.Segments.Count > 0)
             {
-                float lastTime = times.Count > 0 ? times[times.Count - 1] : 0;
-                while (times.Count < path.Count)
+                // Departure time from the first segment
+                times.Add(timeSpacePath.Segments[0].StartTime);
+                
+                // Make sure the index of time and speed lists match the path points
+                speeds.Add(timeSpacePath.Segments[0].Speed);
+                
+                // Add the times and speeds for each segment
+                for (int i = 0; i < timeSpacePath.Segments.Count; i++)
                 {
-                    lastTime += 0.1f;
-                    times.Add(lastTime);
+                    times.Add(timeSpacePath.Segments[i].EndTime);
+                    speeds.Add(timeSpacePath.Segments[i].Speed);
                 }
             }
-
+            else if (path.Count > 0)
+            {
+                // Deal with the case where there are no segments but we have points
+                times.Add(Time.time);
+                speeds.Add(0); // Staying still
+            }
+            
             return (path, times, speeds);
         }
-
-        private static List<SmoothPathPoint> GenerateSmoothPath(
-            List<ConnectionPoint> rawPath, 
-            List<float> rawTimes, 
-            List<float> rawSpeeds,
-            float maxAcceleration,
-            float maxDeceleration)
+        
+        /// <summary>
+        /// Check for conflicts in the occupancy layer
+        /// </summary>
+        private static bool CheckConflict(
+            ConnectionPoint connectionPoint, 
+            float time, 
+            DynamicOccupancyLayer occupancyLayer, 
+            string robotId)
         {
-            var smoothPath = new List<SmoothPathPoint>();
-
-            // 检查输入列表是否有效
-            if (rawPath == null || rawPath.Count == 0 || 
-                rawTimes == null || rawTimes.Count == 0 || 
-                rawSpeeds == null || rawSpeeds.Count == 0)
+            // Check if there are any conflicts in the occupancy layer
+            var conflicts = occupancyLayer.CheckBoundaryConflict(
+                connectionPoint.Id,
+                time,
+                time + 0.2f, // Add a small buffer for the time window
+                robotId);
+                
+            return conflicts.Count > 0;
+        }
+        
+        /// <summary>
+        /// Calculate the distance between two route points
+        /// </summary>
+        private static float CalculateDistance(RoutePoint p1, RoutePoint p2)
+        {
+            if (p1 == null || p2 == null || 
+                p1.ConnectionPoint == null || p2.ConnectionPoint == null ||
+                p1.ConnectionPoint.Point == null || p2.ConnectionPoint.Point == null)
             {
-                UnityEngine.Debug.LogError("GenerateSmoothPath: 输入列表为空或无效");
-                return smoothPath;
+                return 1000;
             }
-
-            // 确保列表长度一致
-            if (rawPath.Count != rawTimes.Count || rawPath.Count != rawSpeeds.Count)
+            
+            Point point1 = (Point)p1.ConnectionPoint.Point;
+            Point point2 = (Point)p2.ConnectionPoint.Point;
+            
+            return (float)Math.Sqrt(
+                Math.Pow(point1.X - point2.X, 2) + 
+                Math.Pow(point1.Y - point2.Y, 2));
+        }
+        
+        /// <summary>
+        /// Calculate the heuristic value for A* search
+        /// </summary>
+        private static float CalculateHeuristic(RoutePoint current, RoutePoint goal, SearchMethod method, float speed)
+        {
+            if (current == null || goal == null || 
+                current.ConnectionPoint == null || goal.ConnectionPoint == null ||
+                current.ConnectionPoint.Point == null || goal.ConnectionPoint.Point == null)
             {
-                UnityEngine.Debug.LogError($"GenerateSmoothPath: 输入列表长度不匹配 - 路径: {rawPath.Count}, 时间: {rawTimes.Count}, 速度: {rawSpeeds.Count}");
-                UnityEngine.Debug.LogError("路径: " + string.Join(", ", rawPath.Select(p => p.Id)));
-                UnityEngine.Debug.LogError("时间: " + string.Join(", ", rawTimes));
-                UnityEngine.Debug.LogError("速度: " + string.Join(", ", rawSpeeds));
+                return 1000;
+            }
+            
+            Point currentPoint = (Point)current.ConnectionPoint.Point;
+            Point goalPoint = (Point)goal.ConnectionPoint.Point;
+            
+            float distance = 0;
+            
+            switch (method)
+            {
+                case SearchMethod.Euclidean_Distance:
+                    distance = (float)Math.Sqrt(
+                        Math.Pow(currentPoint.X - goalPoint.X, 2) + 
+                        Math.Pow(currentPoint.Y - goalPoint.Y, 2));
+                    break;
+                    
+                case SearchMethod.Manhattan_Distance:
+                    distance = (float)(
+                        Math.Abs(currentPoint.X - goalPoint.X) + 
+                        Math.Abs(currentPoint.Y - goalPoint.Y));
+                    break;
+                    
+                default:
+                    distance = (float)Math.Sqrt(
+                        Math.Pow(currentPoint.X - goalPoint.X, 2) + 
+                        Math.Pow(currentPoint.Y - goalPoint.Y, 2));
+                    break;
+            }
+            
+            return distance / speed;
+        }
+        
+        /// <summary>
+        /// Generate a smooth path from the time-space path
+        /// </summary>
+        private static List<SmoothPathPoint> GenerateSmoothPath(TimeSpacePath timeSpacePath)
+        {
+            List<SmoothPathPoint> smoothPath = new List<SmoothPathPoint>();
+            
+            if (timeSpacePath == null || timeSpacePath.Points.Count == 0)
+            {
                 return smoothPath;
             }
             
-            // 添加第一个点（不变）
-            smoothPath.Add(new SmoothPathPoint(rawPath[0], rawTimes[0], rawSpeeds[0]));
-            
-            // 处理中间点
-            for (int i = 1; i < rawPath.Count - 1; i++)
+            // Short-circuit for very short paths
+            if (timeSpacePath.Points.Count < 3)
             {
-                // 获取前、当前、后点的位置
-                Vector3 prevPos = new Vector3(
-                    (float)((Point)rawPath[i-1].Point).X, 
-                    0, 
-                    (float)((Point)rawPath[i-1].Point).Y);
-                    
-                Vector3 currentPos = new Vector3(
-                    (float)((Point)rawPath[i].Point).X, 
-                    0, 
-                    (float)((Point)rawPath[i].Point).Y);
-                    
-                Vector3 nextPos = new Vector3(
-                    (float)((Point)rawPath[i+1].Point).X, 
-                    0, 
-                    (float)((Point)rawPath[i+1].Point).Y);
-                
-                // 计算转弯角度
-                Vector3 prevDir = (currentPos - prevPos).normalized;
-                Vector3 nextDir = (nextPos - currentPos).normalized;
-                float turnAngle = Vector3.Angle(prevDir, nextDir);
-                
-                // 跟踪当前点的ModifySpeed速度
-                float currentNodeSpeed = rawSpeeds[i-1]; // 注意，rawSpeeds索引与时间对应
-                
-                // 如果是急转弯，添加辅助点
-                if (turnAngle > 30f)
+                for (int i = 0; i < timeSpacePath.Points.Count; i++)
                 {
-                    // 计算转弯半径 - 基于速度
-                    float safeRadius = Mathf.Max(0.8f, currentNodeSpeed * 0.5f);
+                    var point = timeSpacePath.Points[i];
+                    Point geoPoint = (Point)point.Point;
+                    Vector3 position = new Vector3((float)geoPoint.X, 0, (float)geoPoint.Y);
                     
-                    // 计算可用距离
-                    float prevDist = Vector3.Distance(prevPos, currentPos);
-                    float nextDist = Vector3.Distance(currentPos, nextPos);
+                    float time = 0, speed = 0;
                     
-                    // 确保转弯半径不超过路径长度的限制
-                    float maxRadius = Mathf.Min(prevDist * 0.4f, nextDist * 0.4f);
-                    float actualRadius = Mathf.Min(safeRadius, maxRadius);
+                    if (i == 0 && timeSpacePath.Segments.Count > 0)
+                    {
+                        time = timeSpacePath.Segments[0].StartTime;
+                        speed = timeSpacePath.Segments[0].Speed;
+                    }
+                    else if (i > 0 && i <= timeSpacePath.Segments.Count)
+                    {
+                        time = timeSpacePath.Segments[i-1].EndTime;
+                        speed = timeSpacePath.Segments[i-1].Speed;
+                    }
                     
-                    // 计算贝塞尔曲线控制点
-                    Vector3 backPoint = currentPos - prevDir * actualRadius;
-                    Vector3 forwardPoint = currentPos + nextDir * actualRadius;
-                    
-                    // 创建4个辅助点（2个在转弯前，2个在转弯后）
-                    AddBezierAuxiliaryPoints(
-                        smoothPath,
-                        prevPos, currentPos, nextPos,
-                        backPoint, forwardPoint,
-                        rawPath[i-1], rawPath[i], rawPath[i+1],
-                        rawTimes[i-1], rawTimes[i], 
-                        rawSpeeds[i-1], rawSpeeds[i],
-                        turnAngle);
+                    smoothPath.Add(new SmoothPathPoint 
+                    { 
+                        ConnectionPoint = point,
+                        Position = position,
+                        Time = time,
+                        Speed = speed,
+                        IsAuxiliary = false
+                    });
                 }
                 
-                // 添加原始点
-                smoothPath.Add(new SmoothPathPoint(rawPath[i], rawTimes[i], rawSpeeds[i]));
+                return smoothPath;
             }
             
-            // 添加最后一个点
-            if (rawPath.Count > 1)
+            // Add the first point
             {
-                int lastIndex = rawPath.Count - 1;
-                smoothPath.Add(new SmoothPathPoint(rawPath[lastIndex], rawTimes[lastIndex], rawSpeeds[lastIndex]));
+                var firstPoint = timeSpacePath.Points[0];
+                Point geoPoint = (Point)firstPoint.Point;
+                Vector3 position = new Vector3((float)geoPoint.X, 0, (float)geoPoint.Y);
+                
+                smoothPath.Add(new SmoothPathPoint
+                {
+                    ConnectionPoint = firstPoint,
+                    Position = position,
+                    Time = timeSpacePath.Segments[0].StartTime,
+                    Speed = timeSpacePath.Segments[0].Speed,
+                    IsAuxiliary = false
+                });
+            }
+            
+            // Iterate through the path points to find corners and add auxiliary points
+            for (int i = 1; i < timeSpacePath.Points.Count - 1; i++)
+            {
+                var prevPoint = timeSpacePath.Points[i-1];
+                var currentPoint = timeSpacePath.Points[i];
+                var nextPoint = timeSpacePath.Points[i+1];
+                
+                Point prevGeoPoint = (Point)prevPoint.Point;
+                Point currentGeoPoint = (Point)currentPoint.Point;
+                Point nextGeoPoint = (Point)nextPoint.Point;
+                
+                Vector3 prev = new Vector3((float)prevGeoPoint.X, 0, (float)prevGeoPoint.Y);
+                Vector3 current = new Vector3((float)currentGeoPoint.X, 0, (float)currentGeoPoint.Y);
+                Vector3 next = new Vector3((float)nextGeoPoint.X, 0, (float)nextGeoPoint.Y);
+                
+                // Calculate the direction vectors
+                Vector3 inDirection = (current - prev).normalized;
+                Vector3 outDirection = (next - current).normalized;
+                
+                // Calculate the angle between the two direction vectors
+                float turnAngle = Vector3.Angle(inDirection, outDirection);
+                
+                // Find the corresponding segments
+                PathSegment inSegment = null;
+                PathSegment outSegment = null;
+                
+                for (int j = 0; j < timeSpacePath.Segments.Count; j++)
+                {
+                    var segment = timeSpacePath.Segments[j];
+                    if (segment.To.Id == currentPoint.Id)
+                    {
+                        inSegment = segment;
+                    }
+                    if (segment.From.Id == currentPoint.Id)
+                    {
+                        outSegment = segment;
+                    }
+                }
+                
+                // If the angle is small, just add the current point
+                if (turnAngle < 20)
+                {
+                    smoothPath.Add(new SmoothPathPoint
+                    {
+                        ConnectionPoint = currentPoint,
+                        Position = current,
+                        Time = inSegment?.EndTime ?? 0,
+                        Speed = outSegment?.Speed ?? 0,
+                        IsAuxiliary = false
+                    });
+                    continue;
+                }
+                
+                // Add auxiliary points for the corner
+                float cornerDistance = 0.3f; // distance to the corner point
+                
+                // Calculate the position of auxiliary points
+                Vector3 backPoint = current - inDirection * cornerDistance;
+                Vector3 forwardPoint = current + outDirection * cornerDistance;
+                
+                // Calculate the time and speed for the auxiliary points
+                float inTime = inSegment?.EndTime ?? 0;
+                float outTime = outSegment?.StartTime ?? inTime;
+                
+                float inSpeed = inSegment?.Speed ?? 0;
+                float outSpeed = outSegment?.Speed ?? inSpeed;
+                
+                // Add the backward auxiliary point (before the corner)
+                smoothPath.Add(new SmoothPathPoint
+                {
+                    ConnectionPoint = currentPoint,
+                    Position = backPoint,
+                    Time = inTime - 0.1f, // Earlier than the corner time
+                    Speed = inSpeed * 0.8f, // slightly slower speed
+                    IsAuxiliary = true
+                });
+                
+                // Add the actual corner point
+                smoothPath.Add(new SmoothPathPoint
+                {
+                    ConnectionPoint = currentPoint,
+                    Position = current,
+                    Time = inTime,
+                    Speed = Math.Min(inSpeed, outSpeed) * 0.7f, // slightly slower speed
+                    IsAuxiliary = false
+                });
+                
+                // Add the forward auxiliary point (after the corner)
+                smoothPath.Add(new SmoothPathPoint
+                {
+                    ConnectionPoint = currentPoint,
+                    Position = forwardPoint,
+                    Time = outTime + 0.1f, // Later than the corner time
+                    Speed = outSpeed * 0.9f, // slightly faster speed
+                    IsAuxiliary = true
+                });
+            }
+            
+            // Add the last point
+            {
+                var lastPoint = timeSpacePath.Points[timeSpacePath.Points.Count-1];
+                Point geoPoint = (Point)lastPoint.Point;
+                Vector3 position = new Vector3((float)geoPoint.X, 0, (float)geoPoint.Y);
+                
+                float time = 0, speed = 0;
+                
+                if (timeSpacePath.Segments.Count > 0)
+                {
+                    var lastSegment = timeSpacePath.Segments[timeSpacePath.Segments.Count-1];
+                    time = lastSegment.EndTime;
+                    speed = lastSegment.Speed;
+                }
+                
+                smoothPath.Add(new SmoothPathPoint
+                {
+                    ConnectionPoint = lastPoint,
+                    Position = position,
+                    Time = time,
+                    Speed = speed,
+                    IsAuxiliary = false
+                });
             }
             
             return smoothPath;
         }
-
-        // 添加贝塞尔曲线辅助点
-        private static void AddBezierAuxiliaryPoints(
-            List<SmoothPathPoint> smoothPath,
-            Vector3 prevPos, Vector3 cornerPos, Vector3 nextPos,
-            Vector3 backControlPoint, Vector3 forwardControlPoint,
-            ConnectionPoint prevPoint, ConnectionPoint cornerPoint, ConnectionPoint nextPoint,
-            float prevTime, float cornerTime,
-            float prevSpeed, float cornerSpeed,
-            float turnAngle)
+        
+        /// <summary>
+        /// Reserve the path occupancy for the robot
+        /// </summary>
+        private static void ReservePathOccupancyPrecise(
+            Graph graph, 
+            IndoorSpace indoorSpace, 
+            DynamicOccupancyLayer occupancyLayer, 
+            TimeSpacePath timeSpacePath, 
+            string robotId, 
+            string planId)
         {
-            // 辅助点数量（可调整）
-            int numPoints = turnAngle > 60f ? 6 : 4;
-            
-            for (int i = 1; i < numPoints; i++)
+            if (timeSpacePath == null || timeSpacePath.Segments.Count == 0)
             {
-                float t = i / (float)(numPoints);
+                UnityEngine.Debug.LogWarning($"Robot {robotId}: Attempted to reserve path occupancy, but no segments found.");
+                return;
+            }
+            
+            // Clear previous occupancy
+            float startTime = timeSpacePath.Segments.Count > 0 ? 
+                timeSpacePath.Segments[0].StartTime : 
+                Time.time;
+            
+            occupancyLayer.ClearPlannedOccupancy(robotId, planId, startTime);
+            
+            // Reserve occupancy for each segment
+            foreach (var segment in timeSpacePath.Segments)
+            {
+                string fromId = segment.From.Id;
+                string toId = segment.To.Id;
+                float startSegmentTime = segment.StartTime;
+                float endSegmentTime = segment.EndTime;
                 
-                // 计算贝塞尔曲线点
-                Vector3 smoothPos;
-                if (t <= 0.5f)
-                {
-                    // 前半段：从前一点到转弯点
-                    float localT = t * 2.0f; // 重新缩放t为0-1
-                    Vector3 p0 = Vector3.Lerp(prevPos, backControlPoint, localT);
-                    Vector3 p1 = Vector3.Lerp(backControlPoint, cornerPos, localT);
-                    smoothPos = Vector3.Lerp(p0, p1, localT);
-                }
-                else
-                {
-                    // 后半段：从转弯点到下一点
-                    float localT = (t - 0.5f) * 2.0f; // 重新缩放t为0-1
-                    Vector3 p0 = Vector3.Lerp(cornerPos, forwardControlPoint, localT);
-                    Vector3 p1 = Vector3.Lerp(forwardControlPoint, nextPos, localT);
-                    smoothPos = Vector3.Lerp(p0, p1, localT);
-                }
+                occupancyLayer.SetBoundaryPlannedOccupancy(
+                    fromId, 
+                    startSegmentTime, 
+                    endSegmentTime, 
+                    robotId, 
+                    planId
+                );
                 
-                // 计算辅助点的速度 - 基于ModifySpeed计算的速度
-                float speed;
-                if (t <= 0.5f)
+                if (segment.From.CellBoundary != null)
                 {
-                    // 前半段：从前一点的速度过渡到转弯点速度
-                    speed = Mathf.Lerp(prevSpeed, cornerSpeed, t * 2.0f);
+                    var cellBoundary = segment.From.CellBoundary;
+                    occupancyLayer.SetPlannedOccupancy(
+                        cellBoundary.Source, 
+                        startSegmentTime, 
+                        endSegmentTime, 
+                        robotId, 
+                        planId
+                    );
+                    occupancyLayer.SetPlannedOccupancy(
+                        cellBoundary.Target, 
+                        startSegmentTime, 
+                        endSegmentTime, 
+                        robotId, 
+                        planId
+                    );
                 }
-                else
-                {
-                    // 后半段：从转弯点速度过渡到下一点速度（假设与转弯点相同）
-                    speed = cornerSpeed;
-                }
+            }
+            
+            if (timeSpacePath.Points.Count > 0)
+            {
+                var lastPoint = timeSpacePath.Points[timeSpacePath.Points.Count - 1];
+                float lastArrivalTime = timeSpacePath.Segments.Count > 0 ? 
+                    timeSpacePath.Segments[timeSpacePath.Segments.Count - 1].EndTime : 
+                    startTime;
                 
-                // 急转弯处略微降低速度，但幅度小
-                if (turnAngle > 60f)
-                {
-                    speed *= 0.9f; // 只降低10%，保持与ModifySpeed的一致性
-                }
+                float terminationTime = lastArrivalTime + 5.0f;
                 
-                // 计算辅助点的时间
-                float time;
-                if (t <= 0.5f)
-                {
-                    // 前半段：时间线性插值
-                    time = Mathf.Lerp(prevTime, cornerTime, t * 2.0f);
-                }
-                else
-                {
-                    // 后半段：时间预估（基于到下一个点的距离和速度）
-                    time = cornerTime;
-                }
+                occupancyLayer.SetBoundaryPlannedOccupancy(
+                    lastPoint.Id, 
+                    lastArrivalTime, 
+                    terminationTime, 
+                    robotId, 
+                    planId
+                );
                 
-                // 创建并添加辅助点 - 关联到最接近的原始点
-                ConnectionPoint relatedPoint = t <= 0.5f ? prevPoint : cornerPoint;
-                
-                smoothPath.Add(new SmoothPathPoint(relatedPoint, smoothPos, time, speed));
+                if (lastPoint.CellBoundary != null)
+                {
+                    var cellBoundary = lastPoint.CellBoundary;
+                    occupancyLayer.SetPlannedOccupancy(
+                        cellBoundary.Source, 
+                        lastArrivalTime, 
+                        terminationTime, 
+                        robotId, 
+                        planId
+                    );
+                    occupancyLayer.SetPlannedOccupancy(
+                        cellBoundary.Target, 
+                        lastArrivalTime, 
+                        terminationTime, 
+                        robotId, 
+                        planId
+                    );
+                }
             }
         }
-
+        
+        /// <summary>
+        /// Save the smooth path history for a robot
+        /// </summary>
         private static void SaveSmoothPathForRobot(string robotId, List<SmoothPathPoint> smoothPath)
         {
-            // 转换为RobotController可以使用的格式
+            if (smoothPath == null || smoothPath.Count == 0)
+                return;
+                
             var pathInfo = new RobotSmoothPathInfo
             {
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -523,13 +860,13 @@ namespace PathPlanning
                 pathInfo.IsAuxiliary.Add(point.IsAuxiliary);
             }
             
-            // 存储到字典
+            // Save the path info to the dictionary
             if (!robotSmoothPaths.ContainsKey(robotId))
             {
                 robotSmoothPaths[robotId] = new List<RobotSmoothPathInfo>();
             }
             
-            // 限制存储的路径数量（只保留最近的3条）
+            // Only keep the last 3 paths
             var paths = robotSmoothPaths[robotId];
             paths.Add(pathInfo);
             if (paths.Count > 3)
@@ -537,135 +874,17 @@ namespace PathPlanning
                 paths.RemoveAt(0);
             }
         }
-
-        public static RobotSmoothPathInfo GetSmoothPathForRobot(string robotId, long timestamp = 0)
+        
+        /// <summary>
+        /// Get the history smooth path for a robot
+        /// </summary>
+        public static RobotSmoothPathInfo GetRobotLastSmoothPath(string robotId)
         {
-            if (!robotSmoothPaths.ContainsKey(robotId) || robotSmoothPaths[robotId].Count == 0)
+            if (robotSmoothPaths.TryGetValue(robotId, out var paths) && paths.Count > 0)
             {
-                return null;
+                return paths[paths.Count - 1];
             }
-            
-            var paths = robotSmoothPaths[robotId];
-            
-            // 如果指定了时间戳，查找匹配的路径
-            if (timestamp > 0)
-            {
-                foreach (var path in paths)
-                {
-                    if (path.Timestamp == timestamp)
-                    {
-                        return path;
-                    }
-                }
-            }
-            
-            // 否则返回最新的路径
-            return paths[paths.Count - 1];
-        }
-
-        private static void ClearUnusedReservations(
-            DynamicOccupancyLayer personalOccupancyLayer, 
-            string robotId,
-            string planId, 
-            float currentTime)
-        {
-            personalOccupancyLayer.ClearPlannedOccupancy(robotId, planId, currentTime);
-        }
-
-        private static void ReservePathOccupancy(
-            Graph graph,
-            IndoorSpace indoorSpace,
-            DynamicOccupancyLayer personalOccupancyLayer,
-            List<ConnectionPoint> path,
-            List<float> times,
-            List<float> speeds, 
-            string robotId, 
-            string newPlanId)
-        {
-            for (int i = 0; i < path.Count - 1; i++)
-            {
-                CellSpace currentCellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(path[i]);
-                if (currentCellSpace != null)
-                {
-                    float startTime = times[i];
-                    float endTime = times[i + 1];
-                    
-                    personalOccupancyLayer.SetPlannedOccupancy(
-                        currentCellSpace.Id,
-                        startTime,
-                        endTime,
-                        robotId, 
-                        newPlanId
-                    );
-                }
-            }
-        }
-
-        private static float HeuristicCostEstimate(DynamicOccupancyLayer personalOccupancyLayer, RoutePoint a, RoutePoint b, float speed, SearchMethod searchMethod)
-        {
-            var p1 = (Point)a.ConnectionPoint.Point;
-            var p2 = (Point)b.ConnectionPoint.Point;
-            float distance;
-            
-            switch (searchMethod)
-            {
-                case SearchMethod.Euclidean_Distance:
-                    distance = (float)Math.Sqrt(Math.Pow(p1.X - p2.X, 2) + Math.Pow(p1.Y - p2.Y, 2));
-                    break;
-                case SearchMethod.Manhattan_Distance:
-                    distance = (float)(Math.Abs(p1.X - p2.X) + Math.Abs(p1.Y - p2.Y));
-                    break;
-                default:
-                    UnityEngine.Debug.LogWarning($"Unknown search method: {searchMethod}. Using Euclidean distance.");
-                    distance = (float)Math.Sqrt(Math.Pow(p1.X - p2.X, 2) + Math.Pow(p1.Y - p2.Y, 2));
-                    break;
-            }
-            
-            float baseHeuristic = distance / speed;
-            
-            return baseHeuristic;
-        }
-
-        private static float ModifySpeed(Graph graph, ConnectionPoint current, ConnectionPoint neighbor, 
-            float defaultSpeed, float lastSpeed, Layer layerOfNeighbor, float deltaTime, 
-            float maxAcceleration, float maxDeceleration)
-        {
-            float speedLimit = layerOfNeighbor.SpeedLimit();
-            float targetSpeed = defaultSpeed;
-
-            PointLocation currentLocation = graph.GetPointLocation(current);
-            PointLocation neighborLocation = graph.GetPointLocation(neighbor);
-
-            switch (currentLocation)
-            {
-                case PointLocation.InAisle when neighborLocation == PointLocation.ApproachingIntersection:
-                    targetSpeed = speedLimit * 0.8f;
-                    break;
-                case PointLocation.ApproachingIntersection:
-                case PointLocation.InIntersection:
-                    targetSpeed = speedLimit;
-                    break;
-                case PointLocation.OutIntersection when neighborLocation == PointLocation.InAisle:
-                    targetSpeed = Mathf.Min(defaultSpeed, speedLimit);
-                    break;
-                default:
-                    targetSpeed = Mathf.Min(defaultSpeed, speedLimit);
-                    break;
-            }
-
-            float speedDifference = targetSpeed - lastSpeed;
-            float acceleration = speedDifference / deltaTime;
-            
-            acceleration = Mathf.Clamp(acceleration, -maxDeceleration, maxAcceleration);
-            
-            float newSpeed = lastSpeed + acceleration * deltaTime;
-
-            newSpeed = Mathf.Clamp(newSpeed, speedLimit * 0.5f, speedLimit);
-
-            float randomFactor = UnityEngine.Random.Range(0.98f, 1.02f);
-            newSpeed *= randomFactor;
-
-            return newSpeed;
+            return null;
         }
     }
 }

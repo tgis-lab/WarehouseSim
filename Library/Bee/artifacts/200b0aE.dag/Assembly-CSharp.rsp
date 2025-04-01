@@ -401,6 +401,7 @@
 "Assets/Script/PathPlanning/PathChecker.cs"
 "Assets/Script/PathPlanning/PathPlanner.cs"
 "Assets/Script/PathPlanning/PriorityQueue.cs"
+"Assets/Script/PathPlanning/TrafficRulesKnowledge.cs"
 -langversion:9.0
 
 /deterministic
