@@ -8,14 +8,19 @@ using SystemCollections = System.Collections.Generic;
 
 namespace Map
 {
+    /// <summary>
+    /// 时间占用记录，表示特定时间段内的占用情况
+    /// </summary>
     public class TimeOccupancy : IComparable<TimeOccupancy>
     {
         public float StartTime { get; private set; }
         public float EndTime { get; private set; }
         public OccupancyIdentifier Occupier { get; private set; }
         public Guid Id { get; private set; }
+        public bool IsStartCell { get; private set; }
+        public bool IsEndCell { get; private set; }
 
-        public TimeOccupancy(float startTime, float endTime, OccupancyIdentifier occupier)
+        public TimeOccupancy(float startTime, float endTime, OccupancyIdentifier occupier, bool isStartCell = false, bool isEndCell = false)
         {
             if (endTime < startTime)
             {
@@ -26,6 +31,8 @@ namespace Map
             EndTime = endTime;
             Occupier = occupier;
             Id = Guid.NewGuid();
+            IsStartCell = isStartCell;
+            IsEndCell = isEndCell;
         }
 
         // 更新结束时间（用于实时跟踪）
@@ -36,18 +43,6 @@ namespace Map
                 throw new ArgumentException("New end time cannot be less than start time");
             }
             EndTime = newEndTime;
-        }
-
-        // 检查是否与给定的时间段重叠
-        public bool OverlapsWith(float startTime, float endTime)
-        {
-            // 不重叠的情况：一个区间结束于另一个开始之前
-            return !(EndTime <= startTime || StartTime >= endTime);
-        }
-
-        public override string ToString()
-        {
-            return $"TimeOccupancy({StartTime:F2}-{EndTime:F2}, {Occupier})";
         }
 
         // IComparable接口实现，用于C5集合
@@ -69,12 +64,12 @@ namespace Map
     }
 
     /// <summary>
-    /// 使用C5库实现的时间索引
-    /// 基于中点排序的区间树实现
+    /// 时间索引 - 管理单一位置的时间占用
+    /// 使用C5库实现的基于区间树概念的时间索引
     /// </summary>
     public class TemporalIndex
     {
-        // 存储所有占用的列表，用于快速迭代
+        // 存储所有占用的字典，键为GUID，值为TimeOccupancy
         private readonly HashDictionary<Guid, TimeOccupancy> allOccupancies;
         
         // 按开始时间排序的占用索引
@@ -86,6 +81,9 @@ namespace Map
         // 当前进行中的占用
         private readonly Dictionary<string, TimeOccupancy> ongoingOccupancies;
 
+        /// <summary>
+        /// 创建新的时间索引
+        /// </summary>
         public TemporalIndex()
         {
             allOccupancies = new HashDictionary<Guid, TimeOccupancy>();
@@ -94,10 +92,14 @@ namespace Map
             ongoingOccupancies = new Dictionary<string, TimeOccupancy>();
         }
 
-        // 添加一个时间区间到索引
+        /// <summary>
+        /// 添加时间区间到索引
+        /// </summary>
         public void AddInterval(TimeOccupancy interval)
         {
-            // 添加到主字典
+            if (interval == null) return;
+            
+            // 添加到所有占用字典
             allOccupancies[interval.Id] = interval;
             
             // 添加到开始时间索引
@@ -115,30 +117,38 @@ namespace Map
             endTimeIndex[interval.EndTime].Add(interval);
         }
 
-        // 从索引中移除一个时间区间
+        /// <summary>
+        /// 从索引中移除时间区间
+        /// </summary>
         public void RemoveInterval(TimeOccupancy interval)
         {
+            if (interval == null) return;
+            
+            // 从所有占用字典移除
             if (allOccupancies.Contains(interval.Id))
             {
-                // 从主字典中移除
                 allOccupancies.Remove(interval.Id);
                 
-                // 从开始时间索引中移除
+                // 从开始时间索引移除
                 if (startTimeIndex.Contains(interval.StartTime))
                 {
                     var list = startTimeIndex[interval.StartTime];
                     list.Remove(interval);
+                    
+                    // 如果该时间点没有更多占用，删除整个条目
                     if (list.Count == 0)
                     {
                         startTimeIndex.Remove(interval.StartTime);
                     }
                 }
                 
-                // 从结束时间索引中移除
+                // 从结束时间索引移除
                 if (endTimeIndex.Contains(interval.EndTime))
                 {
                     var list = endTimeIndex[interval.EndTime];
                     list.Remove(interval);
+                    
+                    // 如果该时间点没有更多占用，删除整个条目
                     if (list.Count == 0)
                     {
                         endTimeIndex.Remove(interval.EndTime);
@@ -147,18 +157,25 @@ namespace Map
             }
         }
 
-        // 查询与给定时间段重叠的所有区间
-        public SystemCollections.List<TimeOccupancy> QueryOverlapping(float startTime, float endTime)
+        /// <summary>
+        /// 查询与指定时间段重叠的所有占用
+        /// </summary>
+        public List<TimeOccupancy> QueryOverlapping(float startTime, float endTime)
         {
-            var result = new SystemCollections.List<TimeOccupancy>();
+            List<TimeOccupancy> result = new List<TimeOccupancy>();
             
-            // 使用已有的索引结构进行高效查询，但避免使用Until方法
-            if (startTimeIndex.Count > 0)
+            // 提前检查特殊情况
+            if (startTime > endTime || startTimeIndex.IsEmpty)
             {
-                // 获取所有可能重叠的区间
-                var potentialOverlaps = new SystemCollections.HashSet<TimeOccupancy>();
-                
-                // 手动迭代，而不是使用Until
+                return result;
+            }
+            
+            // 收集所有可能重叠的区间
+            var potentialOverlaps = new SystemCollections.HashSet<TimeOccupancy>();
+            
+            try
+            {
+                // 遍历所有开始时间早于等于查询结束时间的区间
                 var enumerator = startTimeIndex.RangeFrom(startTimeIndex.FindMin().Key).GetEnumerator();
                 while (enumerator.MoveNext())
                 {
@@ -181,11 +198,74 @@ namespace Map
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                Debug.LogError($"查询时间重叠时出错: {ex.Message}");
+            }
             
             return result;
         }
 
-        // 更新进行中的占用
+        /// <summary>
+        /// 检查时间冲突，可排除指定机器人的占用
+        /// </summary>
+        public List<TimeOccupancy> CheckConflict(
+            float startTime, 
+            float endTime, 
+            string excludeRobotId = null, 
+            bool isStartCell = false, 
+            bool isEndCell = false)
+        {
+            // 查询重叠的占用
+            var overlappingOccupancies = QueryOverlapping(startTime, endTime);
+            var conflicts = new List<TimeOccupancy>();
+            
+            foreach (var occupancy in overlappingOccupancies)
+            {
+                // 排除指定机器人的占用
+                if (!string.IsNullOrEmpty(excludeRobotId) && occupancy.Occupier.RobotId == excludeRobotId)
+                {
+                    continue;
+                }
+                
+                // 应用特殊规则处理
+                
+                // 规则1: 如果当前检查的是起点单元格，我们只在特定情况下报告冲突
+                if (isStartCell && !occupancy.IsEndCell)
+                {
+                    // 在起点允许与非终点的其他占用共存
+                    continue;
+                }
+                
+                // 规则2: 如果当前检查的是终点单元格，我们只在特定情况下报告冲突
+                if (isEndCell && !occupancy.IsStartCell)
+                {
+                    // 在终点允许与非起点的其他占用共存
+                    continue;
+                }
+                
+                // 规则3: 如果被检查的占用是起点，而我们不是终点，则允许共存
+                if (occupancy.IsStartCell && !isEndCell)
+                {
+                    continue;
+                }
+                
+                // 规则4: 如果被检查的占用是终点，而我们不是起点，则允许共存
+                if (occupancy.IsEndCell && !isStartCell)
+                {
+                    continue;
+                }
+                
+                // 所有规则验证后仍存在，则为真实冲突
+                conflicts.Add(occupancy);
+            }
+            
+            return conflicts;
+        }
+
+        /// <summary>
+        /// 更新进行中的占用
+        /// </summary>
         public void UpdateCurrentOccupancy(string robotId, float currentTime)
         {
             string key = robotId;
@@ -211,7 +291,9 @@ namespace Map
             }
         }
 
-        // 结束当前占用
+        /// <summary>
+        /// 结束当前占用
+        /// </summary>
         public void EndCurrentOccupancy(string robotId, float endTime)
         {
             string key = robotId;
@@ -232,83 +314,50 @@ namespace Map
             }
         }
 
-        // 添加计划的占用
-        public void AddPlannedOccupancy(float startTime, float endTime, string robotId, string planId)
-        {
-            var occupier = new OccupancyIdentifier(robotId, planId, OccupancyType.Planned);
-            var occupancy = new TimeOccupancy(startTime, endTime, occupier);
-            AddInterval(occupancy);
-        }
-
-        // 清除指定机器人的计划占用
-        public void ClearPlannedOccupancy(string robotId, string planId, float fromTime)
-        {
-            var toRemove = new SystemCollections.List<TimeOccupancy>();
-            
-            // 找出需要删除的占用
-            foreach (var occupancy in allOccupancies.Values)
-            {
-                if (occupancy.Occupier.RobotId == robotId &&
-                    occupancy.Occupier.Type == OccupancyType.Planned &&
-                    (planId == null || occupancy.Occupier.PlanId == planId) &&
-                    occupancy.StartTime >= fromTime)
-                {
-                    toRemove.Add(occupancy);
-                }
-            }
-            
-            // 移除找到的占用
-            foreach (var occupancy in toRemove)
-            {
-                RemoveInterval(occupancy);
-            }
-        }
-
-        // 检查占用冲突
-        public SystemCollections.List<TimeOccupancy> CheckConflict(float startTime, float endTime, string excludeRobotId = null)
-        {
-            var overlapping = QueryOverlapping(startTime, endTime);
-            
-            // 过滤掉指定机器人的占用
-            if (!string.IsNullOrEmpty(excludeRobotId))
-            {
-                return overlapping.Where(o => o.Occupier.RobotId != excludeRobotId).ToList();
-            }
-            
-            return overlapping;
-        }
-
-        // 清理过期数据
+        /// <summary>
+        /// 清理过期数据
+        /// </summary>
         public void Cleanup(float currentTime, float windowDuration)
         {
-            float cleanupThreshold = currentTime - windowDuration;
+            float cutoffTime = currentTime - windowDuration;
+            List<TimeOccupancy> toRemove = new List<TimeOccupancy>();
             
-            var toRemove = new SystemCollections.List<TimeOccupancy>();
-            
-            // 手动迭代查找已过期的占用
-            if (endTimeIndex.Count > 0)
+            try
             {
-                var enumerator = endTimeIndex.RangeFrom(endTimeIndex.FindMin().Key).GetEnumerator();
-                while (enumerator.MoveNext())
+                // 查找所有结束时间早于阈值的占用
+                if (!endTimeIndex.IsEmpty)
                 {
-                    var entry = enumerator.Current;
+                    var minKey = endTimeIndex.FindMin().Key;
+                    var maxKey = cutoffTime;
                     
-                    // 如果结束时间超过了清理阈值，可以停止
-                    if (entry.Key >= cleanupThreshold)
-                        break;
-                    
-                    // 添加所有结束时间早于清理阈值的占用
-                    foreach (var interval in entry.Value)
+                    if (minKey <= maxKey)
                     {
-                        toRemove.Add(interval);
+                        var enumerator = endTimeIndex.RangeFrom(minKey).GetEnumerator();
+                        while (enumerator.MoveNext())
+                        {
+                            var entry = enumerator.Current;
+                            if (entry.Key > cutoffTime)
+                                break;
+                                
+                            foreach (var interval in entry.Value)
+                            {
+                                toRemove.Add(interval);
+                            }
+                        }
                     }
                 }
+                
+                // 移除过期的占用
+                foreach (var interval in toRemove)
+                {
+                    RemoveInterval(interval);
+                }
+                
+                Debug.Log($"已清理 {toRemove.Count} 个过期占用记录");
             }
-            
-            // 移除过期数据
-            foreach (var interval in toRemove)
+            catch (Exception ex)
             {
-                RemoveInterval(interval);
+                Debug.LogError($"清理占用记录时出错: {ex.Message}");
             }
         }
     }

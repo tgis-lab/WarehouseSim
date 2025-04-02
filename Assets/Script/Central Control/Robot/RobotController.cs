@@ -161,7 +161,7 @@ namespace CentralControl.RobotControl
             if (GetComponent<Collider>() == null)
             {
                 BoxCollider collider = gameObject.AddComponent<BoxCollider>();
-                
+
                 collider.size = new Vector3(2.5f, 0.8f, 5.4f); // AGV size
                 collider.center = new Vector3(0, 0.1f, 0.05f); // Adjust collider position
             }
@@ -351,6 +351,7 @@ namespace CentralControl.RobotControl
 
             currentPlanId = result.planId;
             RaisePathPlannedEvent(result.path, result.times, currentPlanId);
+            personalOccupancyLayer.RecordPathOccupancy(indoorSpace, result.path, result.times, this.Id.ToString(), currentPlanId);
             UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
             
             // Wait until destination reached or timeout
@@ -505,26 +506,26 @@ namespace CentralControl.RobotControl
             
             if (shouldUseDWA)
             {
-                // 设置DWA参数 - 根据导航阶段和点类型
+                // Adjust DWA parameters based on navigation phase
                 if (currentNavigationPhase == NavigationPhase.FollowingPath)
                 {
                     dwaPlanner.PredictionTime = 2.0f;
                     
-                    // 如果是平滑点，增强障碍物避让
+                    // Check if the robot is on a smooth path or an auxiliary point
                     if (smoothPathIndex < smoothPositions.Count && isAuxiliaryPoint[smoothPathIndex])
                     {
                         dwaPlanner.ObstacleWeight = 0.6f;
                         dwaPlanner.HeadingWeight = 0.3f;
                         
-                        // 检查是否是转弯处
+                        // Check if the point is a corner point
                         if (IsCornerPoint(smoothPathIndex))
                         {
-                            dwaPlanner.PredictionTime = 2.5f; // 转弯处使用更长的预测时间
+                            dwaPlanner.PredictionTime = 2.5f;
                         }
                     }
                     else
                     {
-                        // 普通路径点
+                        // Normal path following
                         dwaPlanner.ObstacleWeight = 0.4f;
                         dwaPlanner.HeadingWeight = 0.4f;
                     }
@@ -542,15 +543,14 @@ namespace CentralControl.RobotControl
                     return;
                 }
                 
-                // 根据当前点类型决定是否启用特殊避障模式
-                bool useSpecialAvoidance = smoothPathIndex < smoothPositions.Count && 
-                                        (isAuxiliaryPoint[smoothPathIndex] || IsCornerPoint(smoothPathIndex));
-                                        
+                bool obstacleNearby = recentCollisions.Count > 0 || isEmergencyStopped;
+
+                ConfigureDWAParameters(obstacleNearby);
+
                 var (velocity, needReplan) = dwaPlanner.CalculateVelocity(
                     transform.position, 
                     rb.velocity, 
-                    target, 
-                    useSpecialAvoidance);
+                    target);
                 
                 // 失败保护：如果DWA无法找到有效速度但距离目标还远，使用基础移动
                 if (velocity.magnitude < 0.1f && Vector3.Distance(transform.position, target) > 1.0f)
@@ -562,20 +562,13 @@ namespace CentralControl.RobotControl
                 // 限制最大速度
                 float maxAllowedSpeed = currentNavigationPhase == NavigationPhase.FollowingPath ? 
                                     defaultSpeed : defaultSpeed * 0.7f;
-                                    
-                // 如果是辅助点或转弯点，进一步降低速度
-                if (smoothPathIndex < smoothPositions.Count && 
-                    (isAuxiliaryPoint[smoothPathIndex] || IsCornerPoint(smoothPathIndex)))
-                {
-                    maxAllowedSpeed *= 0.85f; // 转弯处降低到85%速度
-                }
                 
                 Vector3 targetVelocity = Vector3.ClampMagnitude(velocity, maxAllowedSpeed);
                 
-                // 平滑应用速度
+                // Smooth velocity
                 rb.velocity = Vector3.Lerp(rb.velocity, targetVelocity, 0.3f);
                 
-                // 更新朝向
+                // Update rotation to face movement direction
                 if (rb.velocity.magnitude > 0.1f)
                 {
                     Quaternion targetRotation = Quaternion.LookRotation(rb.velocity.normalized);
@@ -835,20 +828,6 @@ namespace CentralControl.RobotControl
                 // Move according to current navigation phase
                 if (isDWAEnabled)
                 {
-                    // 根据当前阶段和点类型配置DWA
-                    bool isSpecialPoint = false;
-                    
-                    if (currentNavigationPhase == NavigationPhase.FollowingPath && 
-                        smoothPathIndex < smoothPositions.Count)
-                    {
-                        // 检查是否是辅助点或转弯点
-                        isSpecialPoint = isAuxiliaryPoint[smoothPathIndex] || IsCornerPoint(smoothPathIndex);
-                    }
-                    
-                    // 针对不同点类型配置DWA
-                    ConfigureDWAParameters(false, false, isSpecialPoint);
-                    
-                    // 使用DWA进行移动
                     MoveTowards(currentTarget);
                 }
                 else
@@ -1090,7 +1069,7 @@ namespace CentralControl.RobotControl
                 // Adjust DWA parameters
                 if (shouldActivate)
                 {
-                    ConfigureDWAParameters(obstacleDetected, inSpecialArea, false);
+                    ConfigureDWAParameters(obstacleDetected);
                 }
             }
             
@@ -1170,36 +1149,29 @@ namespace CentralControl.RobotControl
             return false;
         }
 
-        private void ConfigureDWAParameters(bool obstacleDetected=false, bool inSpecialArea=false, bool isSpecialpoint=false)
+        private void ConfigureDWAParameters(bool obstacleDetected=false)
         {
-            if (obstacleDetected || inSpecialArea)
-            {
-                // 有障碍物时，提高避障权重
-                dwaPlanner.ObstacleWeight = 0.7f;
-                dwaPlanner.HeadingWeight = 0.2f;
-                dwaPlanner.MaxSpeed = defaultSpeed * 0.7f;
-                dwaPlanner.PredictionTime = 2.5f;
-                dwaPlanner.VelocitySamples = 20;
-                dwaPlanner.AngleSamples = 24;
-                
-                Debug.Log($"Robot {Id}: DWA配置为障碍物避让模式");
-            }
-            else if (isSpecialpoint)
+            if (obstacleDetected)
             {
                 dwaPlanner.ObstacleWeight = 0.6f;
                 dwaPlanner.HeadingWeight = 0.3f;
-                dwaPlanner.MaxSpeed = defaultSpeed * 0.8f;
+                dwaPlanner.DistanceWeight = 0.1f;
+                dwaPlanner.MaxSpeed = defaultSpeed * 0.7f;
                 dwaPlanner.PredictionTime = 2.0f;
                 
-                Debug.Log($"Robot {Id}: DWA配置为转弯模式");
+                dwaPlanner.VelocitySamples = 9;
+                dwaPlanner.AngleSamples = 20;
             }
             else
             {
-                // 正常模式
-                dwaPlanner.ObstacleWeight = 0.4f;
-                dwaPlanner.HeadingWeight = 0.4f;
+                dwaPlanner.HeadingWeight = 0.5f;
+                dwaPlanner.DistanceWeight = 0.2f;
+                dwaPlanner.VelocityWeight = 0.2f;
+                dwaPlanner.ObstacleWeight = 0.3f;
                 dwaPlanner.MaxSpeed = defaultSpeed * 0.8f;
                 dwaPlanner.PredictionTime = 1.5f;
+                dwaPlanner.VelocitySamples = 7;
+                dwaPlanner.AngleSamples = 15;
             }
         }
         # endregion
@@ -1274,6 +1246,7 @@ namespace CentralControl.RobotControl
             {
                 currentPlanId = result.planId;
                 RaisePathPlannedEvent(result.path, result.times, currentPlanId);
+                personalOccupancyLayer.RecordPathOccupancy(indoorSpace, result.path, result.times, this.Id.ToString(), currentPlanId);
                 UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                 
                 // Force DWA activation
@@ -1342,6 +1315,7 @@ namespace CentralControl.RobotControl
             {
                 currentPlanId = result.planId;
                 RaisePathPlannedEvent(result.path, result.times, currentPlanId);
+                personalOccupancyLayer.RecordPathOccupancy(indoorSpace, result.path, result.times, this.Id.ToString(), currentPlanId);
                 UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                 currentPathIndex = 0;
                 
@@ -1367,6 +1341,7 @@ namespace CentralControl.RobotControl
                     {
                         currentPlanId = result.planId;
                         RaisePathPlannedEvent(result.path, result.times, currentPlanId);
+                        personalOccupancyLayer.RecordPathOccupancy(indoorSpace, result.path, result.times, this.Id.ToString(), currentPlanId);
                         UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                         currentPathIndex = 0;
                         finalDestination = intermediateTarget;
@@ -1548,22 +1523,33 @@ namespace CentralControl.RobotControl
             // Check if robot has transitioned to a new cell space
             if (currentCellSpace.Id != lastCellSpace.Id)
             {
+                // Determine if the last cell space was a start cell
+                bool wasStartCell = (lastCellSpace == firstCellSpace);
                 
                 // Update occupancy for last cell space
                 if (cellSpaceEntryTimes.TryGetValue(lastCellSpace.Id, out float oldEntryTime))
                 {
-                    personalOccupancyLayer.SetPlannedOccupancy(
+                    personalOccupancyLayer.SetDynamicOccupancy(
                         lastCellSpace.Id,
                         oldEntryTime,
                         currentTime,
                         Id.ToString(), 
-                        currentPlanId
+                        currentPlanId,
+                        wasStartCell,
+                        false // Not an end cell since we're moving to a new cell
                     );
                     cellSpaceEntryTimes.Remove(lastCellSpace.Id);
                 }
                 
                 // Record entry time for new cell space
                 cellSpaceEntryTimes[currentCellSpace.Id] = currentTime;
+                
+                // If this is our first cell transition, record the first cell space
+                if (firstCellSpace == null)
+                {
+                    firstCellSpace = lastCellSpace;
+                }
+                
                 lastCellSpace = currentCellSpace;
                 return;
             }
@@ -1571,12 +1557,18 @@ namespace CentralControl.RobotControl
             // Update occupancy for current cell space
             if (cellSpaceEntryTimes.TryGetValue(currentCellSpace.Id, out float entryTime))
             {
-                personalOccupancyLayer.SetPlannedOccupancy(
+                // Determine if this is a start or end cell
+                bool isStartCell = (currentCellSpace == firstCellSpace);
+                bool isEndCell = (currentOrder != null && HasReachedFinalDestination());
+                
+                personalOccupancyLayer.SetDynamicOccupancy(
                     currentCellSpace.Id,
                     entryTime,
                     currentTime,
                     Id.ToString(), 
-                    currentPlanId
+                    currentPlanId,
+                    isStartCell,
+                    isEndCell
                 );
             }
         }
@@ -1588,7 +1580,6 @@ namespace CentralControl.RobotControl
                 foreach (var cellSpace in indoorSpace.CellSpaces)
                 {
                     personalOccupancyLayer.ClearPlannedOccupancy(
-                        cellSpace.Id,
                         Id.ToString(),
                         currentPlanId,
                         Time.time
@@ -1981,6 +1972,7 @@ namespace CentralControl.RobotControl
         # region Helper Methods
         private bool isInitialized = false;
         private CellSpace lastCellSpace = null;
+        private CellSpace firstCellSpace = null; // Track the first cell space in a path
         private Dictionary<string, float> cellSpaceEntryTimes = new Dictionary<string, float>();
         private Vector3 currentPosition;
         

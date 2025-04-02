@@ -5,6 +5,7 @@ using UnityEngine;
 using Map;
 using NetTopologySuite.Geometries;
 using System.Diagnostics;
+using CentralControl;
 
 namespace PathPlanning
 {
@@ -101,6 +102,7 @@ namespace PathPlanning
     
     public class Astar_Traffic
     {
+        private static CellSpaceConflictDetector conflictDetector = new CellSpaceConflictDetector();
         private static Dictionary<string, List<RobotSmoothPathInfo>> robotSmoothPaths = new Dictionary<string, List<RobotSmoothPathInfo>>();
         
         // Time delay and retry attempts for smart avoidance
@@ -133,13 +135,6 @@ namespace PathPlanning
             
             // Create a new plan ID
             string newPlanId = $"Plan_{robotId}_{DateTime.Now.Ticks}";
-            
-            // If there is a current plan ID, clear the previous plan occupancy
-            if (!string.IsNullOrEmpty(currentPlanId))
-            {
-                personalOccupancyLayer.ClearPlannedOccupancy(robotId, currentPlanId, startTime);
-                globalOccupancyLayer.ClearPlannedOccupancy(robotId, currentPlanId, startTime);
-            }
             
             // Smart Avoidance Strategy: Try multiple path planning attempts
             for (int attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt++)
@@ -184,19 +179,8 @@ namespace PathPlanning
                     // Save the smooth path for the robot
                     SaveSmoothPathForRobot(robotId, smoothPath);
                     
-                    // Reserve the path occupancy
-                    ReservePathOccupancyPrecise(
-                        graph, 
-                        indoorSpace, 
-                        personalOccupancyLayer, 
-                        timeSpacePath, 
-                        robotId, 
-                        newPlanId
-                    );
-                    
                     var (path, times, speeds) = ConvertTimeSpacePathToLists(timeSpacePath);
                     
-                    // UnityEngine.Debug.Log($"Robot {robotId}: 成功找到路径，点数: {path.Count}, 时间点数: {times.Count}, 速度点数: {speeds.Count}");
                     return (path, times, speeds, newPlanId);
                 }
             }
@@ -308,15 +292,19 @@ namespace PathPlanning
                     float tentative_g_score = g_score[current] + travelTime;
                     float arrivalTime = currentTime + travelTime;
                     
-                    bool hasConflict = CheckConflict(
-                        neighbor.ConnectionPoint,
-                        arrivalTime,
-                        globalOccupancyLayer,
+                    bool hasConflict = CheckCellSpaceConflict(
+                        indoorSpace, 
+                        globalOccupancyLayer, 
+                        conflictDetector, 
+                        current, 
+                        neighbor, 
+                        arrivalTime, 
+                        arrivalTime + CalculateTime(current, neighbor, defaultSpeed), 
                         robotId);
                     
                     if (hasConflict)
                     {
-                        tentative_g_score += 2.0f;
+                        tentative_g_score += 5.0f;
                     }
                     
                     if (!g_score.ContainsKey(neighbor) || tentative_g_score < g_score[neighbor])
@@ -469,20 +457,59 @@ namespace PathPlanning
         /// <summary>
         /// Check for conflicts in the occupancy layer
         /// </summary>
-        private static bool CheckConflict(
-            ConnectionPoint connectionPoint, 
-            float time, 
-            DynamicOccupancyLayer occupancyLayer, 
+        private static bool CheckCellSpaceConflict(
+            IndoorSpace indoorSpace,
+            DynamicOccupancyLayer occupancyLayer,
+            CellSpaceConflictDetector conflictDetector,
+            RoutePoint fromPoint,
+            RoutePoint toPoint,
+            float startTime,
+            float endTime,
             string robotId)
         {
-            // Check if there are any conflicts in the occupancy layer
-            var conflicts = occupancyLayer.CheckBoundaryConflict(
-                connectionPoint.Id,
-                time,
-                time + 0.2f, // Add a small buffer for the time window
+            // Get the corresponding ConnectionPoints
+            ConnectionPoint fromCP = fromPoint.ConnectionPoint;
+            ConnectionPoint toCP = toPoint.ConnectionPoint;
+            
+            if (fromCP == null || toCP == null)
+            {
+                return false; // Not connection points, can't check
+            }
+            
+            // Create a mini-path to check just this segment
+            List<ConnectionPoint> miniPath = new List<ConnectionPoint> { fromCP, toCP };
+            List<float> miniTimes = new List<float> { startTime, endTime };
+            
+            // Use the conflict detector to check for conflicts
+            var conflicts = conflictDetector.DetectConflicts(
+                occupancyLayer,
+                indoorSpace,
+                miniPath,
+                miniTimes,
                 robotId);
-                
+            
             return conflicts.Count > 0;
+        }
+
+        /// <summary>
+        /// Calculate the time required to travel between two route points
+        /// </summary>
+        private static float CalculateTime(RoutePoint p1, RoutePoint p2, float speed)
+        {
+            if (p1 == null || p2 == null || 
+                p1.ConnectionPoint == null || p2.ConnectionPoint == null ||
+                p1.ConnectionPoint.Point == null || p2.ConnectionPoint.Point == null)
+            {
+                return 1000;
+            }
+            
+            Point point1 = (Point)p1.ConnectionPoint.Point;
+            Point point2 = (Point)p2.ConnectionPoint.Point;
+            
+            // Manhattan distance
+            float distance = (float)(Math.Abs(point1.X - point2.X) + Math.Abs(point1.Y - point2.Y));
+            
+            return distance / speed;
         }
         
         /// <summary>
@@ -500,9 +527,7 @@ namespace PathPlanning
             Point point1 = (Point)p1.ConnectionPoint.Point;
             Point point2 = (Point)p2.ConnectionPoint.Point;
             
-            return (float)Math.Sqrt(
-                Math.Pow(point1.X - point2.X, 2) + 
-                Math.Pow(point1.Y - point2.Y, 2));
+            return (float)(Math.Abs(point1.X - point2.X) + Math.Abs(point1.Y - point2.Y));
         }
         
         /// <summary>
@@ -733,104 +758,6 @@ namespace PathPlanning
             }
             
             return smoothPath;
-        }
-        
-        /// <summary>
-        /// Reserve the path occupancy for the robot
-        /// </summary>
-        private static void ReservePathOccupancyPrecise(
-            Graph graph, 
-            IndoorSpace indoorSpace, 
-            DynamicOccupancyLayer occupancyLayer, 
-            TimeSpacePath timeSpacePath, 
-            string robotId, 
-            string planId)
-        {
-            if (timeSpacePath == null || timeSpacePath.Segments.Count == 0)
-            {
-                UnityEngine.Debug.LogWarning($"Robot {robotId}: Attempted to reserve path occupancy, but no segments found.");
-                return;
-            }
-            
-            // Clear previous occupancy
-            float startTime = timeSpacePath.Segments.Count > 0 ? 
-                timeSpacePath.Segments[0].StartTime : 
-                Time.time;
-            
-            occupancyLayer.ClearPlannedOccupancy(robotId, planId, startTime);
-            
-            // Reserve occupancy for each segment
-            foreach (var segment in timeSpacePath.Segments)
-            {
-                string fromId = segment.From.Id;
-                string toId = segment.To.Id;
-                float startSegmentTime = segment.StartTime;
-                float endSegmentTime = segment.EndTime;
-                
-                occupancyLayer.SetBoundaryPlannedOccupancy(
-                    fromId, 
-                    startSegmentTime, 
-                    endSegmentTime, 
-                    robotId, 
-                    planId
-                );
-                
-                if (segment.From.CellBoundary != null)
-                {
-                    var cellBoundary = segment.From.CellBoundary;
-                    occupancyLayer.SetPlannedOccupancy(
-                        cellBoundary.Source, 
-                        startSegmentTime, 
-                        endSegmentTime, 
-                        robotId, 
-                        planId
-                    );
-                    occupancyLayer.SetPlannedOccupancy(
-                        cellBoundary.Target, 
-                        startSegmentTime, 
-                        endSegmentTime, 
-                        robotId, 
-                        planId
-                    );
-                }
-            }
-            
-            if (timeSpacePath.Points.Count > 0)
-            {
-                var lastPoint = timeSpacePath.Points[timeSpacePath.Points.Count - 1];
-                float lastArrivalTime = timeSpacePath.Segments.Count > 0 ? 
-                    timeSpacePath.Segments[timeSpacePath.Segments.Count - 1].EndTime : 
-                    startTime;
-                
-                float terminationTime = lastArrivalTime + 5.0f;
-                
-                occupancyLayer.SetBoundaryPlannedOccupancy(
-                    lastPoint.Id, 
-                    lastArrivalTime, 
-                    terminationTime, 
-                    robotId, 
-                    planId
-                );
-                
-                if (lastPoint.CellBoundary != null)
-                {
-                    var cellBoundary = lastPoint.CellBoundary;
-                    occupancyLayer.SetPlannedOccupancy(
-                        cellBoundary.Source, 
-                        lastArrivalTime, 
-                        terminationTime, 
-                        robotId, 
-                        planId
-                    );
-                    occupancyLayer.SetPlannedOccupancy(
-                        cellBoundary.Target, 
-                        lastArrivalTime, 
-                        terminationTime, 
-                        robotId, 
-                        planId
-                    );
-                }
-            }
         }
         
         /// <summary>

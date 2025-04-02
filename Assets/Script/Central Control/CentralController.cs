@@ -49,6 +49,7 @@ namespace CentralControl
         
         // Navigation
         private Graph graph;
+        private IndoorSpace indoorSpace;
         private GraphConnectivityChecker graphConnectivityChecker;
         private DynamicOccupancyLayer globalOccupancyLayer;
         private bool navMeshInitialized = false;
@@ -66,7 +67,7 @@ namespace CentralControl
         private Coroutine orderGenerationCoroutine;
 
         [SerializeField]
-        private BoundaryConflictDetector boundaryConflictDetector;
+        private CellSpaceConflictDetector cellSpaceConflictDetector;
         private Dictionary<string, List<PathConflictInfo>> detectedConflicts = new Dictionary<string, List<PathConflictInfo>>();
         private bool hasNewConflicts = false;
         #endregion
@@ -155,6 +156,7 @@ namespace CentralControl
 
             // 检查地图连接性
             graph = mapLoader.GetGraph();
+            indoorSpace = mapLoader.indoorSpace;
             graphConnectivityChecker = new GraphConnectivityChecker(graph);
             if (!graphConnectivityChecker.CheckConnectivityUsingFloydWarshall())
             {
@@ -505,9 +507,9 @@ namespace CentralControl
         // 初始化碰撞检测器
         private void InitializeConflictDetector()
         {
-            if (boundaryConflictDetector == null)
+            if (cellSpaceConflictDetector == null)
             {
-                boundaryConflictDetector = new BoundaryConflictDetector();
+                cellSpaceConflictDetector = new CellSpaceConflictDetector();
             }
             
             // 注册事件监听
@@ -529,44 +531,30 @@ namespace CentralControl
                 return false;
             }
             
+            // 合并所有机器人的占用层，获取最新全局状态
             MergeRobotOccupancyLayer();
 
             try
             {
-                // 解析边界ID
-                List<string> boundaryIds = path.Select(cp => cp.Id).ToList();
+                // 使用CellSpaceConflictDetector检测冲突
+                Dictionary<string, List<TimeOccupancy>> conflicts = cellSpaceConflictDetector.DetectConflicts(
+                    globalOccupancyLayer,
+                    indoorSpace,
+                    path,
+                    times,
+                    robotId);
                 
-                // 使用BoundaryConflictDetector检测冲突
-                bool hasConflict = false;
-                Dictionary<string, List<TimeOccupancy>> conflicts = new Dictionary<string, List<TimeOccupancy>>();
-                
-                // 检查每个边界的冲突
-                for (int i = 0; i < boundaryIds.Count; i++)
-                {
-                    string boundaryId = boundaryIds[i];
-                    float entryTime = times[i];
-                    float exitTime = (i < boundaryIds.Count - 1) ? times[i + 1] : entryTime + 1.0f; // 最后一个点估计1秒
-                    
-                    // 检查边界冲突
-                    var boundaryConflicts = globalOccupancyLayer.CheckBoundaryConflict(
-                        boundaryId, entryTime, exitTime, robotId);
-                    
-                    if (boundaryConflicts.Count > 0)
-                    {
-                        hasConflict = true;
-                        conflicts[boundaryId] = boundaryConflicts;
-                    }
-                }
+                bool hasConflict = conflicts.Count > 0;
                 
                 if (hasConflict)
                 {
                     // 记录冲突信息
-                    RecordConflict(robotId, planId, boundaryIds, times, conflicts);
+                    RecordCellSpaceConflict(robotId, planId, path, times, conflicts);
                     return true;
                 }
                 
                 // 如果没有冲突，预留路径占用
-                ReservePath(robotId, planId, boundaryIds, times);
+                ReserveCellSpacePath(robotId, planId, path, times);
                 return false;
             }
             catch (Exception ex)
@@ -577,8 +565,10 @@ namespace CentralControl
         }
         
         // 记录路径冲突信息
-        private void RecordConflict(string robotId, string planId, List<string> boundaryIds, 
-                                   List<float> times, Dictionary<string, List<TimeOccupancy>> conflicts)
+        private void RecordCellSpaceConflict(string robotId, string planId, 
+                                        List<ConnectionPoint> path, 
+                                        List<float> times, 
+                                        Dictionary<string, List<TimeOccupancy>> conflicts)
         {
             if (!detectedConflicts.ContainsKey(robotId))
             {
@@ -590,44 +580,67 @@ namespace CentralControl
                 RobotId = robotId,
                 PlanId = planId,
                 DetectionTime = Time.time,
-                BoundaryConflicts = new Dictionary<string, List<BoundaryConflictInfo>>()
+                CellSpaceConflicts = new Dictionary<string, List<CellSpaceConflictInfo>>()
             };
+            
+            // 获取路径对应的CellSpace占用
+            var cellOccupancies = cellSpaceConflictDetector.MapConnectionPointPathToCellSpaceOccupancies(
+                indoorSpace, path, times);
+            
+            // 创建CellId到占用时间的映射
+            Dictionary<string, CellSpaceOccupancy> cellOccupancyMap = new Dictionary<string, CellSpaceOccupancy>();
+            foreach (var occ in cellOccupancies)
+            {
+                cellOccupancyMap[occ.CellId] = occ;
+            }
             
             foreach (var entry in conflicts)
             {
-                string boundaryId = entry.Key;
-                var boundaryConflicts = new List<BoundaryConflictInfo>();
+                string cellId = entry.Key;
+                var cellConflicts = new List<CellSpaceConflictInfo>();
                 
-                int boundaryIndex = boundaryIds.IndexOf(boundaryId);
-                float entryTime = (boundaryIndex >= 0 && boundaryIndex < times.Count) ? times[boundaryIndex] : 0;
-                float exitTime = (boundaryIndex >= 0 && boundaryIndex + 1 < times.Count) ? times[boundaryIndex + 1] : entryTime + 1.0f;
+                // 获取当前CellSpace的占用时间
+                if (!cellOccupancyMap.TryGetValue(cellId, out var myCellOccupancy))
+                {
+                    Debug.LogWarning($"无法找到CellSpace {cellId}的占用信息");
+                    continue;
+                }
+                
+                float myEntryTime = myCellOccupancy.EntryTime;
+                float myExitTime = myCellOccupancy.ExitTime;
+                bool isStartCell = myCellOccupancy.IsStartCell;
+                bool isEndCell = myCellOccupancy.IsEndCell;
                 
                 foreach (var occupancy in entry.Value)
                 {
-                    var conflict = new BoundaryConflictInfo
+                    var conflict = new CellSpaceConflictInfo
                     {
-                        BoundaryId = boundaryId,
+                        CellId = cellId,
                         ConflictRobotId = occupancy.Occupier.RobotId,
                         ConflictPlanId = occupancy.Occupier.PlanId,
-                        ConflictType = DetermineConflictType(entryTime, exitTime, occupancy.StartTime, occupancy.EndTime),
-                        MyEntryTime = entryTime,
-                        MyExitTime = exitTime,
+                        // ConflictType = DetermineConflictType(myEntryTime, myExitTime, occupancy.StartTime, occupancy.EndTime),
+                        MyEntryTime = myEntryTime,
+                        MyExitTime = myExitTime,
                         TheirEntryTime = occupancy.StartTime,
                         TheirExitTime = occupancy.EndTime,
-                        OverlapDuration = CalculateOverlapDuration(entryTime, exitTime, occupancy.StartTime, occupancy.EndTime)
+                        OverlapDuration = CalculateOverlapDuration(myEntryTime, myExitTime, occupancy.StartTime, occupancy.EndTime),
+                        IsStartCell = isStartCell,
+                        IsEndCell = isEndCell,
+                        TheirIsStartCell = occupancy.IsStartCell,
+                        TheirIsEndCell = occupancy.IsEndCell
                     };
                     
-                    boundaryConflicts.Add(conflict);
+                    cellConflicts.Add(conflict);
                 }
                 
-                conflictInfo.BoundaryConflicts[boundaryId] = boundaryConflicts;
+                conflictInfo.CellSpaceConflicts[cellId] = cellConflicts;
             }
             
             detectedConflicts[robotId].Add(conflictInfo);
             hasNewConflicts = true;
             
             // 日志输出冲突信息
-            LogConflictInfo(conflictInfo);
+            LogCellSpaceConflictInfo(conflictInfo);
         }
         
         // 计算重叠持续时间
@@ -638,98 +651,71 @@ namespace CentralControl
             return Mathf.Max(0, overlapEnd - overlapStart);
         }
         
-        // 确定冲突类型
-        private ConflictType DetermineConflictType(float myEntryTime, float myExitTime, float theirEntryTime, float theirExitTime)
-        {
-            // 简单分类：基于进入/离开时间判断
-            // 更复杂的分类可以考虑机器人移动方向
+        // // 确定冲突类型
+        // private ConflictType DetermineConflictType(float myEntryTime, float myExitTime, float theirEntryTime, float theirExitTime)
+        // {
+        //     // 简单分类：基于进入/离开时间判断
+        //     // 更复杂的分类可以考虑机器人移动方向
             
-            // 同时进入 (±0.1秒容差)
-            if (Mathf.Abs(myEntryTime - theirEntryTime) < 0.1f)
-            {
-                return ConflictType.HeadOn;
-            }
+        //     // 同时进入 (±0.1秒容差)
+        //     if (Mathf.Abs(myEntryTime - theirEntryTime) < 0.1f)
+        //     {
+        //         return ConflictType.HeadOn;
+        //     }
             
-            // 我先进入，对方后进入
-            if (myEntryTime < theirEntryTime)
-            {
-                // 我离开前对方就进入 -> 追尾冲突
-                if (myExitTime > theirEntryTime)
-                {
-                    return ConflictType.BeingOvertaken;
-                }
-            }
-            // 对方先进入，我后进入
-            else
-            {
-                // 对方离开前我就进入 -> 追尾冲突
-                if (theirExitTime > myEntryTime)
-                {
-                    return ConflictType.Overtaking;
-                }
-            }
+        //     // 我先进入，对方后进入
+        //     if (myEntryTime < theirEntryTime)
+        //     {
+        //         // 我离开前对方就进入 -> 追尾冲突
+        //         if (myExitTime > theirEntryTime)
+        //         {
+        //             return ConflictType.BeingOvertaken;
+        //         }
+        //     }
+        //     // 对方先进入，我后进入
+        //     else
+        //     {
+        //         // 对方离开前我就进入 -> 追尾冲突
+        //         if (theirExitTime > myEntryTime)
+        //         {
+        //             return ConflictType.Overtaking;
+        //         }
+        //     }
             
-            // 其他类型冲突
-            return ConflictType.General;
-        }
+        //     // 其他类型冲突
+        //     return ConflictType.General;
+        // }
         
         // 日志输出冲突信息
-        private void LogConflictInfo(PathConflictInfo conflictInfo)
+        private void LogCellSpaceConflictInfo(PathConflictInfo conflictInfo)
         {
-            Debug.LogWarning($"===== 检测到路径冲突 =====");
+            Debug.LogWarning($"===== 检测到路径冲突(中央检测) =====");
             Debug.LogWarning($"机器人: {conflictInfo.RobotId}, 计划: {conflictInfo.PlanId}, 时间: {conflictInfo.DetectionTime:F2}");
             
-            foreach (var entry in conflictInfo.BoundaryConflicts)
+            foreach (var entry in conflictInfo.CellSpaceConflicts)
             {
-                string boundaryId = entry.Key;
+                string cellId = entry.Key;
                 var conflicts = entry.Value;
                 
-                Debug.LogWarning($"边界 {boundaryId} 存在 {conflicts.Count} 个冲突:");
+                Debug.LogWarning($"CellSpace {cellId} 存在 {conflicts.Count} 个冲突:");
                 
                 foreach (var conflict in conflicts)
                 {
-                    Debug.LogWarning($"  与机器人 {conflict.ConflictRobotId} 发生 {conflict.ConflictType} 类型冲突");
-                    Debug.LogWarning($"  我方时间: {conflict.MyEntryTime:F2}-{conflict.MyExitTime:F2}, " +
-                                    $"对方时间: {conflict.TheirEntryTime:F2}-{conflict.TheirExitTime:F2}, " +
-                                    $"重叠: {conflict.OverlapDuration:F2}秒");
+                    string cellTypeInfo = "";
+                    if (conflict.IsStartCell) cellTypeInfo += "[起点]";
+                    if (conflict.IsEndCell) cellTypeInfo += "[终点]";
+                    
+                    string theirCellTypeInfo = "";
+                    if (conflict.TheirIsStartCell) theirCellTypeInfo += "[起点]";
+                    if (conflict.TheirIsEndCell) theirCellTypeInfo += "[终点]";
+                    
+                    Debug.LogWarning($"  我方{cellTypeInfo}时间: {conflict.MyEntryTime:F2}-{conflict.MyExitTime:F2}, " +
+                                $"对方{theirCellTypeInfo}时间: {conflict.TheirEntryTime:F2}-{conflict.TheirExitTime:F2}, " +
+                                $"重叠: {conflict.OverlapDuration:F2}秒");
                 }
             }
             
             Debug.LogWarning($"========================");
-        }
-        
-        // 预留路径占用
-        private void ReservePath(string robotId, string planId, List<string> boundaryIds, List<float> times)
-        {
-            if (string.IsNullOrEmpty(planId))
-            {
-                planId = $"Plan_{robotId}_{DateTime.Now.Ticks}";
-            }
-            
-            // 清除之前的计划
-            globalOccupancyLayer.ClearPlannedOccupancy(robotId, planId, Time.time);
-            
-            // 添加新的计划占用
-            for (int i = 0; i < boundaryIds.Count - 1; i++)
-            {
-                string boundaryId = boundaryIds[i];
-                float entryTime = times[i];
-                float exitTime = times[i + 1];
-                
-                globalOccupancyLayer.SetBoundaryPlannedOccupancy(boundaryId, entryTime, exitTime, robotId, planId);
-            }
-            
-            // 最后一个边界点
-            if (boundaryIds.Count > 0)
-            {
-                string lastBoundaryId = boundaryIds[boundaryIds.Count - 1];
-                float lastEntryTime = times[times.Count - 1];
-                float lastExitTime = lastEntryTime + 1.0f; // 估计停留1秒
-                
-                globalOccupancyLayer.SetBoundaryPlannedOccupancy(lastBoundaryId, lastEntryTime, lastExitTime, robotId, planId);
-            }
-            
-            Debug.Log($"为机器人 {robotId} 预留了路径，计划ID: {planId}");
         }
         
         // 处理机器人路径规划完成事件
@@ -756,6 +742,18 @@ namespace CentralControl
             }
         }
         
+        // 预留路径占用空间
+        private void ReserveCellSpacePath(string robotId, string planId, List<ConnectionPoint> path, List<float> times)
+        {
+            if (string.IsNullOrEmpty(planId))
+            {
+                planId = $"Plan_{robotId}_{DateTime.Now.Ticks}";
+            }
+            
+            // Use the new method to record path occupancy
+            globalOccupancyLayer.RecordPathOccupancy(indoorSpace, path, times, robotId, planId);
+        }
+
         // 定期更新并处理冲突
         private void UpdateConflictDetection()
         {
@@ -1328,40 +1326,45 @@ namespace CentralControl
         #endregion
     }
 
-    // 冲突类型
-    public enum ConflictType
-    {
-        // 头对头冲突 - 两机器人相向而行
-        HeadOn,
-        // 超车冲突 - 我方想超越前车
-        Overtaking,
-        //被超车冲突 - 后车想超越我方
-        BeingOvertaken,
-        // 一般冲突 - 其他类型冲突
-        General
-    }
+    // // 冲突类型
+    // public enum ConflictType
+    // {
+    //     // 头对头冲突 - 两机器人相向而行
+    //     HeadOn,
+    //     // 超车冲突 - 我方想超越前车
+    //     Overtaking,
+    //     // 被超车冲突 - 后车想超越我方
+    //     BeingOvertaken,
+    //     // 一般冲突 - 其他类型冲突
+    //     General
+    // }
     
     // 边界冲突信息
-    public class BoundaryConflictInfo
+    public class CellSpaceConflictInfo
     {
-        public string BoundaryId { get; set; }
+        public string CellId { get; set; }
         public string ConflictRobotId { get; set; }
         public string ConflictPlanId { get; set; }
-        public ConflictType ConflictType { get; set; }
+        // public ConflictType ConflictType { get; set; }
         public float MyEntryTime { get; set; }
         public float MyExitTime { get; set; }
         public float TheirEntryTime { get; set; }
         public float TheirExitTime { get; set; }
         public float OverlapDuration { get; set; }
+        public bool IsStartCell { get; set; }
+        public bool IsEndCell { get; set; }
+        public bool TheirIsStartCell { get; set; }
+        public bool TheirIsEndCell { get; set; }
     }
     
-    /// 路径冲突信息
+    // 路径冲突信息
     public class PathConflictInfo
     {
         public string RobotId { get; set; }
         public string PlanId { get; set; }
         public float DetectionTime { get; set; }
-        public Dictionary<string, List<BoundaryConflictInfo>> BoundaryConflicts { get; set; }
+        public Dictionary<string, List<CellSpaceConflictInfo>> CellSpaceConflicts { get; set; } = 
+            new Dictionary<string, List<CellSpaceConflictInfo>>();
     }
     
     // 机器人路径事件参数
