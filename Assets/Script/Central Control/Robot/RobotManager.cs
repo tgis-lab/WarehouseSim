@@ -217,6 +217,16 @@ namespace CentralControl.RobotControl
             return robots.Where(r => r.IsAvailable).ToList();
         }
 
+        public RobotController GetRobotById(int id)
+        {
+            return robots.FirstOrDefault(r => r.Id == id);
+        }
+
+        public RobotController GetRobotById(string id)
+        {
+            return robots.FirstOrDefault(r => r.Id.ToString() == id);
+        }
+
         public void CheckRobotStatus()
         {
             foreach (var robot in robots)

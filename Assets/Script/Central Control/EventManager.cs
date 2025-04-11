@@ -21,6 +21,28 @@ namespace CentralControl
         }
     }
 
+    public class RobotPathModificationEventArgs : EventArgs
+    {
+        public string RobotId { get; private set; }
+        public string PlanId { get; private set; }
+        public List<ConnectionPoint> Path { get; private set; }
+        public List<float> NewTimes { get; private set; }
+        public string ModificationType { get; private set; }
+        public float ModificationValue { get; private set; }
+        
+        public RobotPathModificationEventArgs(
+            string robotId, string planId, List<ConnectionPoint> path, 
+            List<float> newTimes, string modificationType, float modificationValue)
+        {
+            RobotId = robotId;
+            PlanId = planId;
+            Path = path;
+            NewTimes = newTimes;
+            ModificationType = modificationType;
+            ModificationValue = modificationValue;
+        }
+    }
+
     public class EventManager : MonoBehaviour
     {
         public static EventManager Instance { get; private set; }
@@ -34,6 +56,10 @@ namespace CentralControl
 
         // Path-related events
         public event EventHandler<RobotPathEventArgs> OnRobotPathPlanned;
+        
+        public event EventHandler<RobotPathModificationEventArgs> OnRobotPathModified;
+        
+        public event EventHandler<string> OnRobotPathAccepted;
 
         private void Awake()
         {
@@ -97,6 +123,18 @@ namespace CentralControl
         {
             Debug.Log($"EventManager: Robot {robotId} planned a path with {path.Count} points");
             OnRobotPathPlanned?.Invoke(this, new RobotPathEventArgs(robotId, planId, path, times));
+        }
+        
+        public void TriggerRobotPathModified(RobotPathModificationEventArgs args)
+        {
+            Debug.Log($"EventManager: 触发机器人路径修改事件: 机器人 {args.RobotId}, 类型 {args.ModificationType}, 值 {args.ModificationValue}");
+            OnRobotPathModified?.Invoke(this, args);
+        }
+        
+        public void TriggerRobotPathAccepted(string robotId, string planId)
+        {
+            Debug.Log($"EventManager: 机器人 {robotId} 的路径 {planId} 已被接受");
+            OnRobotPathAccepted?.Invoke(this, robotId);
         }
     }
 }

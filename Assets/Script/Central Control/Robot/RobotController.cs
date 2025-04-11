@@ -90,6 +90,7 @@ namespace CentralControl.RobotControl
         }
         private NavigationPhase currentNavigationPhase = NavigationPhase.FollowingPath;
         private Vector3 finalDestination;
+        private Vector3 targetPosition;
         private float pathPointAcceptanceRadius = 0.8f;
         private float finalDestinationAcceptanceRadius = 0.3f;
         private bool hasReportedArrival = false;
@@ -125,6 +126,12 @@ namespace CentralControl.RobotControl
         private float lastPathRecoveryTime = 0f;
         private const int MAX_RECOVERY_ATTEMPTS = 3;
         private const float RECOVERY_INTERVAL = 2.0f;
+        # endregion
+
+        # region Conflict Resolution
+        private Coroutine waitForExecutionCoroutine;
+        private bool isWaitingForExecution = false;
+        private List<float> pathTimes = new List<float>();
         # endregion
 
         # region Collision Avoidance
@@ -212,6 +219,15 @@ namespace CentralControl.RobotControl
             Debug.DrawLine(transform.position, transform.position + Vector3.up * 2, Color.red);
             Debug.DrawLine(transform.position, transform.position + transform.forward * 1.5f, Color.red);
         }
+
+        private void OnDestroy()
+        {
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotPathModified -= HandlePathModified;
+                EventManager.Instance.OnRobotPathAccepted -= HandlePathAccepted;
+            }
+        }
         # endregion
 
         # region Initialization
@@ -240,6 +256,16 @@ namespace CentralControl.RobotControl
             dwaPlanner = new DWAPlanner();
             dwaPlanner.MaxSpeed = defaultSpeed;
             dwaPlanner.ObstacleLayer = obstacleLayer;
+
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotPathModified += HandlePathModified;
+                EventManager.Instance.OnRobotPathAccepted += HandlePathAccepted;
+            }
+            else
+            {
+                Debug.LogError($"Robot {Id}: EventManager not found, path modification events will not be received");
+            }
             
             isInitialized = true;
             Debug.Log($"Robot {Id} initialized at {transform.position}");
@@ -1356,6 +1382,86 @@ namespace CentralControl.RobotControl
         }
         # endregion
 
+        # region Conflict Resolution
+        // 1. Time shift modification
+        private void ApplyTimeShiftModification(List<ConnectionPoint> path, List<float> newTimes, string planId, float shift)
+        {
+            // Update path and times
+            currentPath = path;
+            pathTimes = newTimes;
+            currentPlanId = planId;
+            
+            Debug.Log($"Robot {Id}: Utilize time shift modification: {shift}s, new path length: {path.Count}");
+            
+            // Save path to personal layer
+            SavePathToPersonalLayer(path, newTimes, planId);
+            
+            // Adjust waiting time
+            float newStartTime = newTimes[0];
+            float currentTime = Time.time;
+            float waitTime = Math.Max(0, newStartTime - currentTime);
+            
+            isWaitingForExecution = true;
+            
+            // If there's an existing waiting coroutine, stop it
+            if (waitForExecutionCoroutine != null)
+            {
+                StopCoroutine(waitForExecutionCoroutine);
+            }
+            
+            // Execute new waiting time
+            waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
+        }
+
+        private IEnumerator WaitForExecution(float waitTime)
+        {
+            Debug.Log($"机器人 {Id}: 等待 {waitTime}s 后开始执行路径");
+            
+            yield return new WaitForSeconds(waitTime);
+            
+            BeginPathExecution();
+        }
+
+        private void BeginPathExecution()
+        {
+            if (currentPath == null || pathTimes == null || currentPath.Count == 0)
+            {
+                Debug.LogWarning($"Robot {Id}: Attempt to execute an empty path");
+                return;
+            }
+            
+            Debug.Log($"Robot {Id}: Start to execute naivgation, path length: {currentPath.Count}");
+            
+            isWaitingForExecution = false;
+            SetState(RobotState.Moving, true);
+            
+            // Set navigation target
+            SetNavigationTarget(currentPath[0]);
+            
+            // Update path tracking index
+            currentPathIndex = 0;
+        }
+
+        private void SetNavigationTarget(ConnectionPoint target)
+        {
+            if (target == null || target.Point == null)
+            {
+                Debug.LogWarning($"Robot {Id}: Attempt to set an invalid target point");
+                return;
+            }
+            
+            Point point = target.Point as Point;
+            if (point == null)
+            {
+                Debug.LogWarning($"Robot {Id}: Attempt to set an invalid target point type");
+                return;
+            }
+            
+            targetPosition = new Vector3((float)point.X, transform.position.y, (float)point.Y);
+            Debug.Log($"Robot {Id}: set target to: {targetPosition}");
+        }
+        # endregion
+
         # region Status Management
         private void UpdateRobotStatus()
         {
@@ -1572,7 +1678,16 @@ namespace CentralControl.RobotControl
                 );
             }
         }
-        
+
+        private void SavePathToPersonalLayer(List<ConnectionPoint> path, List<float> times, string planId)
+        {
+            // 创建一个占用标识符
+            var occupier = new OccupancyIdentifier(Id.ToString(), planId, OccupancyType.Planned);
+            
+            // 记录路径到个人地图层
+            personalOccupancyLayer.RecordPathOccupancy(indoorSpace, path, times, Id.ToString(), planId);
+        }
+
         public void ClearPathReservations()
         {
             if (!string.IsNullOrEmpty(currentPlanId))
@@ -1824,6 +1939,42 @@ namespace CentralControl.RobotControl
             
             // Replan path
             yield return StartCoroutine(ReplanPath());
+        }
+        #endregion
+
+        #region Events Management
+        private void HandlePathModified(object sender, RobotPathModificationEventArgs e)
+        {
+            // 检查是否是给当前机器人的修改
+            if (e.RobotId != Id.ToString())
+                return;
+            
+            Debug.Log($"机器人 {Id}: 收到路径修改通知: 类型 {e.ModificationType}, 值 {e.ModificationValue}");
+            
+            // 根据修改类型处理
+            switch (e.ModificationType)
+            {
+                case "time_shift":
+                    // 处理时间偏移修改
+                    ApplyTimeShiftModification(e.Path, e.NewTimes, e.PlanId, e.ModificationValue);
+                    break;
+                // 未来可以添加其他修改类型的处理
+                default:
+                    Debug.LogWarning($"机器人 {Id}: 未知的路径修改类型: {e.ModificationType}");
+                    break;
+            }
+        }
+
+        private void HandlePathAccepted(object sender, string robotId)
+        {
+            // 检查是否是给当前机器人的通知
+            if (robotId != Id.ToString())
+                return;
+            
+            Debug.Log($"机器人 {Id}: 路径已被中央接受");
+            
+            // 执行响应逻辑，例如开始执行路径
+            BeginPathExecution();
         }
         #endregion
 

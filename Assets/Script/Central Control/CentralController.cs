@@ -54,6 +54,9 @@ namespace CentralControl
         private DynamicOccupancyLayer globalOccupancyLayer;
         private bool navMeshInitialized = false;
         private float lastUpdateTime;
+
+        // Conflict resolution
+        private ConflictResolver conflictResolver;
         
         // Order management
         private OrderAssignmentSelector orderAssignmentSelector;
@@ -202,6 +205,7 @@ namespace CentralControl
             {
                 Debug.Log("初始化碰撞检测系统...");
                 InitializeConflictDetector();
+                conflictResolver = new ConflictResolver(globalOccupancyLayer, cellSpaceConflictDetector, indoorSpace);
                 
                 // 标记为完全初始化
                 isFullyInitialized = true;
@@ -550,6 +554,26 @@ namespace CentralControl
                 {
                     // 记录冲突信息
                     RecordCellSpaceConflict(robotId, planId, path, times, conflicts);
+
+                    // 尝试使用时间偏移解决冲突
+                    var (success, newTimes, shift) = conflictResolver.ResolveConflictByTimeShift(
+                        robotId, path, times, conflicts);
+                    
+                    if (success)
+                    {
+                        Debug.Log($"通过时间偏移成功解决冲突: 机器人 {robotId}, 偏移量 {shift}s");
+                        
+                        // 使用修改后的时间更新路径预留
+                        ReserveCellSpacePath(robotId, planId, path, newTimes);
+                        
+                        // 通知机器人路径已被修改
+                        NotifyRobotPathModified(robotId, planId, path, newTimes, "time_shift", shift);
+                        
+                        return false; // 冲突已解决
+                    }
+                    
+                    // 时间偏移失败，记录冲突信息
+                    RecordCellSpaceConflict(robotId, planId, path, times, conflicts);
                     return true;
                 }
                 
@@ -732,13 +756,13 @@ namespace CentralControl
             
             if (hasConflict)
             {
-                Debug.LogWarning($"机器人 {e.RobotId} 的路径存在冲突");
+                Debug.LogWarning($"The path of robot {e.RobotId} has conflicts!");
                 // 在此可以触发事件通知机器人重新规划
                 // 或者执行其他冲突处理策略
             }
             else
             {
-                Debug.Log($"机器人 {e.RobotId} 的路径已被接受");
+                Debug.Log($"The path of robot {e.RobotId} has been accepted.");
             }
         }
         
@@ -1001,11 +1025,6 @@ namespace CentralControl
             }
         }
 
-        public static void NotifyRobotFree(RobotController robot)
-        {
-            OnRobotBecameFree?.Invoke(null, new RobotStatusEventArgs(robot));
-        }
-
         private void HandleRobotBecameFree(object sender, RobotStatusEventArgs e)
         {
             if (e.Robot != null && e.Robot.IsFree)
@@ -1132,6 +1151,32 @@ namespace CentralControl
                     }
                 }
             }
+        }
+        #endregion
+
+        #region Notification System
+        public static void NotifyRobotFree(RobotController robot)
+        {
+            OnRobotBecameFree?.Invoke(null, new RobotStatusEventArgs(robot));
+        }
+
+        private void NotifyRobotPathModified(string robotId, string planId, List<ConnectionPoint> path, 
+                                            List<float> newTimes, string modificationType, float modificationValue)
+        {
+            // 找到对应的机器人
+            RobotController robot = robotManager.GetRobotById(robotId);
+            if (robot == null)
+            {
+                Debug.LogWarning($"无法找到机器人 {robotId}，无法通知路径修改");
+                return;
+            }
+            
+            // 创建路径修改事件参数
+            var modificationArgs = new RobotPathModificationEventArgs(
+                robotId, planId, path, newTimes, modificationType, modificationValue);
+            
+            // 触发事件通知机器人
+            EventManager.Instance.TriggerRobotPathModified(modificationArgs);
         }
         #endregion
 
