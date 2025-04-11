@@ -226,6 +226,7 @@ namespace CentralControl.RobotControl
             {
                 EventManager.Instance.OnRobotPathModified -= HandlePathModified;
                 EventManager.Instance.OnRobotPathAccepted -= HandlePathAccepted;
+                EventManager.Instance.OnPickingCompleted -= HandlePickingCompletedEvent;
             }
         }
         # endregion
@@ -261,6 +262,7 @@ namespace CentralControl.RobotControl
             {
                 EventManager.Instance.OnRobotPathModified += HandlePathModified;
                 EventManager.Instance.OnRobotPathAccepted += HandlePathAccepted;
+                EventManager.Instance.OnPickingCompleted += HandlePickingCompletedEvent;
             }
             else
             {
@@ -364,7 +366,6 @@ namespace CentralControl.RobotControl
             // Plan path to destination
             Debug.Log($"Robot {Id} planning path to {order.Destination}");
             SetState(RobotState.Moving, true);
-            
             
             Vector3 targetPosition = GetTargetPosition(order.PickingPoint);
             var result = PlanPath(targetPosition);
@@ -1975,6 +1976,25 @@ namespace CentralControl.RobotControl
             
             // 执行响应逻辑，例如开始执行路径
             BeginPathExecution();
+        }
+
+        private void HandlePickingCompletedEvent(object sender, PickingEventArgs e)
+        {
+            // 确认事件是否针对此机器人
+            if (e.RobotId != Id.ToString())
+                return;
+            
+            Debug.Log($"Robot {Id}: 收到拣货完成事件，PickingPoint: {e.PickingPoint.Id}");
+            
+            // 确认是当前订单的拣货点
+            if (currentOrder != null && currentOrder.PickingPoint.Id == e.PickingPoint.Id)
+            {
+                NotifyPickingCompleted();
+            }
+            else
+            {
+                Debug.LogWarning($"Robot {Id}: 收到拣货完成事件，但当前没有匹配的订单或拣货点不匹配");
+            }
         }
         #endregion
 
