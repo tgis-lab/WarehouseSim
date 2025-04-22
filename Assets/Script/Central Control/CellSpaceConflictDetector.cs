@@ -15,18 +15,19 @@ namespace CentralControl
             IndoorSpace indoorSpace, 
             List<ConnectionPoint> connectionPointPath, 
             List<float> times, 
-            string robotId)
+            string robotId,
+            string source = "Unknown") // 添加来源参数，默认为"Unknown"
         {
             if (connectionPointPath == null || connectionPointPath.Count < 2 || times == null || times.Count < connectionPointPath.Count)
             {
-                Debug.LogWarning("Invalid boundary path or times");
+                Debug.LogWarning($"[{source}] Invalid boundary path or times");
                 return new Dictionary<string, List<TimeOccupancy>>();
             }
             
             // Collect all conflicts
             Dictionary<string, List<TimeOccupancy>> conflicts = new Dictionary<string, List<TimeOccupancy>>();
             
-            // Construct CellSpace path and its occupancy time
+            // 构建CellSpace路径及其占用时间
             var cellSpaceOccupancies = MapConnectionPointPathToCellSpaceOccupancies(indoorSpace, connectionPointPath, times);
             
             // 检查每个CellSpace的冲突
@@ -43,7 +44,7 @@ namespace CentralControl
                 
                 if (cellConflicts.Count > 0)
                 {
-                    // 先按机器人ID分组
+                    // 按机器人ID分组
                     Dictionary<string, List<TimeOccupancy>> robotConflicts = new Dictionary<string, List<TimeOccupancy>>();
                     
                     foreach (var conflict in cellConflicts)
@@ -69,41 +70,39 @@ namespace CentralControl
                         string conflictRobotId = robotEntry.Key;
                         var robotOccupancies = robotEntry.Value;
                         
-                        // 对于每个机器人，只保留一个合并后的占用记录
-                        if (robotOccupancies.Count > 0)
+                        // 合并同一机器人在同一单元格的冲突
+                        var mergedOccupancy = robotOccupancies[0];
+                        for (int i = 1; i < robotOccupancies.Count; i++)
                         {
-                            // 找出最早的开始时间和最晚的结束时间
-                            float minStart = float.MaxValue;
-                            float maxEnd = float.MinValue;
-                            bool hasStartCell = false;
-                            bool hasEndCell = false;
-                            
-                            foreach (var occ in robotOccupancies)
+                            if (robotOccupancies[i].StartTime < mergedOccupancy.StartTime)
                             {
-                                minStart = Mathf.Min(minStart, occ.StartTime);
-                                maxEnd = Mathf.Max(maxEnd, occ.EndTime);
-                                hasStartCell |= occ.IsStartCell;
-                                hasEndCell |= occ.IsEndCell;
+                                mergedOccupancy = new TimeOccupancy(
+                                    robotOccupancies[i].StartTime,
+                                    mergedOccupancy.EndTime,
+                                    mergedOccupancy.Occupier,
+                                    mergedOccupancy.IsStartCell,
+                                    mergedOccupancy.IsEndCell);
                             }
                             
-                            // 创建一个合并的占用记录，保留起点/终点标志
-                            var mergedOccupier = robotOccupancies[0].Occupier; // 使用第一个占用的标识符
-                            var mergedOccupancy = new TimeOccupancy(
-                                minStart, 
-                                maxEnd, 
-                                mergedOccupier, 
-                                hasStartCell, 
-                                hasEndCell);
-                            
-                            conflicts[cellId].Add(mergedOccupancy);
+                            if (robotOccupancies[i].EndTime > mergedOccupancy.EndTime)
+                            {
+                                mergedOccupancy = new TimeOccupancy(
+                                    mergedOccupancy.StartTime,
+                                    robotOccupancies[i].EndTime,
+                                    mergedOccupancy.Occupier,
+                                    mergedOccupancy.IsStartCell,
+                                    mergedOccupancy.IsEndCell);
+                            }
                         }
+                        
+                        conflicts[cellId].Add(mergedOccupancy);
                     }
                     
-                    // 只输出每个单元格的汇总信息
-                    Debug.LogWarning($"CellSpace {cellId} 检测到 {conflicts[cellId].Count} 个冲突机器人");
+                    // 添加来源信息到日志输出
+                    Debug.LogWarning($"[{source}] CellSpace {cellId} 检测到 {conflicts[cellId].Count} 个冲突机器人");
                     foreach (var conflict in conflicts[cellId])
                     {
-                        Debug.LogWarning($"  与机器人 {conflict.Occupier.RobotId} 在时间 " +
+                        Debug.LogWarning($"[{source}]   与机器人 {conflict.Occupier.RobotId} 在时间 " +
                                     $"{conflict.StartTime:F2}-{conflict.EndTime:F2} 发生冲突");
                     }
                 }

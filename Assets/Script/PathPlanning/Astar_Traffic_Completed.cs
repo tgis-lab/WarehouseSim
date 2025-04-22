@@ -486,7 +486,8 @@ namespace PathPlanning
                 indoorSpace,
                 miniPath,
                 miniTimes,
-                robotId);
+                robotId, 
+                "PathPlanning");
             
             return conflicts.Count > 0;
         }

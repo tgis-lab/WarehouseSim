@@ -527,63 +527,133 @@ namespace CentralControl
         }
         
         // 检测指定路径的碰撞
-        public bool DetectPathConflicts(string robotId, List<ConnectionPoint> path, List<float> times, string planId = null)
+        private bool DetectPathConflicts(string robotId, List<ConnectionPoint> path, List<float> times, string planId)
         {
-            if (path == null || path.Count < 2 || times == null || times.Count < path.Count)
-            {
-                Debug.LogWarning($"无效的路径数据: 路径点{path?.Count ?? 0}, 时间点{times?.Count ?? 0}");
-                return false;
-            }
-            
-            // 合并所有机器人的占用层，获取最新全局状态
-            MergeRobotOccupancyLayer();
-
             try
             {
-                // 使用CellSpaceConflictDetector检测冲突
+                // 初始冲突检测
                 Dictionary<string, List<TimeOccupancy>> conflicts = cellSpaceConflictDetector.DetectConflicts(
                     globalOccupancyLayer,
                     indoorSpace,
                     path,
                     times,
-                    robotId);
+                    robotId, 
+                    "CentralControl_Initial");
                 
                 bool hasConflict = conflicts.Count > 0;
                 
+                // 如果存在冲突，尝试应用冲突消解策略
                 if (hasConflict)
                 {
-                    // 记录冲突信息
-                    RecordCellSpaceConflict(robotId, planId, path, times, conflicts);
-
-                    // 尝试使用时间偏移解决冲突
-                    var (success, newTimes, shift) = conflictResolver.ResolveConflictByTimeShift(
+                    Debug.LogWarning($"[CentralControl] Robot {robotId} path has {conflicts.Count} conflicts!");
+                    
+                    List<float> modifiedTimes = times;
+                    List<float> modifiedSpeeds = null;
+                    string modificationType = null;
+                    float modificationValue = 0;
+                    bool conflictResolved = false;
+                    
+                    // 1. 尝试时间偏移策略
+                    var (timeShiftSuccess, newTimes, shift) = conflictResolver.ResolveConflictByTimeShift(
                         robotId, path, times, conflicts);
                     
-                    if (success)
+                    if (timeShiftSuccess)
                     {
-                        Debug.Log($"通过时间偏移成功解决冲突: 机器人 {robotId}, 偏移量 {shift}s");
+                        modifiedTimes = newTimes;
+                        modificationType = "time_shift";
+                        modificationValue = shift;
+                        conflictResolved = true;
+                        Debug.Log($"[CentralControl] 应用时间偏移策略: 机器人 {robotId}, 偏移量 {shift}s");
+                    }
+                    else
+                    {
+                        // 2. 时间偏移失败，尝试速度调整
+                        var (speedAdjustSuccess, adjustedTimes, adjustedSpeeds, hasChanges) = 
+                            conflictResolver.ResolveConflictBySpeedAdjustment(
+                                robotId, path, times, conflicts);
                         
+                        if (speedAdjustSuccess)
+                        {
+                            modifiedTimes = adjustedTimes;
+                            modifiedSpeeds = adjustedSpeeds;
+                            modificationType = "speed_adjustment";
+                            modificationValue = CalculateAverageSpeedChange(adjustedSpeeds);
+                            conflictResolved = true;
+                            Debug.Log($"[CentralControl] 应用速度调整策略: 机器人 {robotId}, 平均调整比例 {modificationValue:F2}");
+                        }
+                        else if (hasChanges)
+                        {
+                            // 速度调整部分成功但未完全解决
+                            modifiedTimes = adjustedTimes;
+                            modifiedSpeeds = adjustedSpeeds;
+                            modificationType = "partial_speed_adjustment";
+                            modificationValue = CalculateAverageSpeedChange(adjustedSpeeds);
+                            Debug.LogWarning($"[CentralControl] 速度调整部分解决了冲突: 机器人 {robotId}");
+                            // 注意：conflictResolved 仍为 false
+                        }
+                    }
+                    
+                    // 应用了策略后，重新检测冲突
+                    if (modifiedTimes != times)
+                    {
+                        // 使用更明确的来源标识
+                        Dictionary<string, List<TimeOccupancy>> remainingConflicts = cellSpaceConflictDetector.DetectConflicts(
+                            globalOccupancyLayer,
+                            indoorSpace,
+                            path,
+                            modifiedTimes,
+                            robotId, 
+                            "CentralControl_AfterResolve");
+                        
+                        // 确认冲突是否真的解决了
+                        if (remainingConflicts.Count == 0)
+                        {
+                            conflictResolved = true;
+                            Debug.Log($"[CentralControl] 冲突成功解决: 机器人 {robotId}, 策略: {modificationType}");
+                        }
+                        else
+                        {
+                            conflictResolved = false;
+                            Debug.LogWarning($"[CentralControl] 应用 {modificationType} 策略后仍有 {remainingConflicts.Count} 个冲突");
+                            
+                            // 保存最新的冲突信息以便记录
+                            conflicts = remainingConflicts;
+                        }
+                    }
+                    
+                    // 处理最终结果
+                    if (conflictResolved)
+                    {
                         // 使用修改后的时间更新路径预留
-                        ReserveCellSpacePath(robotId, planId, path, newTimes);
+                        ReserveCellSpacePath(robotId, planId, path, modifiedTimes);
                         
-                        // 通知机器人路径已被修改
-                        NotifyRobotPathModified(robotId, planId, path, newTimes, "time_shift", shift);
+                        // 根据修改类型选择通知方式
+                        if (modificationType == "time_shift")
+                        {
+                            NotifyRobotPathModified(robotId, planId, path, modifiedTimes, modificationType, modificationValue);
+                        }
+                        else if (modificationType == "speed_adjustment" || modificationType == "partial_speed_adjustment")
+                        {
+                            NotifyRobotPathModifiedWithSpeed(robotId, planId, path, modifiedTimes, modifiedSpeeds, modificationValue);
+                        }
                         
                         return false; // 冲突已解决
                     }
-                    
-                    // 时间偏移失败，记录冲突信息
-                    RecordCellSpaceConflict(robotId, planId, path, times, conflicts);
-                    return true;
+                    else
+                    {
+                        // 所有策略都失败，记录冲突信息
+                        RecordCellSpaceConflict(robotId, planId, path, times, conflicts);
+                        return true; // 冲突未解决
+                    }
                 }
                 
-                // 如果没有冲突，预留路径占用
+                // 没有冲突，直接预留路径
                 ReserveCellSpacePath(robotId, planId, path, times);
                 return false;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"检测路径冲突时发生错误: {ex.Message}\n{ex.StackTrace}");
+                Debug.LogError($"[CentralControl] 检测路径冲突时发生错误: {ex.Message}\n{ex.StackTrace}");
                 return false;
             }
         }
@@ -674,41 +744,20 @@ namespace CentralControl
             float overlapEnd = Mathf.Min(t1End, t2End);
             return Mathf.Max(0, overlapEnd - overlapStart);
         }
-        
-        // // 确定冲突类型
-        // private ConflictType DetermineConflictType(float myEntryTime, float myExitTime, float theirEntryTime, float theirExitTime)
-        // {
-        //     // 简单分类：基于进入/离开时间判断
-        //     // 更复杂的分类可以考虑机器人移动方向
-            
-        //     // 同时进入 (±0.1秒容差)
-        //     if (Mathf.Abs(myEntryTime - theirEntryTime) < 0.1f)
-        //     {
-        //         return ConflictType.HeadOn;
-        //     }
-            
-        //     // 我先进入，对方后进入
-        //     if (myEntryTime < theirEntryTime)
-        //     {
-        //         // 我离开前对方就进入 -> 追尾冲突
-        //         if (myExitTime > theirEntryTime)
-        //         {
-        //             return ConflictType.BeingOvertaken;
-        //         }
-        //     }
-        //     // 对方先进入，我后进入
-        //     else
-        //     {
-        //         // 对方离开前我就进入 -> 追尾冲突
-        //         if (theirExitTime > myEntryTime)
-        //         {
-        //             return ConflictType.Overtaking;
-        //         }
-        //     }
-            
-        //     // 其他类型冲突
-        //     return ConflictType.General;
-        // }
+
+        // 计算平均速度变化
+        private float CalculateAverageSpeedChange(List<float> speeds, float defaultSpeed = 1.0f)
+        {
+            if (speeds == null || speeds.Count == 0)
+                return 0;
+                
+            float sum = 0;
+            foreach (float speed in speeds)
+            {
+                sum += (speed / defaultSpeed);
+            }
+            return sum / speeds.Count;
+        }
         
         // 日志输出冲突信息
         private void LogCellSpaceConflictInfo(PathConflictInfo conflictInfo)
@@ -1177,6 +1226,30 @@ namespace CentralControl
             
             // 触发事件通知机器人
             EventManager.Instance.TriggerRobotPathModified(modificationArgs);
+        }
+
+        private void NotifyRobotPathModifiedWithSpeed(
+            string robotId, 
+            string planId, 
+            List<ConnectionPoint> path, 
+            List<float> newTimes, 
+            List<float> newSpeeds,
+            float avgSpeedChange)
+        {
+            // 创建事件参数
+            var args = new RobotPathModificationEventArgs(
+                robotId, 
+                planId, 
+                path, 
+                newTimes, 
+                "speed_adjustment", 
+                avgSpeedChange);
+            
+            // 添加速度信息到事件参数
+            args.NewSpeeds = new List<float>(newSpeeds);
+            
+            // 触发事件
+            EventManager.Instance.TriggerRobotPathModified(args);
         }
         #endregion
 

@@ -29,6 +29,7 @@ namespace CentralControl
         public List<float> NewTimes { get; private set; }
         public string ModificationType { get; private set; }
         public float ModificationValue { get; private set; }
+        public List<float> NewSpeeds { get; set; }
         
         public RobotPathModificationEventArgs(
             string robotId, string planId, List<ConnectionPoint> path, 
@@ -40,6 +41,7 @@ namespace CentralControl
             NewTimes = newTimes;
             ModificationType = modificationType;
             ModificationValue = modificationValue;
+            NewSpeeds = new List<float>();
         }
     }
 

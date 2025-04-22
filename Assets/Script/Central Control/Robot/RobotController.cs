@@ -1414,6 +1414,75 @@ namespace CentralControl.RobotControl
             waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
         }
 
+        // 2. Speed adjustment modification
+        private void ApplySpeedAdjustmentModification(
+            List<ConnectionPoint> path, 
+            List<float> newTimes, 
+            List<float> newSpeeds, 
+            string planId, 
+            float avgSpeedChange)
+        {
+            // 更新路径和时间
+            currentPath = path;
+            pathTimes = newTimes;
+            currentPlanId = planId;
+            
+            Debug.Log($"机器人 {Id}: 应用速度调整修改: 平均速度变化 {avgSpeedChange:F2}倍, 新路径长度: {path.Count}");
+            
+            // 更新路径段并应用新的速度
+            UpdatePathSegmentsWithSpeed(path, newTimes, newSpeeds);
+            
+            // 保存路径到个人地图层
+            SavePathToPersonalLayer(path, newTimes, planId);
+            
+            // 调整等待时间
+            float newStartTime = newTimes[0];
+            float currentTime = Time.time;
+            float waitTime = Math.Max(0, newStartTime - currentTime);
+            
+            isWaitingForExecution = true;
+            
+            // 如果有现有等待，取消它
+            if (waitForExecutionCoroutine != null)
+            {
+                StopCoroutine(waitForExecutionCoroutine);
+            }
+            
+            // 启动新的等待
+            waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
+            
+            // 通知状态改变
+            SetState(RobotState.Moving, true);
+        }
+
+        private void UpdatePathSegmentsWithSpeed(List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        {
+            // 清空当前的移动段
+            currentMovement.Clear();
+            
+            // 确保有效的输入
+            if (path == null || times == null || speeds == null || 
+                path.Count != times.Count || path.Count != speeds.Count)
+            {
+                Debug.LogError($"机器人 {Id}: 更新路径段失败 - 数据不一致");
+                return;
+            }
+            
+            // 创建新的路径段
+            for (int i = 0; i < path.Count; i++)
+            {
+                currentMovement.Add(new PathSegment(path[i], times[i], speeds[i]));
+            }
+            
+            // 更新DWA规划器的最大速度，使用路径中的最大速度
+            if (speeds.Count > 0)
+            {
+                float maxSpeed = speeds.Max();
+                dwaPlanner.MaxSpeed = maxSpeed;
+                Debug.Log($"机器人 {Id}: 更新最大速度为 {maxSpeed}");
+            }
+        }
+
         private IEnumerator WaitForExecution(float waitTime)
         {
             Debug.Log($"机器人 {Id}: 等待 {waitTime}s 后开始执行路径");
@@ -1958,6 +2027,10 @@ namespace CentralControl.RobotControl
                 case "time_shift":
                     // 处理时间偏移修改
                     ApplyTimeShiftModification(e.Path, e.NewTimes, e.PlanId, e.ModificationValue);
+                    break;
+                case "speed_adjustment":
+                    // 处理速度调整修改
+                    ApplySpeedAdjustmentModification(e.Path, e.NewTimes, e.NewSpeeds, e.PlanId, e.ModificationValue);
                     break;
                 // 未来可以添加其他修改类型的处理
                 default:
