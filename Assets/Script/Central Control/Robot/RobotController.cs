@@ -24,7 +24,7 @@ namespace CentralControl.RobotControl
     {
         # region Inspector Fields
         public Transform targetIndicator;
-        public SearchAlgorithm selectedAlgorithm = SearchAlgorithm.Astar_Basic;
+        public SearchAlgorithm selectedAlgorithm = SearchAlgorithm.AnytimeSIPP;
         public SearchMethod selectedSearchMethod = SearchMethod.Manhattan_Distance;
         public float baseDetectionRadius = 0.7f;
         public float emergencyStopDistance = 0.2f;

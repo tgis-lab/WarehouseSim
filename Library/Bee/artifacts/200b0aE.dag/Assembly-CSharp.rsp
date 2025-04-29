@@ -395,6 +395,7 @@
 "Assets/Script/Map/Schema/RLineGroup.cs"
 "Assets/Script/Map/Schema/RoutePoint.cs"
 "Assets/Script/Map/Schema/SpatialIndex.cs"
+"Assets/Script/PathPlanning/AnytimeSIPP.cs"
 "Assets/Script/PathPlanning/Astar_Basic.cs"
 "Assets/Script/PathPlanning/Astar_Traffic_Completed.cs"
 "Assets/Script/PathPlanning/BFS.cs"

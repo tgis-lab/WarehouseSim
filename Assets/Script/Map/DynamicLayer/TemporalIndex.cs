@@ -315,6 +315,14 @@ namespace Map
         }
 
         /// <summary>
+        /// 获取此索引中的所有时间占用
+        /// </summary>
+        public List<TimeOccupancy> GetAllOccupancies()
+        {
+            return new List<TimeOccupancy>(allOccupancies.Values);
+        }
+
+        /// <summary>
         /// 清理过期数据
         /// </summary>
         public void Cleanup(float currentTime, float windowDuration)

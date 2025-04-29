@@ -56,7 +56,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetIndicator: {fileID: 0}
-  selectedAlgorithm: 2
+  selectedAlgorithm: 3
   selectedSearchMethod: 1
   baseDetectionRadius: 0.5
   emergencyStopDistance: 0.2
@@ -66,10 +66,10 @@ MonoBehaviour:
   MaxOrder: 20
   robotCollisionLayer:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 64
   pickerCollisionLayer:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1024
 --- !u!54 &4801726294540973590
 Rigidbody:
   m_ObjectHideFlags: 0

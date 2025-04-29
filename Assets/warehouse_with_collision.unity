@@ -356,8 +356,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetIndicator: {fileID: 1239929927}
-  selectedAlgorithm: 2
-  selectedSearchMethod: 0
+  selectedAlgorithm: 3
+  selectedSearchMethod: 1
   baseDetectionRadius: 0.7
   emergencyStopDistance: 0.2
   defaultSpeed: 3
@@ -366,10 +366,10 @@ MonoBehaviour:
   MaxOrder: 20
   robotCollisionLayer:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 64
   pickerCollisionLayer:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 1024
 --- !u!4 &732838027
 Transform:
   m_ObjectHideFlags: 0
@@ -741,7 +741,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 8841361260369869970, guid: eb24a2b82e9fe46a2b4f48fa3ce1987a, type: 3}
-  numberOfRobots: 10
+  numberOfRobots: 5
   targetIndicatorPrefab: {fileID: 1239929927}
 --- !u!4 &1545376426
 Transform:

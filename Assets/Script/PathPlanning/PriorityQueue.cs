@@ -79,7 +79,15 @@ namespace PathPlanning
             
             return true;
         }
-        
+
+        public T Peek()
+        {
+            if (Count == 0)
+                throw new InvalidOperationException("Queue is empty");
+            
+            return elements[0].Item;
+        }
+
         public bool Contains(T item)
         {
             return indexMap.ContainsKey(item);

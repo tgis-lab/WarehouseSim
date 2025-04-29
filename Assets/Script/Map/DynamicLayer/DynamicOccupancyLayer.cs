@@ -250,6 +250,14 @@ namespace Map
                     Debug.LogError($"Error: Could not find source CellSpace for boundary {startCP.CellBoundary.Id}");
                     return;
                 }
+
+                for (int i = 0; i < times.Count - 1; i++)
+                {
+                    if (times[i] >= times[i+1])
+                    {
+                        Debug.LogWarning($"发现时间点不递增: times[{i}]={times[i]}, times[{i+1}]={times[i+1]}, 路径点: {connectionPointPath[i].Id}->{connectionPointPath[i+1].Id}");
+                    }
+                }
                 
                 string startCellId = startCellSpace.Id;
                 entryTimes[startCellId] = times[0];
@@ -340,6 +348,13 @@ namespace Map
                     
                     if (entryTime.HasValue && exitTime.HasValue)
                     {
+                        // 确保出口时间大于入口时间
+                        if (exitTime.Value <= entryTime.Value)
+                        {
+                            Debug.LogWarning($"修正Cell {cellId}的时间: 入口={entryTime.Value}, 出口={exitTime.Value}");
+                            exitTime = entryTime.Value + 0.001f; // 增加一个微小差值
+                        }
+                        
                         // 获取CellSpace的时间索引
                         var timeIndex = GetCellTimeIndex(cellId);
                         if (timeIndex != null)
@@ -435,6 +450,20 @@ namespace Map
             {
                 timeIndex.Cleanup(currentTime, windowDuration);
             }
+        }
+
+        /// <summary>
+        /// 获取指定CellSpace的所有时间占用
+        /// </summary>
+        public List<TimeOccupancy> GetTimeOccupanciesForCellSpace(string cellId)
+        {
+            if (string.IsNullOrEmpty(cellId) || !cellTimeIndices.ContainsKey(cellId))
+            {
+                return new List<TimeOccupancy>();
+            }
+            
+            TemporalIndex timeIndex = cellTimeIndices[cellId];
+            return timeIndex.GetAllOccupancies();
         }
 
         /// <summary>

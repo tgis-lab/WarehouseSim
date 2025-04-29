@@ -12,7 +12,8 @@ namespace PathPlanning
     {
         BFS, 
         Astar_Basic,
-        Astar_Traffic
+        Astar_Traffic,
+        AnytimeSIPP
     }
 
     public enum SearchMethod
@@ -82,11 +83,35 @@ namespace PathPlanning
                         this.maxAcceleration, 
                         this.maxDeceleration, 
                         this.searchMethod);
+                
+                case SearchAlgorithm.AnytimeSIPP:
+                    return AnytimeSIPP.SIPPAlgorithm(
+                        this.graph, 
+                        this.indoorSpace,
+                        personalOccupancyLayer,
+                        globalOccupancyLayer, 
+                        startPoint, 
+                        endPoint, 
+                        robotId, 
+                        currentPlanId,
+                        startTime, 
+                        speed, 
+                        this.maxAcceleration, 
+                        this.maxDeceleration, 
+                        this.searchMethod);
+                
                 // case SearchAlgorithm.Astar_Basic:
-                //     return Astar_Basic.AstarAlgorithm(this.graph, startPoint, endPoint, speed, this.searchMethod);
+                //     // 在这里添加对Astar_Basic的调用（如果已实现）
+                //     Debug.LogWarning("Astar_Basic algorithm not fully implemented");
+                //     return (null, null, null, null);
+                    
                 // case SearchAlgorithm.BFS:
-                //     return BFS.BFSAlgorithm(this.graph, startPoint, endPoint, speed, this.searchMethod);
+                //     // 在这里添加对BFS的调用（如果已实现）
+                //     Debug.LogWarning("BFS algorithm not fully implemented");
+                //     return (null, null, null, null);
+                    
                 default:
+                    Debug.LogError($"Unknown search algorithm: {this.searchAlgorithm}");
                     return (null, null, null, null);
             }
         }
