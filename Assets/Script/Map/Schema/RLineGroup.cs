@@ -56,6 +56,19 @@ namespace Map {
             this.InnerEdges.Add(innerEdge);
         }
 
+        public bool ContainsVerticalConnection(IndoorSpace indoorSpace)
+        {
+            foreach (var connectionPointId in ConnectionPoints)
+            {
+                var connectionPoint = indoorSpace.GetConnectionPointFromId(connectionPointId);
+                if (connectionPoint != null && connectionPoint.IsVertical())
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public string ToJson()
         {
             var settings = new JsonSerializerSettings

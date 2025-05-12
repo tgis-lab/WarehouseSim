@@ -3,6 +3,7 @@ using UnityEngine;
 using Newtonsoft.Json;
 using NetTopologySuite.Geometries;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Map {
     public class Hypergraph
@@ -30,6 +31,20 @@ namespace Map {
         public void AddHyperEdge(RLineGroup rLineGroup)
         {
             this.HyperEdges.Add(rLineGroup);
+        }
+
+        public List<ConnectionPoint> GetVerticalConnectionPoints()
+        {
+            return HyperNodes.Where(node => node.IsVertical()).ToList();
+        }
+        
+        public List<RLineGroup> GetRelatedRLineGroups(ConnectionPoint connectionPoint)
+        {
+            return HyperEdges.Where(edge => edge.ConnectionPoints.Contains(connectionPoint.Id)).ToList();
+        }
+                public ConnectionPoint GetConnectionPointById(string id)
+        {
+            return HyperNodes.FirstOrDefault(node => node.Id == id);
         }
 
         public string ToJson()

@@ -49,7 +49,7 @@ namespace PathPlanning
 
                 foreach (var neighborConnection in current.Children)
                 {
-                    RoutePoint neighbor = graph.GetRoutePointFormConnectionPoint(neighborConnection);
+                    RoutePoint neighbor = graph.GetRoutePointFromConnectionPoint(neighborConnection);
                     if (neighbor == null || closedSet.Contains(neighbor)) continue;
 
                     float currentSpeed = ModifySpeed(graph, current.ConnectionPoint, neighborConnection, defaultSpeed, speedTo[current]);

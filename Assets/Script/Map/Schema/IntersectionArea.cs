@@ -12,16 +12,17 @@ namespace Map
         private List<ConnectionPoint> _exitPoints;
         private List<CellSpace> _intersectionCells;
         private float _activationDistance;
-        private float _deactivationDistance;
-        private Geometry _intersectionGeometry;
+        private string _floorLevel;
 
         public string Id { get => _id; private set => _id = value; }
         public List<ConnectionPoint> EntryPoints { get => _entryPoints; }
         public List<ConnectionPoint> ExitPoints { get => _exitPoints; }
         public List<CellSpace> IntersectionCells { get => _intersectionCells; }
         public float ActivationDistance { get => _activationDistance; set => _activationDistance = value; }
-        public float DeactivationDistance { get => _deactivationDistance; set => _deactivationDistance = value; }
         
+        public string FloorLevel { get => _floorLevel; set => _floorLevel = value; }
+        
+        private Geometry _intersectionGeometry;
         public Geometry IntersectionGeometry 
         { 
             get
@@ -42,12 +43,12 @@ namespace Map
             _exitPoints = new List<ConnectionPoint>();
             _intersectionCells = new List<CellSpace>();
             _activationDistance = 2.0f;
-            _deactivationDistance = 1.5f;
+            _floorLevel = "1F"; // 默认为1F楼层
         }
 
         public (Vector3 entryDirection, Vector3 suggestedExitDirection) CalculateTraversalDirections(Vector3 robotPosition, Vector3 robotVelocity)
         {
-            // Identifier the direction from which the robot is entering
+            // 识别机器人进入的方向
             ConnectionPoint nearestEntryPoint = null;
             float minDistance = float.MaxValue;
             
@@ -64,7 +65,7 @@ namespace Map
                 }
             }
             
-            // If no entry point is found, use the current velocity direction
+            // 如果没有找到入口点，使用当前速度方向
             Vector3 entryDirection = robotVelocity.normalized;
             if (nearestEntryPoint != null)
             {
@@ -73,7 +74,7 @@ namespace Map
                 entryDirection = (robotPosition - entryPos).normalized;
             }
             
-            // Find the best exit direction (approximately opposite to the entry direction)
+            // 寻找最佳出口方向（大致与入口方向相反）
             Vector3 suggestedExitDirection = -entryDirection;
             float bestAlignment = -1f;
             
@@ -83,7 +84,7 @@ namespace Map
                 Vector3 exitPos = new Vector3((float)exit.X, robotPosition.y, (float)exit.Y);
                 Vector3 exitDir = (exitPos - robotPosition).normalized;
                 
-                // Find the exit closest to the continuation of the entry direction
+                // 寻找与入口方向延续最接近的出口
                 float alignment = Vector3.Dot(entryDirection, exitDir);
                 if (alignment > bestAlignment)
                 {
@@ -150,16 +151,6 @@ namespace Map
         {
             var point = new Point(position.x, position.z);
             return IntersectionGeometry.Distance(point) <= distance;
-        }
-
-        public bool ShouldActivateDWA(Vector3 position)
-        {
-            return IsNear(position, _activationDistance);
-        }
-
-        public bool ShouldDeactivateDWA(Vector3 position)
-        {
-            return !IsNear(position, _deactivationDistance);
         }
     }
 }

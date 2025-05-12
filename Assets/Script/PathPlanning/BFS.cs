@@ -69,7 +69,7 @@ namespace PathPlanning
 
                 foreach (var neighborConnection in current.Children)
                 {
-                    RoutePoint neighbor = graph.GetRoutePointFormConnectionPoint(neighborConnection);
+                    RoutePoint neighbor = graph.GetRoutePointFromConnectionPoint(neighborConnection);
                     // var neighbor = graph.RoutePoints.FirstOrDefault(rp => rp.ConnectionPoint.Id == neighborConnection.Id);
                     if (neighbor != null && !visited.Contains(neighbor))
                     {

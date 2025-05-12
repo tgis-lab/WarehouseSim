@@ -13,16 +13,45 @@ namespace Map {
         Free, 
         OccupiedByFacilities
     }
+    
+    public class VerticalFeatures
+    {
+        [JsonProperty("verticalType")]
+        public string VerticalType { get; set; } // null, "elevator", "stair"
+        
+        [JsonProperty("floorAssociation")]
+        public List<FloorAssociation> FloorAssociations { get; set; }
+        
+        public VerticalFeatures()
+        {
+            FloorAssociations = new List<FloorAssociation>();
+        }
+    }
+    
+    public class FloorAssociation
+    {
+        [JsonProperty("floorLevel")]
+        public string FloorLevel { get; set; }
+        
+        [JsonProperty("associationType")]
+        public string AssociationType { get; set; }
+    }
 
     public class CellSpace
     {
         [JsonProperty("id")]
         public string Id { get; private set; }
+        
+        [JsonProperty("properties")]
         public Dictionary<string, object> Properties { get; private set; }
+        
+        [JsonProperty("space")]
         public Geometry Space { get; private set; }
+        
+        [JsonProperty("node")]
         public Geometry Node { get; private set; }
-        public CellSpaceStatus Status;
-
+        
+        public CellSpaceStatus Status { get; set; }
 
         public CellSpace(string cellId, Dictionary<string, object> properties, Geometry space, Geometry node)
         {
@@ -32,10 +61,89 @@ namespace Map {
             this.Node = node;
             this.Status = CellSpaceStatus.Free;
         }
+        
+        // Get vertical features
+        public VerticalFeatures GetVerticalFeatures()
+        {
+            if (Properties.TryGetValue("verticalFeatures", out object verticalFeaturesObj))
+            {
+                if (verticalFeaturesObj is JObject verticalFeaturesJObject)
+                {
+                    return verticalFeaturesJObject.ToObject<VerticalFeatures>();
+                }
+            }
+            return null;
+        }
+        
+        // Get the floor where this cell is located
+        public string GetLocatedFloor()
+        {
+            var verticalFeatures = GetVerticalFeatures();
+            if (verticalFeatures != null && verticalFeatures.FloorAssociations != null)
+            {
+                var locatedFloor = verticalFeatures.FloorAssociations
+                    .FirstOrDefault(fa => fa.AssociationType == "located");
+                    
+                if (locatedFloor != null)
+                    return locatedFloor.FloorLevel;
+            }
+            return null;
+        }
+        
+        // Check if this is a vertical connection cell
+        public bool IsVerticalConnection()
+        {
+            if (Properties.TryGetValue("isVerticalConnection", out object isVerticalConnectionObj) &&
+                isVerticalConnectionObj is bool isVerticalConnection)
+            {
+                return isVerticalConnection;
+            }
+            return false;
+        }
+        
+        // Check if this cell is an elevator
+        public bool IsElevator()
+        {
+            var verticalFeatures = GetVerticalFeatures();
+            return verticalFeatures != null && 
+                   verticalFeatures.VerticalType == "elevator";
+        }
+        
+        // Check if this cell is a staircase
+        public bool IsStair()
+        {
+            var verticalFeatures = GetVerticalFeatures();
+            return verticalFeatures != null && 
+                   verticalFeatures.VerticalType == "stair";
+        }
+        
+        // Get all floors this cell is connected to
+        public List<string> GetConnectedFloors()
+        {
+            var verticalFeatures = GetVerticalFeatures();
+            if (verticalFeatures == null || verticalFeatures.FloorAssociations == null)
+                return new List<string>();
+                
+            return verticalFeatures.FloorAssociations
+                .Where(fa => fa.AssociationType == "connected")
+                .Select(fa => fa.FloorLevel)
+                .ToList();
+        }
+        
+        // Check if this cell is located on a specific floor
+        public bool IsLocatedOnFloor(string floorLevel)
+        {
+            return GetLocatedFloor() == floorLevel;
+        }
+        
+        // Check if this cell connects to a specific floor
+        public bool ConnectsToFloor(string floorLevel)
+        {
+            return GetConnectedFloors().Contains(floorLevel);
+        }
 
         private bool HasFunctionOfType(string type) {
             if (Properties.TryGetValue("functions", out object functionsObj)) {
-
                 if (functionsObj is JArray functionsJArray) {
                     var functions = functionsJArray.ToObject<List<Dictionary<string, object>>>();
                     return functions.Any(function => function.TryGetValue("type", out object typeObj) &&
@@ -105,7 +213,6 @@ namespace Map {
             return null;
         }
 
-
         public string ToJson()
         {
             var settings = new JsonSerializerSettings
@@ -127,4 +234,3 @@ namespace Map {
         }
     }
 }
-

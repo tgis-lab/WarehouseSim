@@ -32,105 +32,233 @@ namespace Map {
 
         public List<PickingPoint> PickingPoints { get => _pickingPoints; }
         public List<CellSpace> BusinessPoints { get => _businessPoints; }
-
-        public void AddCellSpace(CellSpace cellSpace)
+        public List<PackingPoint> PackingPoints { get => _packingPoints; }
+        public List<QueueArea> QueueAreas { get => _queueAreas; }
+        
+        public List<string> GetAllFloorLevels()
         {
-            if (_cellSpaces.Any(c => c.Id == cellSpace.Id))
-                throw new System.Exception("CellSpace id already exists");
-            _cellSpaces.Add(cellSpace);
-        }
-
-        public void AddCellBoundary(CellBoundary cellBoundary)
-        {
-            if (_cellBoundaries.Any(c => c.Id == cellBoundary.Id))
-                throw new System.Exception("CellBoundary id already exists");
-            if (!_cellSpaces.Any(c => c.Id == cellBoundary.Source) || !_cellSpaces.Any(c => c.Id == cellBoundary.Target))
-                throw new System.Exception("Source and/or target cell do not exist");
-            _cellBoundaries.Add(cellBoundary);
-        }
-
-        public void AddLayer(Layer layer)
-        {
-            _layers.Add(layer);
-        }
-
-        public void AddContainer(Container container)
-        {
-            _containers.Add(container);
-        }
-
-        public void AddPickingPoint(CellSpace cellSpace)
-        {
-            if (cellSpace.IsPickingPoint())
-            {
-                List<string> boundings = cellSpace.GetBoundings();
-                if (boundings != null)
-                {
-                    PickingPoint pickingPoint = new PickingPoint(cellSpace.Id, boundings);
-                    _pickingPoints.Add(pickingPoint);
-                }
-            }
-        }
-
-        public void AddPackingPoint(CellSpace cellSpace)
-        {
-            if (cellSpace.IsPackingPoint())
-            {
-                List<string> boundings = cellSpace.GetBoundings();
-                if (boundings != null)
-                {
-                    PackingPoint packingPoint = new PackingPoint(cellSpace.Id, boundings);
-                    _packingPoints.Add(packingPoint);
-                }
-            }
-        }
-
-        public void AddBusinessPoint(CellSpace cellSpace)
-        {
-            if (cellSpace.IsBusinesspoint())
-            {
-                cellSpace.SetStatus(CellSpaceStatus.OccupiedByFacilities);
-                _businessPoints.Add(cellSpace);
-            }
-        }
-
-        public void AddQueueArea(CellSpace cellSpace)
-        {
-            if (cellSpace.IsQueue())
-            {
-                List<string> boundings = cellSpace.GetBoundings();
-                if (boundings != null)
-                {
-                    QueueArea queueArea = new QueueArea(cellSpace.Id, boundings);
-                    _queueAreas.Add(queueArea);
-                }
-            }
-        }
-
-        public void LoadProperties()
-        {
+            HashSet<string> floors = new HashSet<string>();
             foreach (var cellSpace in _cellSpaces)
             {
-                AddPickingPoint(cellSpace);
-                AddPackingPoint(cellSpace);
-                AddBusinessPoint(cellSpace);
-                AddQueueArea(cellSpace);
+                string floorLevel = cellSpace.GetLocatedFloor();
+                if (!string.IsNullOrEmpty(floorLevel))
+                {
+                    floors.Add(floorLevel);
+                }
             }
-            Debug.Log($"Picking Points: {PickingPoints.Count}, Packing Points: {PickingPoints.Count}, Business Points: {BusinessPoints.Count}");
+            return new List<string>(floors).OrderBy(f => ParseFloorLevel(f)).ToList();
+        }
+        
+        // 解析楼层级别为数字(例如:"1F" -> 1, "B1" -> -1)
+        private int ParseFloorLevel(string floorLevel)
+        {
+            if (string.IsNullOrEmpty(floorLevel))
+                return 0;
+                
+            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
+            {
+                // 地下楼层
+                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
+                {
+                    return -level;
+                }
+            }
+            else
+            {
+                // 地上楼层
+                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
+                {
+                    return level;
+                }
+            }
+            
+            return 0; // 默认
+        }
+        
+        public List<CellSpace> GetCellSpacesOnFloor(string floorLevel)
+        {
+            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel)).ToList();
         }
 
-        public PickingPoint GetPickingPointFromBusinessPoint(CellSpace cellSpace)
+        public List<PickingPoint> GetPickingPointsOnFloor(string floorLevel)
         {
-            if (cellSpace.IsBusinesspoint())
+            return _pickingPoints.Where(pp => pp.FloorLevel == floorLevel).ToList();
+        }
+        
+        public List<CellSpace> GetNavigableCellSpacesOnFloor(string floorLevel)
+        {
+            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsNavigable()).ToList();
+        }
+        
+        public List<CellSpace> GetVerticalConnectionsOnFloor(string floorLevel)
+        {
+            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsVerticalConnection()).ToList();
+        }
+        
+        public List<CellSpace> GetElevatorsOnFloor(string floorLevel)
+        {
+            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsElevator()).ToList();
+        }
+        
+        public List<CellSpace> GetStairsOnFloor(string floorLevel)
+        {
+            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsStair()).ToList();
+        }
+        
+        public List<CellBoundary> GetVerticalBoundariesBetweenFloors(string floorLevel1, string floorLevel2)
+        {
+            List<CellBoundary> result = new List<CellBoundary>();
+            
+            foreach (var cellBoundary in _cellBoundaries)
             {
-                foreach (var pickingPoint in _pickingPoints)
+                if (cellBoundary.IsVertical())
                 {
-                    if (pickingPoint.Boundings.Contains(cellSpace.Id))
+                    CellSpace sourceCell = GetCellSpaceFromId(cellBoundary.Source);
+                    CellSpace targetCell = GetCellSpaceFromId(cellBoundary.Target);
+                    
+                    if (sourceCell != null && targetCell != null)
                     {
-                        return pickingPoint;
+                        string sourceFloor = sourceCell.GetLocatedFloor();
+                        string targetFloor = targetCell.GetLocatedFloor();
+                        
+                        if ((sourceFloor == floorLevel1 && targetFloor == floorLevel2) ||
+                            (sourceFloor == floorLevel2 && targetFloor == floorLevel1))
+                        {
+                            result.Add(cellBoundary);
+                        }
                     }
                 }
             }
+            
+            return result;
+        }
+        
+        public List<string> GetDirectlyReachableFloors(string fromFloorLevel)
+        {
+            HashSet<string> reachableFloors = new HashSet<string>();
+            
+            var verticalConnections = GetVerticalConnectionsOnFloor(fromFloorLevel);
+            foreach (var verticalConnection in verticalConnections)
+            {
+                var connectedFloors = verticalConnection.GetConnectedFloors();
+                foreach (var floor in connectedFloors)
+                {
+                    reachableFloors.Add(floor);
+                }
+            }
+            
+            foreach (var cellBoundary in _cellBoundaries)
+            {
+                if (cellBoundary.IsVertical())
+                {
+                    CellSpace sourceCell = GetCellSpaceFromId(cellBoundary.Source);
+                    CellSpace targetCell = GetCellSpaceFromId(cellBoundary.Target);
+                    
+                    if (sourceCell != null && targetCell != null)
+                    {
+                        string sourceFloor = sourceCell.GetLocatedFloor();
+                        string targetFloor = targetCell.GetLocatedFloor();
+                        
+                        if (sourceFloor == fromFloorLevel)
+                        {
+                            reachableFloors.Add(targetFloor);
+                        }
+                        else if (targetFloor == fromFloorLevel)
+                        {
+                            reachableFloors.Add(sourceFloor);
+                        }
+                    }
+                }
+            }
+            
+            return new List<string>(reachableFloors);
+        }
+        
+        public List<Layer> GetLayersOnFloor(string floorLevel)
+        {
+            HashSet<Layer> layersOnFloor = new HashSet<Layer>();
+            
+            var cellSpacesOnFloor = GetCellSpacesOnFloor(floorLevel);
+            
+            foreach (var cellSpace in cellSpacesOnFloor)
+            {
+                foreach (var layer in _layers)
+                {
+                    if (layer.CellSpaces.Contains(cellSpace.Id))
+                    {
+                        layersOnFloor.Add(layer);
+                    }
+                }
+            }
+            
+            return new List<Layer>(layersOnFloor);
+        }
+
+        public string GetElevatorIdFromCellBoundary(CellBoundary cellBoundary)
+        {
+            foreach (var cellSpace in _cellSpaces)
+            {
+                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
+                {
+                    if (cellSpace.IsElevator())
+                    {
+                        return cellSpace.Id;
+                    }
+                }
+            }
+            Debug.Log("Elevator not found");
+            return null;
+        }
+
+        public List<Layer> GetStairLayers()
+        {
+            List<Layer> stairLayers = new List<Layer>();
+            foreach (var layer in _layers)
+            {
+                if (layer.Properties.ContainsKey("type") && layer.Properties["type"].Equals("stair"))
+                {
+                    stairLayers.Add(layer);
+                }
+            }
+            
+            if (stairLayers.Count == 0)
+            {
+                Debug.Log("Stair layers not found");
+            }
+            
+            return stairLayers;
+        }
+
+        public List<CellSpace> GetStairGroupFromLayerId(string layerId)
+        {
+            List<CellSpace> cellSpaces = new List<CellSpace>();
+            List<Layer> layers = GetAllLayers();
+            foreach (var layer in layers)
+            {
+                if (layer.Id == layerId)
+                {
+                    foreach (var cellSpaceId in layer.CellSpaces)
+                    {
+                        cellSpaces.Add(GetCellSpaceFromId(cellSpaceId));
+                    }
+                }
+            }
+            return cellSpaces;
+        }
+
+        public string GetStairIdFromCellBoundary(CellBoundary cellBoundary)
+        {
+            foreach (var cellSpace in _cellSpaces)
+            {
+                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
+                {
+                    if (cellSpace.IsStair())
+                    {
+                        return cellSpace.Id;
+                    }
+                }
+            }
+            Debug.Log("Stair not found");
             return null;
         }
 
@@ -174,9 +302,10 @@ namespace Map {
             return null;
         }
 
-        public CellSpace GetCellSpaceFromCoordinates(Vector3 position)
+        public CellSpace GetCellSpaceFromCoordinates(Vector3 position, string floorLevel)
         {
-            foreach (var cellSpace in _cellSpaces)
+            List<CellSpace> cellSpacesOnFloor = GetCellSpacesOnFloor(floorLevel);
+            foreach (var cellSpace in cellSpacesOnFloor)
             {
                 Polygon polygon = (Polygon)cellSpace.Space;
                 if (polygon.Contains(new Point(position.x, position.z)))
@@ -219,6 +348,24 @@ namespace Map {
             return cellSpaces;
         }
 
+        public List<CellSpace> GetCellSpaceFromLayerTypeAndFloor(string type, string floorLevel)
+        {
+            List<CellSpace> cellSpaces = new List<CellSpace>();
+            List<Layer> layers = GetLayerFromType(type);
+            foreach (var layer in layers)
+            {
+                foreach (var cellSpaceId in layer.CellSpaces)
+                {
+                    CellSpace cellSpace = GetCellSpaceFromId(cellSpaceId);
+                    if (cellSpace.IsLocatedOnFloor(floorLevel))
+                    {
+                        cellSpaces.Add(cellSpace);
+                    }
+                }
+            }
+            return cellSpaces;
+        }
+
         public CellBoundary GetCellBoundaryFromId(string id)
         {
             foreach (var cellBoundary in _cellBoundaries)
@@ -230,66 +377,6 @@ namespace Map {
                 }
             }
             Debug.Log("CellBoundary not found");
-            return null;
-        }
-
-        public List<ConnectionPoint> GetAllConnectionPoints()
-        {
-            List<ConnectionPoint> connectionPoints = new List<ConnectionPoint>();
-            foreach (var cellBoundary in _cellBoundaries)
-            {
-                connectionPoints.Add(cellBoundary.ConvertToConnectionPoint());
-            }
-            return connectionPoints;
-        }
-
-        public ConnectionPoint GetConnectionPointFromId(string id)
-        {
-            foreach (var cellBoundary in _cellBoundaries)
-            {
-                if (cellBoundary.Id == id)
-                {
-                    return cellBoundary.ConvertToConnectionPoint();
-                }
-            }
-            Debug.Log(id + "ConnectionPoint not found");
-            return null;
-        }
-
-        public ConnectionPoint GetConnectionPointFromCellSpace(string cellSpaceId, bool sequence = true)
-        {
-            foreach (var cellBoundary in _cellBoundaries)
-            {
-                if (sequence)
-                {
-                    if (cellBoundary.Source == cellSpaceId)
-                    {
-                        return cellBoundary.ConvertToConnectionPoint();
-                    }
-                }
-                else
-                {
-                    if (cellBoundary.Target == cellSpaceId)
-                    {
-                        return cellBoundary.ConvertToConnectionPoint();
-                    }
-                }
-            }
-            Debug.Log(cellSpaceId);
-            Debug.Log("ConnectionPoint not found");
-            return null;
-        }
-
-        public RLineGroup GetRlineGroupFromCellSpaceId(string id)
-        {
-            foreach (var container in _containers)
-            {
-                if (container.CellSpaceId == id)
-                {
-                    return container.ConvertToRLineGroup();
-                }
-            }
-            Debug.Log("RLineGroup not found");
             return null;
         }
 
@@ -311,33 +398,167 @@ namespace Map {
             return layers;
         }
 
-        public Layer GetLayerFromCellSpaceId(string id)
+        public Layer GetLayerFromCellSpaceId(string cellSpaceId)
         {
             foreach (var layer in _layers)
             {
-                if (layer.CellSpaces.Contains(id))
+                if (layer.CellSpaces.Contains(cellSpaceId))
                 {
                     return layer;
                 }
             }
-            Debug.Log("Layer not found");
+
+            Debug.Log(cellSpaceId + "Layer not found");
+            return null;
+        }
+
+        public List<ConnectionPoint> GetAllConnectionPoints()
+        {
+            List<ConnectionPoint> connectionPoints = new List<ConnectionPoint>();
+            foreach (var cellBoundary in _cellBoundaries)
+            {
+                connectionPoints.Add(GetConnectionPointFromCellBoundary(cellBoundary.Id));
+            }
+            return connectionPoints;
+        }
+
+        public ConnectionPoint GetConnectionPointFromId(string id)
+        {
+            foreach (var cellBoundary in _cellBoundaries)
+            {
+                if (cellBoundary.Id == id)
+                {
+                    return GetConnectionPointFromCellBoundary(cellBoundary.Id);
+                }
+            }
+            Debug.Log(id + "ConnectionPoint not found");
+            return null;
+        }
+
+        public ConnectionPoint GetConnectionPointFromCellBoundary(string cellBoundaryId)
+        {
+            foreach (var cellBoundary in _cellBoundaries)
+            {
+                if (cellBoundary.Id == cellBoundaryId)
+                {
+                    return cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary));
+                }
+            }
+            Debug.Log(cellBoundaryId + "ConnectionPoint not found");
+            return null;
+        }
+
+        public ConnectionPoint GetConnectionPointFromCellSpace(string cellSpaceId, bool sequence = true)
+        {
+            foreach (var cellBoundary in _cellBoundaries)
+            {
+                if (sequence)
+                {
+                    if (cellBoundary.Source == cellSpaceId)
+                    {
+                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
+                    }
+                }
+                else
+                {
+                    if (cellBoundary.Target == cellSpaceId)
+                    {
+                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
+                    }
+                }
+            }
+            Debug.Log(cellSpaceId);
+            Debug.Log("ConnectionPoint not found");
+            return null;
+        }
+
+        public string GetCellBoundaryFloorLevel(CellBoundary cellBoundary)
+        {
+            if (cellBoundary.IsHorizontal())
+            {
+                CellSpace sourceCellSpace = GetCellSpaceFromId(cellBoundary.Source);
+                CellSpace targetCellSpace = GetCellSpaceFromId(cellBoundary.Target);
+                if (!sourceCellSpace.IsElevator() && !targetCellSpace.IsElevator())
+                {
+                    return sourceCellSpace.GetLocatedFloor();
+                }
+                else if (sourceCellSpace.IsElevator() && !targetCellSpace.IsElevator())
+                {
+                    return targetCellSpace.GetLocatedFloor();
+                }
+                else if (!sourceCellSpace.IsElevator() && targetCellSpace.IsElevator())
+                {
+                    return sourceCellSpace.GetLocatedFloor();
+                }
+            }
             return null;
         }
 
         public Hypergraph GetHypergraph()
         {
             Hypergraph hypergraph = new Hypergraph();
+
             foreach (var cellBoundary in _cellBoundaries)
             {
-                ConnectionPoint connectionPoint = cellBoundary.ConvertToConnectionPoint();
+                ConnectionPoint connectionPoint = cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary));
                 hypergraph.AddHyperNode(connectionPoint);
             }
+            
             foreach (var container in _containers)
             {
                 RLineGroup rLineGroup = container.ConvertToRLineGroup();
                 hypergraph.AddHyperEdge(rLineGroup);
             }
+            
             return hypergraph;
+        }
+
+        public void AddPickingPoint(CellSpace cellSpace)
+        {
+            if (cellSpace.IsPickingPoint())
+            {
+                List<string> boundings = cellSpace.GetBoundings();
+                if (boundings != null)
+                {
+                    PickingPoint pickingPoint = new PickingPoint(cellSpace.Id, boundings, cellSpace.GetLocatedFloor());
+                    _pickingPoints.Add(pickingPoint);
+                }
+            }
+        }
+
+        public void AddPackingPoint(CellSpace cellSpace)
+        {
+            if (cellSpace.IsPackingPoint())
+            {
+                List<string> boundings = cellSpace.GetBoundings();
+                if (boundings != null)
+                {
+                    PackingPoint packingPoint = new PackingPoint(cellSpace.Id, boundings, cellSpace.GetLocatedFloor());
+                    _packingPoints.Add(packingPoint);
+                }
+            }
+        }
+
+        public void AddBusinessPoint(CellSpace cellSpace)
+        {
+            if (cellSpace.IsBusinesspoint())
+            {
+                cellSpace.SetStatus(CellSpaceStatus.OccupiedByFacilities);
+                _businessPoints.Add(cellSpace);
+            }
+        }
+
+        public void AddQueueArea(CellSpace cellSpace)
+        {
+            if (cellSpace.IsQueue())
+            {
+                List<string> boundings = cellSpace.GetBoundings();
+                if (boundings != null)
+                {
+                    QueueArea queueArea = new QueueArea(cellSpace.Id, boundings, cellSpace.GetLocatedFloor());
+                    _queueAreas.Add(queueArea);
+                }
+            }
         }
 
         public Dictionary<string, Vector3> GetCellSpaceCentroids()
@@ -345,9 +566,77 @@ namespace Map {
             Dictionary<string, Vector3> cellSpaceCentroids = new Dictionary<string, Vector3>();
             foreach (var cellSpace in _cellSpaces)
             {
-                cellSpaceCentroids.Add(cellSpace.Id, new Vector3((float)cellSpace.Space.Centroid.X, 0, (float)cellSpace.Space.Centroid.Y));
+                float y = 0;
+                string floorLevel = cellSpace.GetLocatedFloor();
+                if (!string.IsNullOrEmpty(floorLevel))
+                {
+                    int level = ParseFloorLevel(floorLevel);
+                    // Convert floor level to y coordinate
+                    if (level > 0)
+                    {
+                        y = (level - 1) * 3.0f;
+                    }
+                    y = level * 3.0f;
+                }
+                
+                cellSpaceCentroids.Add(
+                    cellSpace.Id, 
+                    new Vector3((float)cellSpace.Space.Centroid.X, y, (float)cellSpace.Space.Centroid.Y)
+                );
             }
             return cellSpaceCentroids;
+        }
+
+        // Check if the CellBoundary is stair
+        public bool IsStair(CellBoundary cellBoundary)
+        {
+            foreach (var cellSpace in _cellSpaces)
+            {
+                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
+                {
+                    if (cellSpace.IsStair())
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        public bool IsStair(string cellBoundaryId)
+        {
+            return IsStair(GetCellBoundaryFromId(cellBoundaryId));
+        }
+
+        // Check if the CellBoundary is elevator
+        public bool IsElevator(CellBoundary cellBoundary)
+        {
+            foreach (var cellSpace in _cellSpaces)
+            {
+                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
+                {
+                    if (cellSpace.IsElevator())
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        public bool IsElevator(string cellBoundaryId)
+        {
+            return IsElevator(GetCellBoundaryFromId(cellBoundaryId));
+        }
+        
+        public void LoadProperties()
+        {
+            foreach (var cellSpace in _cellSpaces)
+            {
+                AddPickingPoint(cellSpace);
+                AddPackingPoint(cellSpace);
+                AddBusinessPoint(cellSpace);
+            }
         }
 
         public string ToJson()

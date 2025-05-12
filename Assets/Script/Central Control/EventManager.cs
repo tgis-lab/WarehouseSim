@@ -21,6 +21,42 @@ namespace CentralControl
         }
     }
 
+    public class RobotPathEventArgs : EventArgs
+    {
+        public string RobotId { get; private set; }
+        public string PlanId { get; private set; }
+        public List<ConnectionPoint> Path { get; private set; }
+        public List<float> Times { get; private set; }
+        public List<float> Speeds { get; set; }
+        
+        public RobotPathEventArgs(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        {
+            RobotId = robotId;
+            PlanId = planId;
+            Path = path;
+            Times = times;
+            Speeds = speeds;
+        }
+    }
+
+    public class RobotPathAcceptedEventArgs : EventArgs
+    {
+        public string RobotId { get; private set; }
+        public string PlanId { get; private set; }
+        public List<ConnectionPoint> Path { get; private set; }
+        public List<float> Times { get; private set; }
+        public List<float> Speeds { get; set; }
+        
+        public RobotPathAcceptedEventArgs(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        {
+            RobotId = robotId;
+            PlanId = planId;
+            Path = path;
+            Times = times;
+            Speeds = speeds;
+        }
+    }
+
     public class RobotPathModificationEventArgs : EventArgs
     {
         public string RobotId { get; private set; }
@@ -49,8 +85,10 @@ namespace CentralControl
     {
         public static EventManager Instance { get; private set; }
 
+        // System events
         public event Action OnMapLoaded;
         public event Action OnRobotsInitialized;
+        public event Action OnPickersInitialized; // Added for consistency
 
         // Picking-related events
         public event EventHandler<PickingEventArgs> OnRobotReadyForPicking;
@@ -58,10 +96,8 @@ namespace CentralControl
 
         // Path-related events
         public event EventHandler<RobotPathEventArgs> OnRobotPathPlanned;
-        
         public event EventHandler<RobotPathModificationEventArgs> OnRobotPathModified;
-        
-        public event EventHandler<string> OnRobotPathAccepted;
+        public event EventHandler<RobotPathAcceptedEventArgs> OnRobotPathAccepted;
 
         private void Awake()
         {
@@ -76,6 +112,7 @@ namespace CentralControl
             }
         }
 
+        // System triggers
         public void TriggerMapLoaded()
         {
             OnMapLoaded?.Invoke();
@@ -85,28 +122,32 @@ namespace CentralControl
         {
             OnRobotsInitialized?.Invoke();
         }
+        
+        public void TriggerPickersInitialized()
+        {
+            OnPickersInitialized?.Invoke();
+        }
 
+        // Picking triggers
         public void TriggerRobotReadyForPicking(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
             Debug.Log($"EventManager: Robot {robotId} ready for picking at {location}");
             
-            // 检查无效的监听器
+            // Check for invalid listeners
             if (OnRobotReadyForPicking != null)
             {
-                // 获取所有订阅者
                 var delegates = OnRobotReadyForPicking.GetInvocationList();
                 foreach (var del in delegates)
                 {
-                    // 检查订阅者的目标对象是否为PickerController
                     PickerController picker = del.Target as PickerController;
                     if (picker != null)
                     {
-                        Debug.Log($"EventManager: 事件将通知 Picker {picker.Id}");
+                        Debug.Log($"EventManager: Event will notify Picker {picker.Id}");
                         
-                        // 检查无效的Picker (ID为0或已销毁的GameObject)
+                        // Check for invalid Picker (ID=0 or destroyed GameObject)
                         if (picker.Id == 0 || picker == null || picker.gameObject == null)
                         {
-                            Debug.LogWarning($"EventManager: 检测到无效的Picker监听器 (ID: {picker.Id})，自动移除");
+                            Debug.LogWarning($"EventManager: Detected invalid Picker listener (ID: {picker.Id}), auto-removing");
                             OnRobotReadyForPicking -= (EventHandler<PickingEventArgs>)del;
                         }
                     }
@@ -118,25 +159,26 @@ namespace CentralControl
 
         public void TriggerPickingCompleted(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
+            Debug.Log($"EventManager: Picking completed for robot {robotId} at {location}");
             OnPickingCompleted?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
         }
 
-        public void TriggerRobotPathPlanned(string robotId, string planId, List<ConnectionPoint> path, List<float> times)
+        // Path triggers
+        public void TriggerRobotPathPlanned(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
         {
             Debug.Log($"EventManager: Robot {robotId} planned a path with {path.Count} points");
-            OnRobotPathPlanned?.Invoke(this, new RobotPathEventArgs(robotId, planId, path, times));
+            OnRobotPathPlanned?.Invoke(this, new RobotPathEventArgs(robotId, planId, path, times, speeds));
         }
         
         public void TriggerRobotPathModified(RobotPathModificationEventArgs args)
         {
-            Debug.Log($"EventManager: 触发机器人路径修改事件: 机器人 {args.RobotId}, 类型 {args.ModificationType}, 值 {args.ModificationValue}");
+            Debug.Log($"EventManager: Triggered robot path modification event: Robot {args.RobotId}, Type {args.ModificationType}, Value {args.ModificationValue}");
             OnRobotPathModified?.Invoke(this, args);
         }
-        
-        public void TriggerRobotPathAccepted(string robotId, string planId)
+        public void TriggerRobotPathAccepted(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
         {
-            Debug.Log($"EventManager: 机器人 {robotId} 的路径 {planId} 已被接受");
-            OnRobotPathAccepted?.Invoke(this, robotId);
+            Debug.Log($"EventManager: Robot {robotId}'s path {planId} has been accepted, with {path.Count} points");
+            OnRobotPathAccepted?.Invoke(this, new RobotPathAcceptedEventArgs(robotId, planId, path, times, speeds));
         }
     }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
+using NetTopologySuite.Geometries;
 using Map;
 
 namespace CentralControl
@@ -10,13 +12,16 @@ namespace CentralControl
     /// </summary>
     public class CellSpaceConflictDetector
     {
+        /// <summary>
+        /// 检测路径与已有占用的冲突
+        /// </summary>
         public Dictionary<string, List<TimeOccupancy>> DetectConflicts(
             DynamicOccupancyLayer layer, 
             IndoorSpace indoorSpace, 
             List<ConnectionPoint> connectionPointPath, 
             List<float> times, 
             string robotId,
-            string source = "Unknown") // 添加来源参数，默认为"Unknown"
+            string source = "Unknown")
         {
             if (connectionPointPath == null || connectionPointPath.Count < 2 || times == null || times.Count < connectionPointPath.Count)
             {
@@ -24,88 +29,52 @@ namespace CentralControl
                 return new Dictionary<string, List<TimeOccupancy>>();
             }
             
-            // Collect all conflicts
+            // 检查层和空间索引
+            if (layer == null || indoorSpace == null)
+            {
+                Debug.LogWarning($"[{source}] Missing layer or indoorSpace");
+                return new Dictionary<string, List<TimeOccupancy>>();
+            }
+            
+            // 收集所有冲突
             Dictionary<string, List<TimeOccupancy>> conflicts = new Dictionary<string, List<TimeOccupancy>>();
             
-            // 构建CellSpace路径及其占用时间
-            var cellSpaceOccupancies = MapConnectionPointPathToCellSpaceOccupancies(indoorSpace, connectionPointPath, times);
-            
-            // 检查每个CellSpace的冲突
-            foreach (var occupancy in cellSpaceOccupancies)
+            try
             {
-                string cellId = occupancy.CellId;
-                float entryTime = occupancy.EntryTime;
-                float exitTime = occupancy.ExitTime;
-                bool isStartCell = occupancy.IsStartCell;
-                bool isEndCell = occupancy.IsEndCell;
+                // 构建CellSpace路径及其占用时间
+                var cellSpaceOccupancies = MapConnectionPointPathToCellSpaceOccupancies(layer, indoorSpace, connectionPointPath, times);
                 
-                // 检查CellSpace冲突，传递起点/终点信息
-                var cellConflicts = layer.CheckCellConflict(cellId, entryTime, exitTime, robotId, isStartCell, isEndCell);
-                
-                if (cellConflicts.Count > 0)
+                // 检查每个CellSpace的冲突
+                foreach (var occupancy in cellSpaceOccupancies)
                 {
-                    // 按机器人ID分组
-                    Dictionary<string, List<TimeOccupancy>> robotConflicts = new Dictionary<string, List<TimeOccupancy>>();
+                    string cellId = occupancy.CellId;
+                    float entryTime = occupancy.EntryTime;
+                    float exitTime = occupancy.ExitTime;
+                    bool isStartCell = occupancy.IsStartCell;
+                    bool isEndCell = occupancy.IsEndCell;
                     
-                    foreach (var conflict in cellConflicts)
+                    // 检查CellSpace冲突，传递起点/终点信息
+                    var cellConflicts = layer.CheckCellConflict(cellId, entryTime, exitTime, robotId, isStartCell, isEndCell);
+                    
+                    if (cellConflicts.Count > 0)
                     {
-                        string conflictRobotId = conflict.Occupier.RobotId;
+                        // 合并冲突
+                        var mergedConflicts = MergeConflictsByRobot(cellConflicts, isStartCell, isEndCell);
+                        conflicts[cellId] = mergedConflicts;
                         
-                        if (!robotConflicts.ContainsKey(conflictRobotId))
+                        // 添加来源信息到日志输出
+                        Debug.LogWarning($"[{source}] CellSpace {cellId} 检测到 {conflicts[cellId].Count} 个冲突机器人");
+                        foreach (var conflict in conflicts[cellId])
                         {
-                            robotConflicts[conflictRobotId] = new List<TimeOccupancy>();
+                            Debug.LogWarning($"[{source}]   与机器人 {conflict.Occupier.RobotId} 在时间 " +
+                                        $"{conflict.StartTime:F2}-{conflict.EndTime:F2} 发生冲突");
                         }
-                        
-                        robotConflicts[conflictRobotId].Add(conflict);
-                    }
-                    
-                    // 合并每个机器人的时间段
-                    if (!conflicts.ContainsKey(cellId))
-                    {
-                        conflicts[cellId] = new List<TimeOccupancy>();
-                    }
-                    
-                    foreach (var robotEntry in robotConflicts)
-                    {
-                        string conflictRobotId = robotEntry.Key;
-                        var robotOccupancies = robotEntry.Value;
-                        
-                        // 合并同一机器人在同一单元格的冲突
-                        var mergedOccupancy = robotOccupancies[0];
-                        for (int i = 1; i < robotOccupancies.Count; i++)
-                        {
-                            if (robotOccupancies[i].StartTime < mergedOccupancy.StartTime)
-                            {
-                                mergedOccupancy = new TimeOccupancy(
-                                    robotOccupancies[i].StartTime,
-                                    mergedOccupancy.EndTime,
-                                    mergedOccupancy.Occupier,
-                                    mergedOccupancy.IsStartCell,
-                                    mergedOccupancy.IsEndCell);
-                            }
-                            
-                            if (robotOccupancies[i].EndTime > mergedOccupancy.EndTime)
-                            {
-                                mergedOccupancy = new TimeOccupancy(
-                                    mergedOccupancy.StartTime,
-                                    robotOccupancies[i].EndTime,
-                                    mergedOccupancy.Occupier,
-                                    mergedOccupancy.IsStartCell,
-                                    mergedOccupancy.IsEndCell);
-                            }
-                        }
-                        
-                        conflicts[cellId].Add(mergedOccupancy);
-                    }
-                    
-                    // 添加来源信息到日志输出
-                    Debug.LogWarning($"[{source}] CellSpace {cellId} 检测到 {conflicts[cellId].Count} 个冲突机器人");
-                    foreach (var conflict in conflicts[cellId])
-                    {
-                        Debug.LogWarning($"[{source}]   与机器人 {conflict.Occupier.RobotId} 在时间 " +
-                                    $"{conflict.StartTime:F2}-{conflict.EndTime:F2} 发生冲突");
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[{source}] Error detecting conflicts: {ex.Message}\n{ex.StackTrace}");
             }
             
             return conflicts;
@@ -115,6 +84,7 @@ namespace CentralControl
         /// 将边界路径映射为CellSpace占用
         /// </summary>
         public List<CellSpaceOccupancy> MapConnectionPointPathToCellSpaceOccupancies(
+            DynamicOccupancyLayer layer,
             IndoorSpace indoorSpace, 
             List<ConnectionPoint> connectionPointPath, 
             List<float> times)
@@ -123,28 +93,37 @@ namespace CentralControl
             
             try
             {
-                // Validate inputs first
-                if (indoorSpace == null)
+                // 验证输入
+                if (layer == null || indoorSpace == null)
                 {
-                    Debug.LogError("Error: IndoorSpace is null");
+                    Debug.LogError("Error: Layer or IndoorSpace is null");
                     return occupancies;
                 }
                 
                 if (connectionPointPath == null || connectionPointPath.Count < 2)
                 {
-                    Debug.LogError("Error: ConnectionPointPath is null or too short");
+                    Debug.LogError("Error: ConnectionPoint path is invalid");
                     return occupancies;
                 }
                 
                 if (times == null || times.Count < connectionPointPath.Count)
                 {
-                    Debug.LogError("Error: Times array is null or too short");
+                    Debug.LogError($"Error: Times list length ({times?.Count ?? 0}) less than path length ({connectionPointPath.Count})");
                     return occupancies;
                 }
                 
-                // 使用字典存储每个CellSpace的入口和出口信息
-                Dictionary<string, float?> entryTimes = new Dictionary<string, float?>();
-                Dictionary<string, float?> exitTimes = new Dictionary<string, float?>();
+                // 获取路径经过的所有CellSpace
+                var pathCells = layer.GetPathIntersectingCells(connectionPointPath);
+                
+                if (pathCells == null || pathCells.Count == 0)
+                {
+                    Debug.LogWarning("No cells found intersecting with the path");
+                    return occupancies;
+                }
+                
+                // 跟踪每个CellSpace的进入和退出时间
+                Dictionary<string, float> entryTimes = new Dictionary<string, float>();
+                Dictionary<string, float> exitTimes = new Dictionary<string, float>();
                 HashSet<string> processedCellIds = new HashSet<string>();
                 
                 // 确定起点CellSpace
@@ -155,87 +134,38 @@ namespace CentralControl
                     return occupancies;
                 }
                 
-                // Get CellBoundary from the ConnectionPoint
-                var cellBoundary = startCP.CellBoundary;
-                if (cellBoundary == null)
+                var startCellId = GetStartCellId(indoorSpace, layer, startCP);
+                if (string.IsNullOrEmpty(startCellId))
                 {
-                    Debug.LogError($"Error: Connection point {startCP.Id} has no CellBoundary");
+                    Debug.LogError("Error: Could not determine start cell");
                     return occupancies;
                 }
                 
-                // 获取起点CellSpace (source side of the boundary)
-                CellSpace startCellSpace = indoorSpace.GetCellSpaceFromId(cellBoundary.Source);
-                if (startCellSpace == null)
-                {
-                    Debug.LogError($"Error: Could not find source CellSpace for boundary {cellBoundary.Id}");
-                    return occupancies;
-                }
-                
-                string startCellId = startCellSpace.Id;
-                entryTimes[startCellId] = times[0];
+                // 记录起点CellSpace的入口时间
+                float startTime = times[0];
+                entryTimes[startCellId] = startTime;
                 processedCellIds.Add(startCellId);
                 
-                // 处理路径中的所有连接点
+                // 沿路径遍历所有ConnectionPoint
                 string currentCellId = startCellId;
                 
-                for (int i = 0; i < connectionPointPath.Count; i++)
+                for (int i = 0; i < connectionPointPath.Count - 1; i++)
                 {
-                    if (i >= times.Count)
-                    {
-                        Debug.LogWarning($"Error: Index {i} exceeds times array length {times.Count}");
-                        break;
-                    }
-                    
                     ConnectionPoint cp = connectionPointPath[i];
-                    if (cp == null)
+                    ConnectionPoint nextCP = connectionPointPath[i + 1];
+                    
+                    if (cp?.CellBoundary == null || nextCP?.CellBoundary == null)
                     {
-                        Debug.LogWarning($"Error: Connection point at index {i} is null");
                         continue;
                     }
                     
-                    // Get CellBoundary for this connection point
-                    var boundary = cp.CellBoundary;
-                    if (boundary == null)
-                    {
-                        Debug.LogWarning($"Error: Connection point {cp.Id} has no CellBoundary");
-                        continue;
-                    }
+                    // 确定下一个单元格
+                    string targetCellId = DetermineNextCell(indoorSpace, cp, nextCP, currentCellId);
                     
-                    // Get target CellSpace (depends on current direction)
-                    string targetCellId = null;
-                    
-                    // If we're in the source cell, next cell is target cell
-                    if (currentCellId == boundary.Source)
-                    {
-                        targetCellId = boundary.Target;
-                    }
-                    // If we're in the target cell, next cell is source cell
-                    else if (currentCellId == boundary.Target)
-                    {
-                        targetCellId = boundary.Source;
-                    }
-                    // Otherwise, determine based on cell space query
-                    else
-                    {
-                        // 获取Target CellSpace
-                        CellSpace nextCellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(cp, false);
-                        
-                        if (nextCellSpace != null)
-                        {
-                            targetCellId = nextCellSpace.Id;
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"Error: Could not determine target cell for connection point {cp.Id}");
-                            continue;
-                        }
-                    }
-                    
-                    // If target cell is identified and different from current
                     if (!string.IsNullOrEmpty(targetCellId) && targetCellId != currentCellId)
                     {
                         // 设置当前CellSpace的出口时间
-                        exitTimes[currentCellId] = times[i];
+                        exitTimes[currentCellId] = times[i + 1];
                         
                         // 设置下一个CellSpace的入口时间
                         if (!entryTimes.ContainsKey(targetCellId))
@@ -261,48 +191,160 @@ namespace CentralControl
                     bool isStartCell = (cellId == startCellId);
                     bool isEndCell = (cellId == currentCellId);
                     
-                    float? entryTime = entryTimes.ContainsKey(cellId) ? entryTimes[cellId] : null;
-                    float? exitTime = exitTimes.ContainsKey(cellId) ? exitTimes[cellId] : null;
-                    
-                    if (entryTime.HasValue && exitTime.HasValue)
+                    if (entryTimes.TryGetValue(cellId, out float entryTime) && 
+                        exitTimes.TryGetValue(cellId, out float exitTime))
                     {
-                        // 正常CellSpace：有入口和出口时间
+                        // 确保出口时间大于入口时间
+                        if (exitTime <= entryTime)
+                        {
+                            Debug.LogWarning($"修正Cell {cellId}的时间: 入口={entryTime}, 出口={exitTime}");
+                            exitTime = entryTime + 0.001f; // 增加一个微小差值
+                        }
+                        
                         CellSpaceOccupancy occupancy = new CellSpaceOccupancy(
-                            cellId, entryTime.Value, exitTime.Value, isStartCell, isEndCell);
+                            cellId, entryTime, exitTime, isStartCell, isEndCell);
+                            
                         occupancies.Add(occupancy);
-                    }
-                    else if (entryTime.HasValue)
-                    {
-                        // 终点CellSpace：只有入口时间，使用最后的时间点作为退出时间
-                        CellSpaceOccupancy occupancy = new CellSpaceOccupancy(
-                            cellId, entryTime.Value, times[times.Count - 1], isStartCell, isEndCell);
-                        occupancies.Add(occupancy);
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"CellSpace {cellId} has no entry or exit time");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error: {ex.Message}\n{ex.StackTrace}");
+                Debug.LogError($"Error mapping path to occupancies: {ex.Message}\n{ex.StackTrace}");
             }
             
             return occupancies;
         }
+        
+        /// <summary>
+        /// 按机器人ID合并冲突
+        /// </summary>
+        private List<TimeOccupancy> MergeConflictsByRobot(
+            List<TimeOccupancy> conflicts, 
+            bool isStartCell = false, 
+            bool isEndCell = false)
+        {
+            if (conflicts == null || conflicts.Count == 0)
+                return new List<TimeOccupancy>();
+                
+            // 按机器人ID分组
+            var groupedConflicts = conflicts.GroupBy(c => c.Occupier.RobotId);
+            
+            // 合并同一机器人的多个冲突
+            List<TimeOccupancy> result = new List<TimeOccupancy>();
+            
+            foreach (var group in groupedConflicts)
+            {
+                string robotId = group.Key;
+                var robotConflicts = group.ToList();
+                
+                if (robotConflicts.Count == 1)
+                {
+                    // 只有一个冲突，直接添加
+                    result.Add(robotConflicts[0]);
+                }
+                else
+                {
+                    // 合并多个冲突
+                    float minStartTime = robotConflicts.Min(c => c.StartTime);
+                    float maxEndTime = robotConflicts.Max(c => c.EndTime);
+                    
+                    var firstConflict = robotConflicts[0];
+                    var mergedOccupancy = new TimeOccupancy(
+                        minStartTime,
+                        maxEndTime,
+                        firstConflict.Occupier,
+                        isStartCell,
+                        isEndCell);
+                        
+                    result.Add(mergedOccupancy);
+                }
+            }
+            
+            return result;
+        }
+        
+        /// <summary>
+        /// 确定起点CellSpace ID
+        /// </summary>
+        private string GetStartCellId(IndoorSpace indoorSpace, DynamicOccupancyLayer layer, ConnectionPoint startCP)
+        {
+            if (startCP?.CellBoundary == null)
+                return null;
+                
+            // 首先从边界找出起点CellSpace
+            var sourceCellId = startCP.CellBoundary.Source;
+            var targetCellId = startCP.CellBoundary.Target;
+            
+            if (!string.IsNullOrEmpty(sourceCellId))
+                return sourceCellId;
+                
+            if (!string.IsNullOrEmpty(targetCellId))
+                return targetCellId;
+            
+            // 如果边界没有提供足够信息，使用空间查询
+            if (startCP.Point is Point startPoint)
+            {
+                Vector2 position = new Vector2((float)startPoint.X, (float)startPoint.Y);
+                var containingCells = layer.GetPointContainingCells(position);
+                
+                if (containingCells.Count > 0)
+                    return containingCells[0].Id;
+            }
+            
+            return null;
+        }
+        
+        /// <summary>
+        /// 确定下一个CellSpace
+        /// </summary>
+        private string DetermineNextCell(
+            IndoorSpace indoorSpace, 
+            ConnectionPoint currentCP, 
+            ConnectionPoint nextCP, 
+            string currentCellId)
+        {
+            if (currentCP?.CellBoundary == null || nextCP?.CellBoundary == null)
+                return null;
+                
+            // 当前边界的源和目标
+            string currentSourceId = currentCP.CellBoundary.Source;
+            string currentTargetId = currentCP.CellBoundary.Target;
+            
+            // 下一个边界的源和目标
+            string nextSourceId = nextCP.CellBoundary.Source;
+            string nextTargetId = nextCP.CellBoundary.Target;
+            
+            // 如果当前单元格是当前边界的源，则下一个是目标
+            if (currentCellId == currentSourceId)
+                return currentTargetId;
+                
+            // 如果当前单元格是当前边界的目标，则下一个是源
+            if (currentCellId == currentTargetId)
+                return currentSourceId;
+                
+            // 如果下一个边界的源或目标与当前边界匹配，选择另一个
+            if (nextSourceId == currentSourceId || nextSourceId == currentTargetId)
+                return nextTargetId;
+                
+            if (nextTargetId == currentSourceId || nextTargetId == currentTargetId)
+                return nextSourceId;
+                
+            // 无法确定，返回null
+            return null;
+        }
     }
     
     /// <summary>
-    /// CellSpace占用信息
+    /// CellSpace占用信息类
     /// </summary>
     public class CellSpaceOccupancy
     {
-        public string CellId { get; }
-        public float EntryTime { get; }
-        public float ExitTime { get; }
-        public bool IsStartCell { get; }
-        public bool IsEndCell { get; }
+        public string CellId { get; private set; }
+        public float EntryTime { get; private set; }
+        public float ExitTime { get; private set; }
+        public bool IsStartCell { get; private set; }
+        public bool IsEndCell { get; private set; }
         
         public CellSpaceOccupancy(string cellId, float entryTime, float exitTime, bool isStartCell = false, bool isEndCell = false)
         {

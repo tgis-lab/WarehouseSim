@@ -10,12 +10,14 @@ namespace Map
         private float gridSize = 0.5f;
         private Vector3 mapOrigin;
         public int gridWidth, gridLength;
+        public float floorHeight = 3.0f;
 
-        public MapGrid(float width, float height, float length)
+        public MapGrid(float width, float height, float length, float floorHeight = 3.0f)
         {
             this.width = width;
             this.height = height;
             this.length = length;
+            this.floorHeight = floorHeight;
         }
 
         public void InitializeGrid(IndoorSpace indoorSpace)
@@ -42,15 +44,17 @@ namespace Map
         public Vector3Int GetGridIndex(Vector3 position)
         {
             int x = Mathf.FloorToInt((position.x - mapOrigin.x) / gridSize);
+            int y = Mathf.FloorToInt(position.y / floorHeight); // 将y坐标转换为楼层索引
             int z = Mathf.FloorToInt((position.z - mapOrigin.z) / gridSize);
-            return new Vector3Int(x, 0, z);
+            return new Vector3Int(x, y, z);
         }
 
         public Vector3 GetWorldPosition(Vector3Int gridIndex)
         {
             float x = gridIndex.x * gridSize + mapOrigin.x;
+            float y = gridIndex.y * floorHeight; // 将楼层索引转换为世界高度
             float z = gridIndex.z * gridSize + mapOrigin.z;
-            return new Vector3(x, 0, z);
+            return new Vector3(x, y, z);
         }
 
         public Dictionary<string, Vector3Int> GetCellSpaceGridPositions(IndoorSpace indoorSpace)
@@ -58,10 +62,50 @@ namespace Map
             Dictionary<string, Vector3Int> cellSpaceGridPositions = new Dictionary<string, Vector3Int>();
             foreach (var cellSpace in indoorSpace.CellSpaces)
             {
-                Vector3 centroid = new Vector3((float)cellSpace.Space.Centroid.X, 0, (float)cellSpace.Space.Centroid.Y);
+                // 获取楼层信息
+                string floorLevel = cellSpace.GetLocatedFloor();
+                int floorIndex = 0;
+                
+                if (!string.IsNullOrEmpty(floorLevel))
+                {
+                    floorIndex = ParseFloorLevel(floorLevel);
+                }
+                
+                Vector3 centroid = new Vector3(
+                    (float)cellSpace.Space.Centroid.X, 
+                    floorIndex * floorHeight, 
+                    (float)cellSpace.Space.Centroid.Y
+                );
+                
                 cellSpaceGridPositions.Add(cellSpace.Id, GetGridIndex(centroid));
             }
             return cellSpaceGridPositions;
+        }
+        
+        // 解析楼层级别为数字(例如:"1F" -> 1, "B1" -> -1)
+        private int ParseFloorLevel(string floorLevel)
+        {
+            if (string.IsNullOrEmpty(floorLevel))
+                return 0;
+                
+            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
+            {
+                // 地下楼层
+                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
+                {
+                    return -level;
+                }
+            }
+            else
+            {
+                // 地上楼层
+                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
+                {
+                    return level;
+                }
+            }
+            
+            return 0; // 默认
         }
     }
 }

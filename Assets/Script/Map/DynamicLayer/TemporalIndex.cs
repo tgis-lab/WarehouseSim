@@ -323,6 +323,35 @@ namespace Map
         }
 
         /// <summary>
+        /// 移除指定时间之前的所有时间间隔
+        /// </summary>
+        public void RemoveIntervalsBefore(float cutoffTime)
+        {
+            // 查找早于cutoffTime的所有结束时间
+            var endTimes = endTimeIndex.RangeFrom(float.MinValue).TakeWhile(kvp => kvp.Key <= cutoffTime).ToList();
+            
+            foreach (var kvp in endTimes)
+            {
+                float endTime = kvp.Key;
+                var intervals = kvp.Value.ToList();
+                
+                foreach (var interval in intervals)
+                {
+                    // 移除这个时间间隔
+                    RemoveInterval(interval);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 获取指定时间范围内的所有占用记录
+        /// </summary>
+        public List<TimeOccupancy> GetOccupancies(float startTime, float endTime)
+        {
+            return QueryOverlapping(startTime, endTime);
+        }
+
+        /// <summary>
         /// 清理过期数据
         /// </summary>
         public void Cleanup(float currentTime, float windowDuration)

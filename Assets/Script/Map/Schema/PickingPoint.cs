@@ -9,11 +9,13 @@ namespace Map {
     {
         public string Id { get; private set; }
         public List<string> Boundings { get; private set; }
+        public string FloorLevel { get; private set; }
 
-        public PickingPoint(string id, List<string> boundings)
+        public PickingPoint(string id, List<string> boundings, string floorLevel)
         {
             Id = id;
             Boundings = boundings;
+            FloorLevel = floorLevel;
         }
 
         public string ToJson()

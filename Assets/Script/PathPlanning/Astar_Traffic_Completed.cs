@@ -261,7 +261,7 @@ namespace PathPlanning
                 
                 foreach (var neighborConnectionPoint in current.Children)
                 {
-                    var neighbor = graph.GetRoutePointFormConnectionPoint(neighborConnectionPoint);
+                    var neighbor = graph.GetRoutePointFromConnectionPoint(neighborConnectionPoint);
                     
                     if (neighbor == null || closedSet.Contains(neighbor))
                     {

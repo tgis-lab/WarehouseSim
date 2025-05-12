@@ -13,8 +13,9 @@ namespace CentralControl.OrderAssignment
         public DateTime Priority => CreationTime;  // 优先级 -> 创建时间
         public float ExecutionTime { get; private set; }
         public int? AssignedRobotId { get; set; }
+        public string FloorLevel { get; private set; }
 
-        public Order(string id, Vector3 destination, PickingPoint pickingPoint, float executionTime)
+        public Order(string id, Vector3 destination, PickingPoint pickingPoint, float executionTime, string floorLevel)
         {
             if (string.IsNullOrEmpty(id))
             {
@@ -37,6 +38,12 @@ namespace CentralControl.OrderAssignment
             this.CreationTime = DateTime.Now;
             this.ExecutionTime = executionTime;
             this.AssignedRobotId = null;
+            this.FloorLevel = floorLevel ?? pickingPoint.FloorLevel;
+        }
+        
+        public override string ToString()
+        {
+            return $"Order {Id} [Floor: {FloorLevel}, Point: {PickingPoint?.Id ?? "unknown"}]";
         }
     }
 }

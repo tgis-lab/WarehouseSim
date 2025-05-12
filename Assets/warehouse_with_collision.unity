@@ -243,14 +243,14 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 196572561}
-  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 12.5, y: 20, z: 10}
+  m_LocalRotation: {x: 0.12278779, y: 0.6963643, z: -0.12278779, w: 0.6963643}
+  m_LocalPosition: {x: -15, y: 10, z: 10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 20, y: 90, z: 0}
 --- !u!1 &427437585
 GameObject:
   m_ObjectHideFlags: 0
@@ -364,12 +364,11 @@ MonoBehaviour:
   maxAcceleration: 2
   maxDeceleration: 3
   MaxOrder: 20
-  robotCollisionLayer:
-    serializedVersion: 2
-    m_Bits: 64
-  pickerCollisionLayer:
-    serializedVersion: 2
-    m_Bits: 1024
+  verticalMovementSpeed: 1
+  floorHeight: 3
+  elevatorBaseWaitTime: 3
+  elevatorFloorTime: 1
+  stairsFloorTime: 2
 --- !u!4 &732838027
 Transform:
   m_ObjectHideFlags: 0
@@ -415,9 +414,23 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   pickerPrefab: {fileID: 453130503431497543, guid: 1b2f0b19b195e33478c3e4ac1cd90f17, type: 3}
-  numberOfPickers: 5
+  numberOfPickers: 0
   minPickerSpacing: 10
   pickersParent: {fileID: 706901190}
+  distributeEvenly: 1
+  customPickerFloorDistributions:
+  - floorLevel: 
+    ratio: 0
+  - floorLevel: 
+    ratio: 0
+  - floorLevel: 
+    ratio: 0
+  - floorLevel: 
+    ratio: 0
+  - floorLevel: 
+    ratio: 0
+  floorHeight: 3
+  baseHeight: 0.05
 --- !u!4 &868323830
 Transform:
   m_ObjectHideFlags: 0
@@ -468,17 +481,26 @@ MonoBehaviour:
   pickerManager: {fileID: 868323829}
   mapLoader: {fileID: 1765155605}
   intersectionAreaManager: {fileID: 1052560364}
-  width: 25
+  width: 29
   length: 20
   interval: 7
-  orderCount: 10
+  orderCount: 15
+  floorOrderDistribution:
+  - floorLevel: 1F
+    ratio: 0.3333
+  - floorLevel: 2F
+    ratio: 0.3333
+  - floorLevel: 3F
+    ratio: 0.3333
   correctionFactor: 0.1
   dynamicUpdateInterval: 1
   windowDuration: 60
   timeStep: 0.2
   autoRebuildNavMesh: 1
   navMeshRebuildInterval: 60
-  navMeshSurface: {fileID: 0}
+  offMeshConnectionRadius: 2
+  floorHeight: 3
+  baseHeight: 0.05
 --- !u!4 &1051107022
 Transform:
   m_ObjectHideFlags: 0
@@ -692,10 +714,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1ddf819c19b0e4ef69fa8db8072590c9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mapWidth: 27
-  mapLength: 20
-  wallHeight: 2
+  wallHeight: 9
   wallThickness: 0
+  wallTransparency: 0
+  wallColor: {r: 0.2, g: 0.2, b: 0.8, a: 1}
+  boundaryMaterial: {fileID: 0}
+  boundaryExtension: 0.2
 --- !u!4 &1477745117
 Transform:
   m_ObjectHideFlags: 0
@@ -741,8 +765,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 8841361260369869970, guid: eb24a2b82e9fe46a2b4f48fa3ce1987a, type: 3}
-  numberOfRobots: 5
+  numberOfRobots: 10
   targetIndicatorPrefab: {fileID: 1239929927}
+  distributeEvenly: 0
+  customRobotFloorDistributions:
+  - floorLevel: 1F
+    ratio: 0.2
+  - floorLevel: 2F
+    ratio: 0.2
+  - floorLevel: 3F
+    ratio: 0.6
+  floorHeight: 3
+  baseHeight: 0.05
 --- !u!4 &1545376426
 Transform:
   m_ObjectHideFlags: 0
@@ -790,8 +824,13 @@ MonoBehaviour:
   navigablePolygonMaterial: {fileID: 2100000, guid: b5198f8af2f2fb74d81edc8ca9d255ce, type: 2}
   nonNavigablePolygonMaterial: {fileID: 2100000, guid: b67fda5e1191e4182a77d262353e88e6, type: 2}
   pickingPointPolygonMaterial: {fileID: 2100000, guid: 1b93d41cbf697430f81058d5b31915c3, type: 2}
+  stairMaterial: {fileID: 2100000, guid: d5bb19eb17b3f42949ef016e38c26fc7, type: 2}
+  elevatorMaterial: {fileID: 2100000, guid: fa8397c4403ac42209de9785ae86a05f, type: 2}
+  verticalConnectionMaterial: {fileID: 2100000, guid: 6f241b47854cc480db7b69597f7623a4, type: 2}
   shelfPrefab: {fileID: 4934971901129387132, guid: 215fceb8eccbc54409e145f16c2b0f8c, type: 3}
   planePrefab: {fileID: 6533102830924308197, guid: 35d05da234a2549bb9887df9e0323d5e, type: 3}
+  floorHeight: 3
+  floorSeparation: 3
 --- !u!4 &1668055373
 Transform:
   m_ObjectHideFlags: 0
@@ -836,12 +875,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 57385e235f8d94f4789d7f6aa8639f4d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  jsonFile: {fileID: 4900000, guid: 440f54ad509474105b6d635c668eff68, type: 3}
+  jsonFile: {fileID: 4900000, guid: 106b9a263a8b245a2828060e8e6c6cc8, type: 3}
   mapVisualizer: {fileID: 1668055372}
   mapBoundaryPrefab: {fileID: 1477745115}
-  height: 0
-  width: 27
+  width: 29
   length: 20
+  floorHeight: 3
+  floorSeparation: 3
+  separateNavMeshPerFloor: 1
 --- !u!4 &1765155606
 Transform:
   m_ObjectHideFlags: 0

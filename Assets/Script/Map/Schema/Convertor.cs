@@ -2,6 +2,7 @@ using Newtonsoft.Json;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using System;
+using UnityEngine;
 
 namespace Map {
     public class GeometryConverter : JsonConverter
@@ -27,12 +28,32 @@ namespace Map {
 
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
+            if (reader.TokenType == JsonToken.Null)
+            {
+                return null;
+            }
+            
             if (reader.TokenType == JsonToken.String)
             {
-                string wkt = (string)reader.Value;
-                WKTReader wktReader = new WKTReader();
-                return wktReader.Read(wkt);
+                try
+                {
+                    string wkt = (string)reader.Value;
+                    if (string.IsNullOrEmpty(wkt))
+                    {
+                        return null;
+                    }
+                    
+                    WKTReader wktReader = new WKTReader();
+                    return wktReader.Read(wkt);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error parsing WKT: {ex.Message}");
+                    return null;
+                }
             }
+            
+            Debug.LogWarning($"Unexpected token type when deserializing geometry: {reader.TokenType}");
             return null;
         }
     }

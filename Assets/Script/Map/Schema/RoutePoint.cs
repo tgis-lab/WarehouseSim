@@ -55,6 +55,11 @@ namespace Map {
         {
             this.Children.Remove(child);
         }
+        
+        public bool IsVertical()
+        {
+            return ConnectionPoint != null && ConnectionPoint.IsVertical();
+        }
 
         public string ToJson()
         {
