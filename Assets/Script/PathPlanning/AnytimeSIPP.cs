@@ -150,7 +150,7 @@ namespace PathPlanning
         #region main methods
 
         /// <summary>
-        /// Anytime SIPP算法入口点
+        /// Anytime SIPP Algorithm Entry Point
         /// </summary>
         public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId) SIPPAlgorithm(
             Graph graph,
@@ -173,17 +173,19 @@ namespace PathPlanning
                 return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
             }
 
+            // Initialize
             TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
 
             string newPlanId = $"SIPPPlan_{robotId}_{DateTime.Now.Ticks}";
 
-            float timeLimit = 0.5f;
+            float timeLimit = 1.0f;
             float initialEpsilon = 3.0f;
             float finalEpsilon = 1.0f;
             float epsilonStep = 0.5f;
 
             verticalConnectionInfo.Clear();
 
+            // Build safe intervals according to the occupancy layer for robot
             Dictionary<string, List<SafeInterval>> safeIntervals = BuildSafeIntervals(
                 indoorSpace, globalOccupancyLayer, robotId, startTime);
 
@@ -193,6 +195,7 @@ namespace PathPlanning
 
             Debug.Log($"Robot {robotId}: Start 3D path planning，from Floor {startFloor} to Floor {endFloor}");
 
+            // Start Anytime SIPP
             var result = RunAnytimeSIPP(
                 graph,
                 indoorSpace,
@@ -212,6 +215,7 @@ namespace PathPlanning
                 epsilonStep,
                 globalOccupancyLayer);
 
+            // Check if the path is found, if yes, set the occupancy layer
             if (result.success && globalOccupancyLayer != null)
             {
                 foreach (var info in verticalConnectionInfo.Values)
@@ -235,7 +239,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 运行Anytime SIPP算法
+        /// Run Anytime SIPP Algorithm
         /// </summary>
         private static (bool success, List<ConnectionPoint> path, List<float> times, List<float> speeds, float epsilon) RunAnytimeSIPP(
             Graph graph,
@@ -259,6 +263,7 @@ namespace PathPlanning
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
 
+            // Initialize variables
             bool foundSolution = false;
             List<ConnectionPoint> bestPath = null;
             List<float> bestTimes = null;
@@ -269,13 +274,14 @@ namespace PathPlanning
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
 
+            // OPEN = CLOSED = INCONS = ∅
             PriorityQueue<SIPPState> openSet = new PriorityQueue<SIPPState>();
-            
             HashSet<string> closedSet = new HashSet<string>();
             HashSet<string> inconsSet = new HashSet<string>();
             
             Dictionary<string, SIPPState> allStates = new Dictionary<string, SIPPState>();
 
+            // Get the initial safe interval for the start position
             SafeInterval initialInterval = GetSafeIntervalContainingTime(
                 safeIntervals, startPosition.ConnectionPoint.Id, startTime);
                 
@@ -285,9 +291,11 @@ namespace PathPlanning
                 return (false, null, null, null, initialEpsilon);
             }
 
+            // Calculate the initial heuristic value
             float initialHeuristic = CalculateHeuristic(
                 startPosition, endPosition, searchMethod, defaultSpeed, startFloor, endFloor);
 
+            // Create the initial state
             SIPPState initialState = new SIPPState(
                 startPosition,
                 0,
@@ -305,6 +313,7 @@ namespace PathPlanning
             allStates[initialStateKey] = initialState;
 
             bool finalEpsilonRun = false;
+            // while ε > 1 do
             while (currentEpsilon > finalEpsilon || (currentEpsilon == finalEpsilon && !finalEpsilonRun))
             {
                 Debug.Log($"Robot {robotId}: Attempt to plan for epsilon={currentEpsilon:F1}");
@@ -318,6 +327,7 @@ namespace PathPlanning
                     
                     Dictionary<string, SIPPState> statesCopy = new Dictionary<string, SIPPState>(allStates);
                     
+                    // Update the priorities for all s ∈ OPEN according to f (s)
                     foreach (var kvp in statesCopy)
                     {
                         SIPPState state = kvp.Value;
@@ -348,6 +358,7 @@ namespace PathPlanning
                     }
                 }
 
+                // ImprovePath()
                 var result = ImprovePath(
                     graph,
                     indoorSpace,
@@ -384,6 +395,7 @@ namespace PathPlanning
                         finalEpsilonRun = true;
                     }
                     
+                    // Decrease ε
                     currentEpsilon = Math.Max(currentEpsilon - epsilonStep, finalEpsilon);
                 }
                 else
@@ -406,7 +418,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// ImprovePath函数 - 使用指定的epsilon值优化路径
+        /// ImprovePath()
         /// </summary>
         private static SIPPState ImprovePath(
             Graph graph,
@@ -434,10 +446,13 @@ namespace PathPlanning
             
             const float TIME_EPSILON = 0.001f;
             
+            // while f(s_goal) > min_{s ∈ OPEN} {f(s)} do
             while (openSet.Count > 0 && (goalState == null || goalFValue > openSet.Peek().FScore))
             {
+                // remove s with the smallest f (s) from OPEN
                 SIPPState current = openSet.Dequeue();
                 
+                // CLOSED = CLOSED ∪ {s}
                 string stateKey = current.GetStateKey();
                 
                 if (closedSet.Contains(stateKey))

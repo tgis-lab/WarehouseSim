@@ -117,8 +117,8 @@ namespace CentralControl.RobotControl
         private List<GameObject> recentCollisions = new List<GameObject>();
         private float collisionClearInterval = 5.0f;
         private float lastCollisionClearTime = 0f;
-        private float pathPointAcceptanceRadius = 0.8f;
-        private float finalDestinationAcceptanceRadius = 0.3f;
+        private float pathPointAcceptanceRadius = 0.5f;
+        private float finalDestinationAcceptanceRadius = 0.2f;
         private bool hasReportedArrival = false;
         #endregion
 
@@ -959,16 +959,12 @@ namespace CentralControl.RobotControl
             // Get entry and suggested exit directions
             var (entryDirection, suggestedExitDirection) = intersection.CalculateTraversalDirections(
                 transform.position, rb.velocity);
-            
-            Debug.Log($"Robot {Id} entered intersection {intersection.Id}, entry direction: {entryDirection}, " +
-                    $"suggested exit: {suggestedExitDirection}");
         }
 
         private void ExitIntersection()
         {
             if (currentIntersectionId == null) return;
             
-            Debug.Log($"Robot {Id} exited intersection {currentIntersectionId}");
             currentIntersectionId = null;
         }
         #endregion

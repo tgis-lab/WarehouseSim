@@ -584,7 +584,7 @@ namespace CentralControl
         {
             Debug.Log($"[CentralControl] Handling path planned event for robot {e.RobotId}, plan {e.PlanId}, path length {e.Path.Count}");
             
-            if (e.Path == null || e.Path.Count < 2 || e.Times == null || e.Times.Count != e.Path.Count || e.Times.Count != e.Speeds.Count)
+            if (e.Path == null || e.Times == null || e.Times.Count != e.Path.Count || e.Times.Count != e.Speeds.Count)
             {
                 Debug.LogError($"[CentralControl] Invalid path data for robot {e.RobotId}");
                 return;
