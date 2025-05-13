@@ -13,7 +13,7 @@ namespace PathPlanning
     {
         BFS, 
         Astar_Basic,
-        Astar_Traffic,
+        TimeSpaceAStar,
         AnytimeSIPP
     }
 
@@ -69,8 +69,8 @@ namespace PathPlanning
         {
             switch (this.searchAlgorithm)
             {
-                case SearchAlgorithm.Astar_Traffic:
-                    return Astar_Traffic.AstarAlgorithm(
+                case SearchAlgorithm.TimeSpaceAStar:
+                    return TimeSpaceAStar.TimeSpaceAStarAlgorithm(
                         this.graph, 
                         this.indoorSpace,
                         personalOccupancyLayer,
