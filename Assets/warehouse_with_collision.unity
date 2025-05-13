@@ -243,14 +243,14 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 196572561}
-  m_LocalRotation: {x: 0.12278779, y: 0.6963643, z: -0.12278779, w: 0.6963643}
-  m_LocalPosition: {x: -15, y: 10, z: 10}
+  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 10, y: 25, z: 10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 0
-  m_LocalEulerAnglesHint: {x: 20, y: 90, z: 0}
+  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
 --- !u!1 &427437585
 GameObject:
   m_ObjectHideFlags: 0
@@ -364,11 +364,7 @@ MonoBehaviour:
   maxAcceleration: 2
   maxDeceleration: 3
   MaxOrder: 20
-  verticalMovementSpeed: 1
   floorHeight: 3
-  elevatorBaseWaitTime: 3
-  elevatorFloorTime: 1
-  stairsFloorTime: 2
 --- !u!4 &732838027
 Transform:
   m_ObjectHideFlags: 0
@@ -483,7 +479,7 @@ MonoBehaviour:
   intersectionAreaManager: {fileID: 1052560364}
   width: 29
   length: 20
-  interval: 7
+  interval: 10
   orderCount: 15
   floorOrderDistribution:
   - floorLevel: 1F
@@ -767,7 +763,7 @@ MonoBehaviour:
   robotPrefab: {fileID: 8841361260369869970, guid: eb24a2b82e9fe46a2b4f48fa3ce1987a, type: 3}
   numberOfRobots: 10
   targetIndicatorPrefab: {fileID: 1239929927}
-  distributeEvenly: 0
+  distributeEvenly: 1
   customRobotFloorDistributions:
   - floorLevel: 1F
     ratio: 0.2

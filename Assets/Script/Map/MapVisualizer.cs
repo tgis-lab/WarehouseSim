@@ -524,21 +524,6 @@ public class MapVisualizer : MonoBehaviour
             groundRenderer.material = specialMaterial;
         }
         
-        // 添加电梯图标
-        GameObject iconObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        iconObject.name = "ElevatorIcon";
-        iconObject.transform.SetParent(markerObject.transform);
-        iconObject.transform.localPosition = new Vector3(0, 0.1f, 0);
-        iconObject.transform.localScale = new Vector3(width/3, 0.05f, width/3);
-        
-        MeshRenderer iconRenderer = iconObject.GetComponent<MeshRenderer>();
-        if (iconRenderer != null)
-        {
-            Material iconMaterial = new Material(Shader.Find("Standard"));
-            iconMaterial.color = Color.red;
-            iconRenderer.material = iconMaterial;
-        }
-        
         // 添加文本标签 - 使用3D TextMesh
         GameObject textObject = new GameObject("ElevatorLabel");
         textObject.transform.SetParent(markerObject.transform);

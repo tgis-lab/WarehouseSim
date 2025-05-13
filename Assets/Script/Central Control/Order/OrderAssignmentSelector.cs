@@ -11,12 +11,12 @@ namespace CentralControl.OrderAssignment
     public class OrderAssignmentSelector
     {
         private KMeans kMeans;
-        private IndoorSpace indoorSpace; // 添加对地图的引用以检查楼层连接
+        private IndoorSpace indoorSpace;
 
         public OrderAssignmentSelector()
         {
             kMeans = new KMeans();
-            indoorSpace = null; // 需要在使用前初始化
+            indoorSpace = null;
         }
         
         public OrderAssignmentSelector(IndoorSpace indoorSpace)
@@ -25,7 +25,6 @@ namespace CentralControl.OrderAssignment
             this.indoorSpace = indoorSpace;
         }
         
-        // 设置地图引用
         public void SetIndoorSpace(IndoorSpace indoorSpace)
         {
             this.indoorSpace = indoorSpace;
@@ -39,7 +38,6 @@ namespace CentralControl.OrderAssignment
                 RobotController robot = kvp.Key;
                 List<Order> assignedOrders = kvp.Value;
                 
-                // 对每个机器人的订单按距离排序
                 var sortedOrders = SortOrdersByDistanceForRobot(robot, assignedOrders);
                 
                 foreach (var order in sortedOrders)
@@ -74,11 +72,9 @@ namespace CentralControl.OrderAssignment
         {
             if (orders.Count == 0) return null;
             
-            // 考虑楼层因素的距离计算
             return orders.OrderBy(o => CalculatePathDistance(robot, o)).FirstOrDefault();
         }
         
-        // 对机器人的订单按距离排序
         private List<Order> SortOrdersByDistanceForRobot(RobotController robot, List<Order> orders)
         {
             return orders.OrderBy(o => CalculatePathDistance(robot, o)).ToList();
@@ -90,15 +86,12 @@ namespace CentralControl.OrderAssignment
             order.AssignedRobotId = robot.Id;
         }
         
-        // 计算路径距离（考虑楼层和垂直连接）
         private float CalculatePathDistance(RobotController robot, Order order)
         {
-            // 获取水平距离
             float horizontalDistance = Vector2.Distance(
                 new Vector2(robot.transform.position.x, robot.transform.position.z),
                 new Vector2(order.Destination.x, order.Destination.z));
             
-            // 楼层差异带来的额外成本
             float floorPenalty = 0;
             
             if (robot.CurrentFloor != order.FloorLevel)
@@ -107,20 +100,17 @@ namespace CentralControl.OrderAssignment
                 int orderFloor = ParseFloorLevel(order.FloorLevel);
                 int floorDifference = Mathf.Abs(robotFloor - orderFloor);
                 
-                // 楼层差异的基本成本（每层楼相当于200米水平距离）
                 floorPenalty = floorDifference * 200f;
             }
             
             return horizontalDistance + floorPenalty;
         }
         
-        // 解析楼层编号
         private int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel)) 
-                return 1; // 默认为1楼
+                return 1;
             
-            // 处理地上楼层："F1"或"1F"
             if (floorLevel.StartsWith("F") || floorLevel.EndsWith("F"))
             {
                 string numPart = floorLevel.Replace("F", "");
@@ -130,7 +120,6 @@ namespace CentralControl.OrderAssignment
                 }
             }
             
-            // 处理地下楼层："B1"
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
                 string numPart = floorLevel.Substring(1).Replace("F", "").Replace("f", "");
@@ -140,13 +129,12 @@ namespace CentralControl.OrderAssignment
                 }
             }
             
-            // 尝试简单数字解析
             if (int.TryParse(floorLevel, out int simpleLevel))
             {
                 return simpleLevel;
             }
             
-            return 1; // 如果解析失败，默认为1楼
+            return 1;
         }
     }
 }

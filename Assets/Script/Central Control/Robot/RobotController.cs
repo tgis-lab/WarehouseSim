@@ -28,17 +28,13 @@ namespace CentralControl.RobotControl
         public Transform targetIndicator;
         public SearchAlgorithm selectedAlgorithm = SearchAlgorithm.AnytimeSIPP;
         public SearchMethod selectedSearchMethod = SearchMethod.Manhattan_Distance;
-        public float baseDetectionRadius = 0.7f;
-        public float emergencyStopDistance = 0.2f;
+        public float baseDetectionRadius = 1.0f;
+        public float emergencyStopDistance = 0.5f;
         public float defaultSpeed = 2.0f;
         public float maxAcceleration = 2.0f;
         public float maxDeceleration = 5.0f;
         public int MaxOrder = 20;
-        public float verticalMovementSpeed = 1.0f;
         public float floorHeight = 3.0f;
-        public float elevatorBaseWaitTime = 3.0f;
-        public float elevatorFloorTime = 1.0f;
-        public float stairsFloorTime = 2.0f;
         #endregion
 
         #region Public Properties
@@ -104,10 +100,11 @@ namespace CentralControl.RobotControl
         private float baseHeight = 0.05f;
         
         // Path recovery
+        private bool isReplanning = false;
         private bool needsPathRecovery = false;
         private float lastPathRecoveryTime = 0f;
-        private const int MAX_RECOVERY_ATTEMPTS = 3;
-        private const float RECOVERY_INTERVAL = 2.0f;
+        private const int MAX_RECOVERY_ATTEMPTS = 5;
+        private const float RECOVERY_INTERVAL = 1.0f;
         
         // Conflict resolution
         private Coroutine waitForExecutionCoroutine;
@@ -115,7 +112,7 @@ namespace CentralControl.RobotControl
         
         // Collision
         private List<GameObject> recentCollisions = new List<GameObject>();
-        private float collisionClearInterval = 5.0f;
+        private float collisionClearInterval = 2.0f;
         private float lastCollisionClearTime = 0f;
         private float pathPointAcceptanceRadius = 0.5f;
         private float finalDestinationAcceptanceRadius = 0.2f;
@@ -169,6 +166,7 @@ namespace CentralControl.RobotControl
                 EventManager.Instance.OnRobotPathModified += HandlePathModified;
                 EventManager.Instance.OnRobotPathAccepted += HandlePathAccepted;
                 EventManager.Instance.OnPickingCompleted += HandlePickingCompletedEvent;
+                EventManager.Instance.OnGlobalOccupancyLayerUpdated += HandleGlobalOccupancyLayerUpdated;
             }
             
             // Initialize target indicator
@@ -230,6 +228,7 @@ namespace CentralControl.RobotControl
                 EventManager.Instance.OnRobotPathModified -= HandlePathModified;
                 EventManager.Instance.OnRobotPathAccepted -= HandlePathAccepted;
                 EventManager.Instance.OnPickingCompleted -= HandlePickingCompletedEvent;
+                EventManager.Instance.OnGlobalOccupancyLayerUpdated -= HandleGlobalOccupancyLayerUpdated;
             }
         }
         #endregion
@@ -434,7 +433,7 @@ namespace CentralControl.RobotControl
             EventManager.Instance.TriggerRobotReadyForPicking(Id.ToString(), order.PickingPoint, location);
             
             // Wait until picking is completed
-            float timeout = 180f;  // 3 minutes timeout
+            float timeout = 60f;  // 1 minutes timeout
             float startTime = Time.time;
             
             while (!pickingCompleted && Time.time - startTime < timeout)
@@ -777,46 +776,73 @@ namespace CentralControl.RobotControl
 
         private IEnumerator ReplanPath()
         {
-            Debug.Log($"Robot {Id}: Replanning path to destination");
+            isReplanning = true;
+            Debug.Log($"Robot {Id}: Replanning path to destination at time {Time.time}");
             
             if (currentOrder == null)
             {
                 Debug.LogWarning($"Robot {Id}: No current order to replan path for");
+                isReplanning = false;
                 yield break;
             }
             
-            // Save current position and final target
-            Vector3 finalTarget = GetTargetPosition(currentOrder.PickingPoint);
-            
-            // Temporarily disable navigation
             bool wasNavigationEnabled = navigationEnabled;
             navigationEnabled = false;
             
-            // Wait for stabilization
             yield return new WaitForSeconds(0.5f);
             
-            // Replan path
-            var result = PlanPath(finalTarget, currentOrder.PickingPoint.FloorLevel);
-            if (result.path != null && result.path.Count > 0)
+            Vector3 finalTarget = GetTargetPosition(currentOrder.PickingPoint);
+            string targetFloorLevel = currentOrder.PickingPoint.FloorLevel;
+            
+            isEmergencyStopped = false;
+            needsPathRecovery = false;
+            
+            int attempts = 0;
+            lastPathRecoveryTime = Time.time;
+            bool pathReplanned = false;
+
+            while (attempts < MAX_RECOVERY_ATTEMPTS && !pathReplanned)
             {
-                currentPlanId = result.planId;
-                RaisePathPlannedEvent(currentPlanId, result.path, result.times, result.speeds);
-                personalOccupancyLayer.RecordPathOccupancy(result.path, result.times, this.Id.ToString(), currentPlanId);
-                UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
-                currentPathIndex = 0;
+                Debug.Log($"Robot {Id}: Attempting to replan path to {finalTarget} (Attempt {attempts + 1})");
                 
-                Debug.Log($"Robot {Id}: Replanning path succeeded.");
+                var result = PlanPath(finalTarget, targetFloorLevel);
+                if (result.path != null && result.path.Count > 0)
+                {
+                    currentPlanId = result.planId;
+                    RaisePathPlannedEvent(currentPlanId, result.path, result.times, result.speeds);
+                    
+                    personalOccupancyLayer.RecordPathOccupancy(result.path, result.times, this.Id.ToString(), currentPlanId);
+                    
+                    UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
+                    currentPathIndex = 0;
+                    
+                    Debug.Log($"Robot {Id}: Replanning path succeeded on attempt {attempts + 1}");
+                    
+                    SetState(RobotState.Moving, true);
+                    pathReplanned = true;
+                    
+                    float startDelay = 0.5f;
+                    if (waitForExecutionCoroutine != null)
+                    {
+                        StopCoroutine(waitForExecutionCoroutine);
+                    }
+                    waitForExecutionCoroutine = StartCoroutine(WaitForExecution(startDelay));
+                    
+                    break;
+                }
                 
-                // Resume movement
-                SetState(RobotState.Moving, true);
-            }
-            else
-            {
-                Debug.LogError($"Robot {Id}: Replanning path failed.");
+                attempts++;
+                yield return new WaitForSeconds(RECOVERY_INTERVAL);
             }
             
-            // Re-enable navigation
             navigationEnabled = wasNavigationEnabled;
+            
+            if (!pathReplanned)
+            {
+                Debug.LogError($"Robot {Id}: Failed to replan path after {attempts} attempts");
+            }
+            
+            isReplanning = false;
         }
         #endregion
 
@@ -979,62 +1005,50 @@ namespace CentralControl.RobotControl
                 lastCollisionClearTime = Time.time;
             }
 
-            // Check for nearby obstacles
             Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius, obstacleLayer);
             bool emergencySituation = false;
+            float closestObstacleDistance = float.MaxValue;
             
             foreach (var hitCollider in hitColliders)
             {
                 if (hitCollider.gameObject == gameObject)
                     continue;
                     
-                RobotController otherRobot = hitCollider.GetComponent<RobotController>();
-                if (otherRobot != null)
-                {
-                    float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
+                float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
+                closestObstacleDistance = Mathf.Min(closestObstacleDistance, distance);
                     
-                    // Emergency stop if too close
-                    if (distance < emergencyStopDistance)
-                    {
-                        emergencySituation = true;
-                        
-                        EmergencyStop();
-                        
-                        // Record this collision
-                        if (!recentCollisions.Contains(otherRobot.gameObject))
-                        {
-                            recentCollisions.Add(otherRobot.gameObject);
-                        }
-                        
-                        break;
-                    }
-                }
-                else
+                RobotController otherRobot = hitCollider.GetComponent<RobotController>();
+                float currentEmergencyStopDistance = (otherRobot != null) ? 
+                    emergencyStopDistance : emergencyStopDistance * 1.5f;
+                    
+                if (distance < currentEmergencyStopDistance)
                 {
-                    // Other types of obstacles
-                    float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
-                    if (distance < emergencyStopDistance * 1.5f)
+                    emergencySituation = true;
+                    EmergencyStop();
+                    
+                    if (!recentCollisions.Contains(hitCollider.gameObject))
                     {
-                        emergencySituation = true;
-                        EmergencyStop();
-                        
-                        if (!recentCollisions.Contains(hitCollider.gameObject))
-                        {
-                            recentCollisions.Add(hitCollider.gameObject);
-                        }
-                        
-                        break;
+                        recentCollisions.Add(hitCollider.gameObject);
                     }
+                    
+                    break;
                 }
             }
             
-            // Check if emergency stop can be resumed
-            if (!emergencySituation && isEmergencyStopped)
+            if (isEmergencyStopped)
             {
-                // Cooldown before resuming
-                if (Time.time - lastEmergencyStopTime > EMERGENCY_COOLDOWN)
+                if (!emergencySituation && Time.time - lastEmergencyStopTime > EMERGENCY_COOLDOWN)
                 {
-                    ResumeFromEmergencyStop();
+                    float safeResumeDistance = emergencyStopDistance * 1.5f;
+                    if (hitColliders.Length == 0 || closestObstacleDistance > safeResumeDistance)
+                    {
+                        ResumeFromEmergencyStop();
+                    }
+                    else
+                    {
+                        Debug.Log($"Robot {Id}: Attempted to resume from emergency stop but " +
+                                $"obstacles are still too close (distance: {closestObstacleDistance:F2})");
+                    }
                 }
             }
         }
@@ -1065,40 +1079,162 @@ namespace CentralControl.RobotControl
             if (isEmergencyStopped)
             {
                 isEmergencyStopped = false;
+                Debug.Log($"Robot {Id}: Resuming from emergency stop at time {Time.time}");
                 
-                Debug.Log($"Robot {Id}: Resuming from emergency stop");
-                
-                // Replan path if needed
-                StartCoroutine(ReplanPath());
+                StartCoroutine(ResumeMovementWithDelay());
             }
+        }
+
+        private IEnumerator ResumeMovementWithDelay()
+        {
+            yield return new WaitForSeconds(0.5f);
+            
+            if (currentOrder != null && finalDestination != Vector3.zero)
+            {
+                Debug.Log($"Robot {Id}: Resuming movement to destination {finalDestination}");
+                
+                if (currentPath.Count > 0 && currentPathIndex < currentPath.Count)
+                {
+                    Debug.Log($"Robot {Id}: Resuming existing path from point {currentPathIndex} of {currentPath.Count}");
+                    SetState(RobotState.Moving, true);
+                }
+                else
+                {
+                    Debug.Log($"Robot {Id}: Path invalid after emergency stop, replanning");
+                    StartCoroutine(ReplanPath());
+                }
+            }
+            else
+            {
+                Debug.Log($"Robot {Id}: No current order to resume after emergency stop");
+            }
+        }
+
+        private bool IsCurrentPathValid()
+        {
+            if (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count)
+            {
+                return false;
+            }
+            
+            ConnectionPoint currentPoint = currentPath[currentPathIndex];
+            Vector3 targetPos = GetConnectionPointPosition(currentPoint);
+            
+            float distanceToTarget = Vector3.Distance(transform.position, targetPos);
+            
+            return distanceToTarget < pathPointAcceptanceRadius * 3.0f;
         }
 
         private void OnCollisionEnter(Collision collision)
         {
             if (collision.gameObject.layer == LayerMask.NameToLayer("GroundLayer"))
                 return;
-                
-            Debug.LogWarning($"Robot {Id}: Detected collision - {collision.gameObject.name}");
+                    
+            GameObject collisionObject = collision.gameObject;
+            string collisionObjectName = collisionObject.name;
             
-            if (!recentCollisions.Contains(collision.gameObject))
+            Debug.LogWarning($"Robot {Id}: Detected collision with {collisionObjectName} at time {Time.time}");
+            
+            RobotController otherRobot = collisionObject.GetComponent<RobotController>();
+            if (otherRobot != null)
             {
-                recentCollisions.Add(collision.gameObject);
+                EventManager.Instance.ReportRobotCollision(
+                    this.Id.ToString(),
+                    otherRobot.Id.ToString(), 
+                    collisionObject, 
+                    Time.time
+                );
+                
+                StartCoroutine(HandlingRobotCollision(otherRobot));
+            }
+            else
+            {
+                EventManager.Instance.ReportEnvironmentCollision(
+                    this.Id.ToString(), 
+                    collisionObjectName, 
+                    collisionObject, 
+                    Time.time
+                );
+                
+                StartCoroutine(HandlingEnvironmentCollision(collisionObject));
+            }
+            
+            if (!recentCollisions.Contains(collisionObject))
+            {
+                recentCollisions.Add(collisionObject);
             }
             
             EmergencyStop();
-            
-            // Wait for situation to stabilize
-            StartCoroutine(TemporaryDisableNavigation());
         }
 
-        private IEnumerator TemporaryDisableNavigation()
+        private IEnumerator HandlingRobotCollision(RobotController otherRobot)
         {
             navigationEnabled = false;
+            
             yield return new WaitForSeconds(1.0f);
+            
+            float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
+            if (distance < emergencyStopDistance * 1.2f)
+            {
+                Debug.Log($"Robot {Id}: Still too close to Robot {otherRobot.Id}, waiting longer");
+                yield return new WaitForSeconds(2.0f);
+            }
+            
             navigationEnabled = true;
             
-            // Replan path
-            yield return StartCoroutine(ReplanPath());
+            ClearPathReservations();
+            currentPath.Clear();
+            currentMovement.Clear();
+            currentPathIndex = 0;
+            
+            if (currentOrder != null)
+            {
+                StartCoroutine(ReplanPath());
+            }
+            else
+            {
+                isEmergencyStopped = false;
+            }
+        }
+
+        private IEnumerator HandlingEnvironmentCollision(GameObject obstacle)
+        {
+            navigationEnabled = false;
+            
+            yield return new WaitForSeconds(0.5f);
+            
+            Collider[] hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance, obstacleLayer);
+            bool stillColliding = false;
+            
+            foreach (var hitCollider in hitColliders)
+            {
+                if (hitCollider.gameObject == obstacle)
+                {
+                    stillColliding = true;
+                    break;
+                }
+            }
+            
+            if (stillColliding)
+            {
+                Vector3 backupDirection = -transform.forward;
+                rb.velocity = backupDirection * defaultSpeed * 0.5f;
+                
+                yield return new WaitForSeconds(0.5f);
+                rb.velocity = Vector3.zero;
+            }
+            
+            navigationEnabled = true;
+            
+            if (currentOrder != null)
+            {
+                yield return new WaitForSeconds(0.5f);
+                StartCoroutine(ReplanPath());
+            }
+            else
+            {
+                isEmergencyStopped = false;
+            }
         }
         #endregion
 
@@ -1246,12 +1382,12 @@ namespace CentralControl.RobotControl
             
             Debug.Log($"Robot {Id}: Path has been accepted by central controller with {e.Path.Count} points");
             
-            // 设置当前路径
+            // Update path and times
             currentPath = new List<ConnectionPoint>(e.Path);
             pathTimes = new List<float>(e.Times);
             currentPlanId = e.PlanId;
             
-            // 更新移动信息
+            // Update current movement information
             UpdateCurrentMovementInfo(e.Path, e.Times, e.Speeds);
 
             // Execute response logic such as starting path execution
@@ -1274,6 +1410,17 @@ namespace CentralControl.RobotControl
             else
             {
                 Debug.LogWarning($"Robot {Id}: Received picking completed event, but no matching order or picking point");
+            }
+        }
+
+        private void HandleGlobalOccupancyLayerUpdated(object sender, GlobalOccupancyLayerEventArgs e)
+        {
+            UpdateGlobalLayer(e.GlobalLayer);
+            
+            if (isReplanning)
+            {
+                Debug.Log($"Robot {Id}: Received updated global occupancy layer, triggering path replanning");
+                StartCoroutine(ReplanPath());
             }
         }
         #endregion

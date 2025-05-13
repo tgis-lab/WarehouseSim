@@ -69,6 +69,9 @@ namespace CentralControl
         private MultiFloorOrderGenerator orderGenerator;
         private Dictionary<string, List<NavMeshLink>> floorNavMeshLinks = new Dictionary<string, List<NavMeshLink>>();
         public static event EventHandler<RobotStatusEventArgs> OnRobotBecameFree;
+        private int totalRobotCollisions = 0;
+        private int totalEnvironmentCollisions = 0;
+        private Dictionary<string, int> robotCollisionCounts = new Dictionary<string, int>();
         #endregion
         
         #region Unity Lifecycle
@@ -119,6 +122,9 @@ namespace CentralControl
             // Start generating orders
             if (orderGenerationCoroutine != null) StopCoroutine(orderGenerationCoroutine);
             orderGenerationCoroutine = StartCoroutine(GenerateOrders());
+
+            // Initialize collision tracker
+            InitializeCollisionTracking();
             
             // Mark initialization as complete
             isInitialized = true;
@@ -132,6 +138,9 @@ namespace CentralControl
                 EventManager.Instance.TriggerRobotsInitialized();
                 EventManager.Instance.TriggerPickersInitialized();
             }
+
+            // Start auto-saving collision reports
+            StartCoroutine(AutoSaveCollisionReports(60f)); // Save every 60 seconds
         }
         
         void Update()
@@ -150,6 +159,23 @@ namespace CentralControl
             {
                 RebuildNavMesh();
                 nextNavMeshRebuildTime = Time.time + navMeshRebuildInterval;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            // Unregister event handlers
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
+                EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
+            }
+            
+            // Stop order generation coroutine
+            if (orderGenerationCoroutine != null)
+            {
+                StopCoroutine(orderGenerationCoroutine);
+                orderGenerationCoroutine = null;
             }
         }
         #endregion
@@ -267,6 +293,28 @@ namespace CentralControl
                 Debug.LogWarning("[CentralControl] IntersectionAreaManager component is missing or IndoorSpace is null");
             }
         }
+
+        private void InitializeCollisionTracking()
+        {
+            Debug.Log("[CentralControl] Initializing collision tracking system...");
+            
+            totalRobotCollisions = 0;
+            totalEnvironmentCollisions = 0;
+            robotCollisionCounts.Clear();
+            
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
+                
+                EventManager.Instance.OnRobotCollisionDetected += HandleRobotCollision;
+                
+                Debug.Log("[CentralControl] Collision tracking system initialized!");
+            }
+            else
+            {
+                Debug.LogError("[CentralControl] Failed to initialize collision tracking: EventManager not found!");
+            }
+        }
         #endregion
         
         #region Order Management
@@ -353,8 +401,8 @@ namespace CentralControl
             if (orders.Count > 0)
             {
                 // Get all robots for cluster assignment
-                List<RobotController> allRobots = robotManager.GetAllRobots();
-                assigner.AssignOrders(orders, allRobots);
+                List<RobotController> allAvailableRobots = robotManager.GetAvailableRobots();
+                assigner.AssignOrders(orders, allAvailableRobots);
             }
             
             Debug.Log("[CentralControl] Order distribution complete");
@@ -366,6 +414,15 @@ namespace CentralControl
         {
             globalOccupancyLayer.PruneExpiredOccupancies(Time.time - windowDuration);
             MergeRobotOccupancyLayer();
+
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.TriggerGlobalOccupancyLayerUpdated(globalOccupancyLayer, Time.time);
+            }
+            else
+            {
+                Debug.LogError("[CentralControl] EventManager not found. Cannot notify robots of global layer update.");
+            }
         }
         
         public void UpdateOccupancy(List<ConnectionPoint> path, List<float> times, string robotId, string planId)
@@ -694,9 +751,132 @@ namespace CentralControl
                 }
             }
         }
+
+        private void HandleRobotCollision(object sender, CollisionEventArgs e)
+        {
+            if (e.IsRobotCollision)
+            {
+                totalRobotCollisions++;
+                
+                IncrementRobotCollisionCount(e.RobotId1);
+                
+                IncrementRobotCollisionCount(e.RobotId2);
+                
+                Debug.Log($"[CentralControl] Detected robot-robot collision: {e.RobotId1} with {e.RobotId2} at time {e.Time:F2}");
+            }
+            else
+            {
+                totalEnvironmentCollisions++;
+                
+                IncrementRobotCollisionCount(e.RobotId1);
+                
+                Debug.Log($"[CentralControl] Detected robot-environment collision: {e.RobotId1} with {e.RobotId2} at time {e.Time:F2}");
+            }
+        }
+
+        private void IncrementRobotCollisionCount(string robotId)
+        {
+            if (!robotCollisionCounts.ContainsKey(robotId))
+            {
+                robotCollisionCounts[robotId] = 0;
+            }
+            
+            robotCollisionCounts[robotId]++;
+        }
+
+        public (int totalRobotCollisions, int totalEnvironmentCollisions, Dictionary<string, int> robotCollisions) GetCollisionStatistics()
+        {
+            return (totalRobotCollisions, totalEnvironmentCollisions, new Dictionary<string, int>(robotCollisionCounts));
+        }
+
+        public int GetRobotCollisionCount(string robotId)
+        {
+            if (robotCollisionCounts.TryGetValue(robotId, out int count))
+            {
+                return count;
+            }
+            return 0;
+        }
+
+        public string GenerateCollisionReport()
+        {
+            System.Text.StringBuilder report = new System.Text.StringBuilder();
+            report.AppendLine($"Collision Report - Generated at {DateTime.Now}");
+            report.AppendLine($"Simulation Time: {Time.time:F2} seconds");
+            report.AppendLine($"Total Robot-Robot Collisions: {totalRobotCollisions}");
+            report.AppendLine($"Total Robot-Environment Collisions: {totalEnvironmentCollisions}");
+            report.AppendLine("Per Robot Collision Counts:");
+            
+            foreach (var kvp in robotCollisionCounts.OrderByDescending(x => x.Value))
+            {
+                report.AppendLine($"  Robot {kvp.Key}: {kvp.Value} collisions");
+            }
+            
+            if (EventManager.Instance != null)
+            {
+                var allCollisions = EventManager.Instance.GetAllRobotCollisions()
+                    .Concat(EventManager.Instance.GetAllEnvironmentCollisions())
+                    .OrderBy(c => c.Time);
+                
+                report.AppendLine("\nDetailed Collision Timeline:");
+                foreach (var collision in allCollisions)
+                {
+                    if (collision.IsRobotCollision)
+                    {
+                        report.AppendLine($"  Time {collision.Time:F2}s: Robot {collision.RobotId1} collided with Robot {collision.RobotId2}");
+                    }
+                    else
+                    {
+                        report.AppendLine($"  Time {collision.Time:F2}s: Robot {collision.RobotId1} collided with Environment {collision.RobotId2}");
+                    }
+                }
+            }
+            
+            return report.ToString();
+        }
+
+        public void ResetCollisionStatistics()
+        {
+            totalRobotCollisions = 0;
+            totalEnvironmentCollisions = 0;
+            robotCollisionCounts.Clear();
+            
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.ClearCollisionRecords();
+            }
+            
+            Debug.Log("[CentralControl] Collision statistics reset");
+        }
         #endregion
         
         #region Utility Methods
+        public void SaveCollisionReportToFile()
+        {
+            string report = GenerateCollisionReport();
+            string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string filepath = $"{Application.persistentDataPath}/collision_report_{timestamp}.txt";
+            
+            try
+            {
+                System.IO.File.WriteAllText(filepath, report);
+                Debug.Log($"Collision report saved to: {filepath}");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error saving collision report: {e.Message}");
+            }
+        }
+        
+        private IEnumerator AutoSaveCollisionReports(float interval)
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(interval);
+                SaveCollisionReportToFile();
+            }
+        }
+
         private void RebuildNavMesh()
         {
             if (mapLoader != null)

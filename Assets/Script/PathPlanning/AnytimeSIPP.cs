@@ -19,7 +19,7 @@ namespace PathPlanning
         #region private fields
 
         /// <summary>
-        /// SIPP算法状态类，代表搜索过程中的一个节点
+        /// SIPP State class, representing a node in the search process
         /// </summary>
         private class SIPPState : IComparable<SIPPState>
         {
@@ -96,7 +96,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 安全时间间隔类，表示节点在特定时间段内是否安全
+        /// Safe Interval class, representing a time interval when a location is safe to occupy
         /// </summary>
         private class SafeInterval
         {
@@ -121,7 +121,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 垂直连接信息类，记录垂直移动信息
+        /// Vertical connection information class, recording vertical movement information
         /// </summary>
         private class VerticalConnectionInfo
         {
@@ -144,6 +144,7 @@ namespace PathPlanning
         private const float ELEVATOR_COST_FACTOR = 1.1f;
         private const float STAIR_COST_FACTOR = 1.2f;
         private const float DEFAULT_VERTICAL_COST_FACTOR = 1.3f;
+        private const float TIME_EPSILON = 0.001f;
         
         #endregion
 
@@ -274,13 +275,14 @@ namespace PathPlanning
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
 
-            // OPEN = CLOSED = INCONS = ∅
+            // 1-3: OPEN = CLOSED = INCONS = ∅
             PriorityQueue<SIPPState> openSet = new PriorityQueue<SIPPState>();
             HashSet<string> closedSet = new HashSet<string>();
             HashSet<string> inconsSet = new HashSet<string>();
             
             Dictionary<string, SIPPState> allStates = new Dictionary<string, SIPPState>();
 
+            // 1-4: insert s_start into OPEN with ε * h(s_start)
             // Get the initial safe interval for the start position
             SafeInterval initialInterval = GetSafeIntervalContainingTime(
                 safeIntervals, startPosition.ConnectionPoint.Id, startTime);
@@ -313,7 +315,7 @@ namespace PathPlanning
             allStates[initialStateKey] = initialState;
 
             bool finalEpsilonRun = false;
-            // while ε > 1 do
+            // 1-8: while ε > 1 do
             while (currentEpsilon > finalEpsilon || (currentEpsilon == finalEpsilon && !finalEpsilonRun))
             {
                 Debug.Log($"Robot {robotId}: Attempt to plan for epsilon={currentEpsilon:F1}");
@@ -327,7 +329,7 @@ namespace PathPlanning
                     
                     Dictionary<string, SIPPState> statesCopy = new Dictionary<string, SIPPState>(allStates);
                     
-                    // Update the priorities for all s ∈ OPEN according to f (s)
+                    // 1-11: Update the priorities for all s ∈ OPEN according to f(s)
                     foreach (var kvp in statesCopy)
                     {
                         SIPPState state = kvp.Value;
@@ -358,7 +360,7 @@ namespace PathPlanning
                     }
                 }
 
-                // ImprovePath()
+                // 1-13: ImprovePath()
                 var result = ImprovePath(
                     graph,
                     indoorSpace,
@@ -395,7 +397,7 @@ namespace PathPlanning
                         finalEpsilonRun = true;
                     }
                     
-                    // Decrease ε
+                    // 1-9: Decrease ε
                     currentEpsilon = Math.Max(currentEpsilon - epsilonStep, finalEpsilon);
                 }
                 else
@@ -418,7 +420,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// ImprovePath()
+        /// ImprovePath function - Improves the path using the specified epsilon value
         /// </summary>
         private static SIPPState ImprovePath(
             Graph graph,
@@ -444,15 +446,12 @@ namespace PathPlanning
             
             string goalLocationId = endPosition.ConnectionPoint.Id;
             
-            const float TIME_EPSILON = 0.001f;
-            
-            // while f(s_goal) > min_{s ∈ OPEN} {f(s)} do
+            // 2-1: while f(s_goal) > min_{s ∈ OPEN} {f(s)} do
             while (openSet.Count > 0 && (goalState == null || goalFValue > openSet.Peek().FScore))
             {
-                // remove s with the smallest f (s) from OPEN
+                // 2-2: remove s with the smallest f(s) from OPEN
                 SIPPState current = openSet.Dequeue();
                 
-                // CLOSED = CLOSED ∪ {s}
                 string stateKey = current.GetStateKey();
                 
                 if (closedSet.Contains(stateKey))
@@ -460,8 +459,10 @@ namespace PathPlanning
                     continue;
                 }
                 
+                // 2-3: CLOSED = CLOSED ∪ {s}
                 closedSet.Add(stateKey);
                 
+                // Check if we've reached the goal
                 if (current.RoutePoint.ConnectionPoint.Id == goalLocationId && 
                     current.FloorLevel == goalFloor)
                 {
@@ -470,92 +471,52 @@ namespace PathPlanning
                         goalState = current;
                         goalFValue = current.FScore;
                     }
+                    continue;
                 }
                 
-                string currentFloor = current.FloorLevel;
-                
-                var neighbors = GetNeighbors(
-                    current, 
-                    graph, 
-                    indoorSpace, 
+                // 2-4 - 2-42: Generate and process successors
+                List<SIPPState> successors = GenerateSuccessors(
+                    graph,
+                    indoorSpace,
+                    safeIntervals,
+                    current,
+                    endPosition,
                     robotId,
-                    current.DepartureTime, 
-                    defaultSpeed, 
+                    defaultSpeed,
                     maxAcceleration,
                     maxDeceleration,
-                    trafficRules);
+                    searchMethod,
+                    trafficRules,
+                    epsilon,
+                    goalFloor
+                );
                 
-                foreach (var (nextRoutePoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
+                // Process each successor
+                foreach (var successor in successors)
                 {
-                    float arriveTime = current.DepartureTime + travelTime;
+                    string successorKey = successor.GetStateKey();
                     
-                    List<SafeInterval> intervals = GetSafeIntervals(
-                        safeIntervals, nextRoutePoint.ConnectionPoint.Id);
+                    bool shouldUpdate = false;
                     
-                    if (intervals == null || intervals.Count == 0)
+                    // 2-27: If g(s') > new_cost
+                    if (!allStates.TryGetValue(successorKey, out SIPPState existingState) || 
+                        successor.GScore < existingState.GScore)
                     {
-                        Debug.LogWarning($"Robot {robotId}: Cannot find safe interval at {nextRoutePoint.ConnectionPoint.Id}");
-                        continue;
+                        shouldUpdate = true;
                     }
                     
-                    for (int i = 0; i < intervals.Count; i++)
+                    if (shouldUpdate)
                     {
-                        SafeInterval interval = intervals[i];
+                        allStates[successorKey] = successor;
                         
-                        if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
+                        // 2-29 - 2-38: If s' ∈ CLOSED, add to INCONS, else update OPEN
+                        if (closedSet.Contains(successorKey))
                         {
-                            float departureTime = arriveTime;
-                            
-                            float newGScore = current.GScore + travelCost;
-                            
-                            string newStateKey = $"{nextRoutePoint.ConnectionPoint.Id}_{i}_{nextFloor}";
-                            
-                            float heuristic = CalculateHeuristic(
-                                nextRoutePoint, 
-                                endPosition, 
-                                searchMethod, 
-                                defaultSpeed, 
-                                nextFloor, 
-                                goalFloor);
-                            
-                            float newFScore = newGScore + heuristic * epsilon;
-                            
-                            SIPPState newState = new SIPPState(
-                                nextRoutePoint,
-                                i,
-                                arriveTime,
-                                departureTime,
-                                newGScore,
-                                newFScore,
-                                current,
-                                interval,
-                                defaultSpeed,
-                                nextFloor,
-                                isVertical,
-                                verticalConnectorId);
-                            
-                            bool shouldUpdate = false;
-                            
-                            if (!closedSet.Contains(newStateKey) || 
-                                !allStates.TryGetValue(newStateKey, out SIPPState existingState) || 
-                                newGScore < existingState.GScore)
-                            {
-                                shouldUpdate = true;
-                            }
-                            
-                            if (shouldUpdate)
-                            {
-                                allStates[newStateKey] = newState;
-                                
-                                if (closedSet.Contains(newStateKey))
-                                {
-                                    inconsSet.Add(newStateKey);
-                                }
-                                else
-                                {
-                                    openSet.Enqueue(newState, newState.FScore);
-                                }
-                            }
+                            inconsSet.Add(successorKey);
+                        }
+                        else
+                        {
+                            openSet.Enqueue(successor, successor.FScore);
                         }
                     }
                 }
@@ -565,7 +526,220 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 获取节点的邻居，处理垂直连接
+        /// Generates all possible successor states from a given state
+        /// This handles both movement to neighboring nodes and waiting actions
+        /// </summary>
+        private static List<SIPPState> GenerateSuccessors(
+            Graph graph,
+            IndoorSpace indoorSpace,
+            Dictionary<string, List<SafeInterval>> safeIntervals,
+            SIPPState current,
+            RoutePoint endPosition,
+            string robotId,
+            float defaultSpeed,
+            float maxAcceleration,
+            float maxDeceleration,
+            SearchMethod searchMethod,
+            TrafficRuleKnowledge trafficRules,
+            float epsilon,
+            string goalFloor)
+        {
+            List<SIPPState> successors = new List<SIPPState>();
+            string currentNodeId = current.RoutePoint.ConnectionPoint.Id;
+            string currentFloor = current.FloorLevel;
+            
+            // 1. Motion Type: Move to neighboring nodes
+            // Get all possible physical neighbors
+            var neighbors = GetNeighbors(
+                current, 
+                graph, 
+                indoorSpace, 
+                robotId,
+                current.DepartureTime, 
+                defaultSpeed, 
+                maxAcceleration,
+                maxDeceleration,
+                trafficRules);
+            
+            // Process each neighbor (direct movement)
+            foreach (var (nextRoutePoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
+            {
+                // Calculate arrival time at the neighbor
+                float arriveTime = current.DepartureTime + travelTime;
+                
+                // Get all safe intervals at the destination
+                List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextRoutePoint.ConnectionPoint.Id);
+                
+                if (intervals == null || intervals.Count == 0)
+                {
+                    Debug.LogWarning($"Robot {robotId}: Cannot find safe interval at {nextRoutePoint.ConnectionPoint.Id}");
+                    continue;
+                }
+                
+                // Check each interval at the destination to see if we can arrive within it
+                for (int i = 0; i < intervals.Count; i++)
+                {
+                    SafeInterval interval = intervals[i];
+                    
+                    // Check if arrival time is within the safe interval
+                    if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
+                    {
+                        float departureTime = arriveTime; // No waiting after arrival
+                        float newGScore = current.GScore + travelCost;
+                        
+                        float heuristic = CalculateHeuristic(
+                            nextRoutePoint, 
+                            endPosition, 
+                            searchMethod, 
+                            defaultSpeed, 
+                            nextFloor, 
+                            goalFloor);
+                        
+                        float newFScore = newGScore + heuristic * epsilon;
+                        
+                        // Create successor state for direct movement
+                        SIPPState newState = new SIPPState(
+                            nextRoutePoint,
+                            i,
+                            arriveTime,
+                            departureTime,
+                            newGScore,
+                            newFScore,
+                            current,
+                            interval,
+                            defaultSpeed,
+                            nextFloor,
+                            isVertical,
+                            verticalConnectorId);
+                        
+                        successors.Add(newState);
+                    }
+                }
+            }
+            
+            // 2. Motion Type: Wait at current location until next safe interval
+            // Check if there's a next safe interval at the current location
+            List<SafeInterval> currentIntervals = GetSafeIntervals(safeIntervals, currentNodeId);
+            if (currentIntervals != null && current.IntervalIndex < currentIntervals.Count - 1)
+            {
+                // Get the next safe interval
+                SafeInterval nextInterval = currentIntervals[current.IntervalIndex + 1];
+                
+                // Calculate wait time to reach the next interval
+                float waitTime = nextInterval.Start - current.DepartureTime;
+                
+                // Ensure wait time is positive
+                if (waitTime > TIME_EPSILON)
+                {
+                    float newArrivalTime = current.DepartureTime + waitTime;
+                    float newDepartureTime = newArrivalTime; // No additional waiting after arrival
+                    float newGScore = current.GScore + waitTime;
+                    
+                    float heuristic = CalculateHeuristic(
+                        current.RoutePoint, 
+                        endPosition, 
+                        searchMethod, 
+                        defaultSpeed, 
+                        currentFloor, 
+                        goalFloor);
+                    
+                    float newFScore = newGScore + heuristic * epsilon;
+                    
+                    // Create successor state for waiting until next interval
+                    SIPPState waitSuccessor = new SIPPState(
+                        current.RoutePoint,
+                        current.IntervalIndex + 1,
+                        newArrivalTime,
+                        newDepartureTime,
+                        newGScore,
+                        newFScore,
+                        current,
+                        nextInterval,
+                        defaultSpeed,
+                        currentFloor);
+                    
+                    successors.Add(waitSuccessor);
+                }
+            }
+            
+            // 3. Motion Type: Wait and then move (especially for vertical transitions)
+            // Calculate maximum wait time possible in current interval
+            float maxWaitTimeInCurrentInterval = current.SafeInterval.End - current.DepartureTime;
+            
+            if (maxWaitTimeInCurrentInterval > TIME_EPSILON)
+            {
+                // For each neighbor, try waiting different amounts of time to find valid arrival
+                foreach (var (nextRoutePoint, baseTravelTime, baseTravelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
+                {
+                    // Focus on vertical transitions which might need waiting
+                    if (isVertical)
+                    {
+                        // Try different wait times to find valid transitions
+                        float waitStep = Math.Min(0.5f, maxWaitTimeInCurrentInterval / 10);
+                        bool foundValidWait = false;
+                        
+                        for (float waitTime = 0; waitTime <= maxWaitTimeInCurrentInterval && !foundValidWait; waitTime += waitStep)
+                        {
+                            // Calculate new departure and arrival times
+                            float newDepartureTime = current.DepartureTime + waitTime;
+                            float arriveTime = newDepartureTime + baseTravelTime;
+                            
+                            // Get safe intervals at destination
+                            List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextRoutePoint.ConnectionPoint.Id);
+                            
+                            if (intervals == null || intervals.Count == 0)
+                            {
+                                continue;
+                            }
+                            
+                            // Check each interval to see if we can arrive within it after waiting
+                            for (int i = 0; i < intervals.Count && !foundValidWait; i++)
+                            {
+                                SafeInterval interval = intervals[i];
+                                
+                                if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
+                                {
+                                    float newGScore = current.GScore + waitTime + baseTravelCost;
+                                    
+                                    float heuristic = CalculateHeuristic(
+                                        nextRoutePoint, 
+                                        endPosition, 
+                                        searchMethod, 
+                                        defaultSpeed, 
+                                        nextFloor, 
+                                        goalFloor);
+                                    
+                                    float newFScore = newGScore + heuristic * epsilon;
+                                    
+                                    // Create successor state with waiting and then movement
+                                    SIPPState waitThenMoveSuccessor = new SIPPState(
+                                        nextRoutePoint,
+                                        i,
+                                        arriveTime,
+                                        arriveTime, // No additional waiting after arrival
+                                        newGScore,
+                                        newFScore,
+                                        current,
+                                        interval,
+                                        defaultSpeed,
+                                        nextFloor,
+                                        isVertical,
+                                        verticalConnectorId);
+                                    
+                                    successors.Add(waitThenMoveSuccessor);
+                                    foundValidWait = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return successors;
+        }
+
+        /// <summary>
+        /// Get neighbors for a given state, including vertical connections
         /// </summary>
         private static List<(RoutePoint routePoint, float time, float cost, string floor, bool isVertical, string verticalConnectorId)> GetNeighbors(
             SIPPState state,
@@ -657,7 +831,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 根据目标状态重建完整路径
+        /// Reconstruct the complete path from the goal state
         /// </summary>
         private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ReconstructPath(
             SIPPState goalState,
@@ -691,11 +865,12 @@ namespace PathPlanning
                 SIPPState state = states[i];
                 SIPPState prevState = states[i-1];
                 
+                // If previous state had waiting, add a point at the departure time
                 if (prevState.HasWait && prevState.WaitTime > 0.01f)
                 {
                     path.Add(prevState.RoutePoint.ConnectionPoint);
                     times.Add(prevState.DepartureTime);
-                    speeds.Add(0);
+                    speeds.Add(0); // Speed is zero when waiting
                 }
                 
                 path.Add(state.RoutePoint.ConnectionPoint);
@@ -711,7 +886,7 @@ namespace PathPlanning
         #region Helper
 
         /// <summary>
-        /// 构建安全时间间隔
+        /// Build safe intervals from occupancy data
         /// </summary>
         private static Dictionary<string, List<SafeInterval>> BuildSafeIntervals(
             IndoorSpace indoorSpace,
@@ -765,7 +940,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 获取包含指定时间的安全间隔
+        /// Get the safe interval that contains the specified time
         /// </summary>
         private static SafeInterval GetSafeIntervalContainingTime(
             Dictionary<string, List<SafeInterval>> safeIntervals,
@@ -789,7 +964,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 获取指定位置的所有安全间隔
+        /// Get all safe intervals for a specified location
         /// </summary>
         private static List<SafeInterval> GetSafeIntervals(
             Dictionary<string, List<SafeInterval>> safeIntervals,
@@ -804,7 +979,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 计算启发式函数值，考虑3D距离
+        /// Calculate the heuristic value, considering 3D distance
         /// </summary>
         private static float CalculateHeuristic(
             RoutePoint current,
@@ -849,7 +1024,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 计算两点间的距离
+        /// Calculate distance between two connection points
         /// </summary>
         private static float CalculateDistance(ConnectionPoint from, ConnectionPoint to)
         {
@@ -860,7 +1035,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 获取点的Vector3表示
+        /// Get the Vector3 representation of a connection point
         /// </summary>
         private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
         {
@@ -873,7 +1048,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 计算垂直移动的时间和成本
+        /// Calculate vertical travel metrics
         /// </summary>
         private static (float time, float cost, string cellSpaceId) CalculateVerticalTravelMetrics(
             IndoorSpace indoorSpace,
@@ -905,7 +1080,7 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// 解析楼层编号为整数
+        /// Parse floor level string to integer
         /// </summary>
         private static int ParseFloorLevel(string floorLevel)
         {
