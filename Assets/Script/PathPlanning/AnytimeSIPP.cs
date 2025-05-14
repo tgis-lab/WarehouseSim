@@ -1046,33 +1046,6 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// Calculate vertical travel metrics
-        /// </summary>
-        private static (float time, float cost, string cellSpaceId) CalculateVerticalTravelMetrics(
-            IndoorSpace indoorSpace,
-            ConnectionPoint connectionPoint,
-            string fromFloor,
-            string toFloor,
-            float currentTime,
-            string robotId)
-        {
-            CellSpace cellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint);
-            
-            int floorDifference = Math.Abs(ParseFloorLevel(fromFloor) - ParseFloorLevel(toFloor));
-            
-            if (cellSpace.IsElevator())
-            {
-                float elevatorTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
-                return (elevatorTime, elevatorTime, cellSpace.Id);
-            }
-            else
-            {
-                float defaultTime = DEFAULT_VERTICAL_TIME * floorDifference;
-                return (defaultTime, defaultTime, cellSpace.Id);
-            }
-        }
-
-        /// <summary>
         /// Parse floor level string to integer
         /// </summary>
         private static int ParseFloorLevel(string floorLevel)

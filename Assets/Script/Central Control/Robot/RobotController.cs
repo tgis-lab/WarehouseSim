@@ -115,7 +115,7 @@ namespace CentralControl.RobotControl
         private float collisionClearInterval = 2.0f;
         private float lastCollisionClearTime = 0f;
         private float pathPointAcceptanceRadius = 0.5f;
-        private float finalDestinationAcceptanceRadius = 0.2f;
+        private float finalDestinationAcceptanceRadius = 1.0f;
         private bool hasReportedArrival = false;
         #endregion
 
@@ -433,7 +433,7 @@ namespace CentralControl.RobotControl
             EventManager.Instance.TriggerRobotReadyForPicking(Id.ToString(), order.PickingPoint, location);
             
             // Wait until picking is completed
-            float timeout = 60f;  // 1 minutes timeout
+            float timeout = 10f;  // 1 minutes timeout
             float startTime = Time.time;
             
             while (!pickingCompleted && Time.time - startTime < timeout)
@@ -447,6 +447,7 @@ namespace CentralControl.RobotControl
             }
             
             isWaitingForPicking = false;
+            NotifyPickingCompleted();
         }
 
         public void NotifyPickingCompleted()
@@ -1176,6 +1177,12 @@ namespace CentralControl.RobotControl
                 Debug.Log($"Robot {Id}: Still too close to Robot {otherRobot.Id}, waiting longer");
                 yield return new WaitForSeconds(2.0f);
             }
+
+            Vector3 backupDirection = -transform.forward;
+            rb.velocity = backupDirection * defaultSpeed * 0.5f;
+            
+            yield return new WaitForSeconds(0.5f);
+            rb.velocity = Vector3.zero;
             
             navigationEnabled = true;
             
