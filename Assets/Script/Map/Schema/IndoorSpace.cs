@@ -441,7 +441,7 @@ namespace Map {
             {
                 if (cellBoundary.Id == cellBoundaryId)
                 {
-                    return cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary));
+                    return cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary));
                 }
             }
             Debug.Log(cellBoundaryId + "ConnectionPoint not found");
@@ -500,7 +500,7 @@ namespace Map {
 
             foreach (var cellBoundary in _cellBoundaries)
             {
-                ConnectionPoint connectionPoint = cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary));
+                ConnectionPoint connectionPoint = cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary));
                 hypergraph.AddHyperNode(connectionPoint);
             }
             

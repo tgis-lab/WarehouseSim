@@ -139,11 +139,7 @@ namespace PathPlanning
         private static Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
-        private const float STAIR_FLOOR_TIME = 2.0f;
-        private const float DEFAULT_VERTICAL_TIME = 2.5f;
-        private const float ELEVATOR_COST_FACTOR = 1.1f;
-        private const float STAIR_COST_FACTOR = 1.2f;
-        private const float DEFAULT_VERTICAL_COST_FACTOR = 1.3f;
+        private const float DEFAULT_VERTICAL_TIME = 6.0f;
         private const float TIME_EPSILON = 0.001f;
         
         #endregion
@@ -180,7 +176,7 @@ namespace PathPlanning
             string newPlanId = $"SIPPPlan_{robotId}_{DateTime.Now.Ticks}";
 
             float timeLimit = 1.0f;
-            float initialEpsilon = 3.0f;
+            float initialEpsilon = 5.0f;
             float finalEpsilon = 1.0f;
             float epsilonStep = 0.5f;
 
@@ -760,6 +756,8 @@ namespace PathPlanning
             
             foreach (var childConnection in childConnections)
             {
+                if (childConnection.IsStair) continue;
+
                 RoutePoint childRoutePoint = graph.GetRoutePointFromConnectionPoint(childConnection);
                 if (childRoutePoint == null) continue;
                 
@@ -788,7 +786,7 @@ namespace PathPlanning
                         maxDeceleration);
                     
                     travelTime = Math.Max(baseTime, adjustedTime);
-                    travelCost = travelTime * ELEVATOR_COST_FACTOR;
+                    travelCost = travelTime;
                     speedForMove = adjustedSpeed;
                     
                     verticalConnectorId = childConnection.Id;
@@ -1065,17 +1063,12 @@ namespace PathPlanning
             if (cellSpace.IsElevator())
             {
                 float elevatorTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
-                return (elevatorTime, elevatorTime * ELEVATOR_COST_FACTOR, cellSpace.Id);
-            }
-            else if (cellSpace.IsStair())
-            {
-                float stairTime = STAIR_FLOOR_TIME * floorDifference;
-                return (stairTime, stairTime * STAIR_COST_FACTOR, cellSpace.Id);
+                return (elevatorTime, elevatorTime, cellSpace.Id);
             }
             else
             {
                 float defaultTime = DEFAULT_VERTICAL_TIME * floorDifference;
-                return (defaultTime, defaultTime * DEFAULT_VERTICAL_COST_FACTOR, cellSpace.Id);
+                return (defaultTime, defaultTime, cellSpace.Id);
             }
         }
 

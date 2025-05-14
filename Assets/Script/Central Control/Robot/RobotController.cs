@@ -508,13 +508,10 @@ namespace CentralControl.RobotControl
             
             // Check if in the cell containing the picking point
             CellSpace currentCell = indoorSpace.GetCellSpaceFromCoordinates(transform.position, GetFloorLevelFromPosition(transform.position));
-            if (currentCell != null && currentCell.Id == cellSpace.Id)
+            if (currentCell != null)
             {
                 // Check distance to the center of the picking point
-                float distanceToPickingPoint = Vector3.Distance(
-                    transform.position,
-                    finalDestination
-                );
+                float distanceToPickingPoint = Vector3.Distance(transform.position, finalDestination);
                 return distanceToPickingPoint < finalDestinationAcceptanceRadius;
             }
             

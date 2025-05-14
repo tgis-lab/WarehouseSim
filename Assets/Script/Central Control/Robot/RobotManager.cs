@@ -56,21 +56,21 @@ namespace CentralControl.RobotControl
             this.globalOccupancyLayer = globalOccupancyLayer;
             this.intersectionAreaManager = intersectionAreaManager;
 
-            // 获取所有可用楼层
+            // 获取所有可用Floor
             List<string> availableFloors = indoorSpace.GetAllFloorLevels();
             
             if (availableFloors.Count == 0)
             {
-                Debug.LogError("没有找到可用楼层，无法初始化机器人");
+                Debug.LogError("Can not find any available Floor to place Robots.");
                 return;
             }
 
-            // 计算每层楼的机器人数量
+            // 计算每层楼的Robot数量
             Dictionary<string, int> robotsPerFloor;
             
             if (distributeEvenly)
             {
-                // 均匀分配机器人到各楼层
+                // 均匀分配Robot到各Floor
                 robotsPerFloor = DistributeRobotsEvenly(numberOfRobots, availableFloors);
             }
             else
@@ -80,7 +80,7 @@ namespace CentralControl.RobotControl
             }
 
             int robotId = 1;
-            // 在每层创建机器人
+            // 在每层创建Robot
             foreach (var entry in robotsPerFloor)
             {
                 string floor = entry.Key;
@@ -96,7 +96,7 @@ namespace CentralControl.RobotControl
                     }
                     else
                     {
-                        Debug.LogWarning($"无法在楼层 {floor} 找到有效位置放置机器人 {robotId}");
+                        Debug.LogWarning($"Cannot find valid position to place Robot {robotId} at Floor {floor}.");
                     }
                 }
             }
@@ -104,7 +104,7 @@ namespace CentralControl.RobotControl
             EventManager.Instance?.TriggerRobotsInitialized();
         }
         
-        // 均匀分配机器人到各楼层
+        // 均匀分配Robot到各Floor
         private Dictionary<string, int> DistributeRobotsEvenly(int totalRobots, List<string> floors)
         {
             Dictionary<string, int> distribution = new Dictionary<string, int>();
@@ -113,7 +113,7 @@ namespace CentralControl.RobotControl
             
             foreach (string floor in floors)
             {
-                // 基本分配每层相同数量的机器人
+                // 基本分配每层相同数量的Robot
                 distribution[floor] = robotsPerFloor;
                 
                 // 如果有剩余，每层额外分配一个，直到分完
@@ -127,7 +127,7 @@ namespace CentralControl.RobotControl
             return distribution;
         }
         
-        // 按照自定义比例分配机器人
+        // 按照自定义比例分配Robot
         private Dictionary<string, int> DistributeRobotsByCustomRatio(int totalRobots, List<string> floors)
         {
             Dictionary<string, float> ratios = new Dictionary<string, float>();
@@ -144,7 +144,7 @@ namespace CentralControl.RobotControl
                 }
             }
             
-            // 如果没有配置完整的比例，为剩余楼层分配均等的比例
+            // 如果没有配置完整的比例，为剩余Floor分配均等的比例
             float configuredRatioSum = ratios.Values.Sum();
             float remainingRatio = Mathf.Max(0, 1.0f - configuredRatioSum);
             int unconfiguredFloors = floors.Count - ratios.Count;
@@ -169,7 +169,7 @@ namespace CentralControl.RobotControl
                 }
             }
             
-            // 按比例计算每层机器人数量
+            // 按比例计算每层Robot数量
             Dictionary<string, int> distribution = new Dictionary<string, int>();
             int assignedRobots = 0;
             
@@ -180,10 +180,10 @@ namespace CentralControl.RobotControl
                 assignedRobots += robotsOnFloor;
             }
             
-            // 处理因舍入导致的剩余机器人
+            // 处理因舍入导致的剩余Robot
             int remainingRobots = totalRobots - assignedRobots;
             
-            // 将剩余的机器人分配给比例最高的楼层
+            // 将剩余的Robot分配给比例最高的Floor
             if (remainingRobots > 0)
             {
                 var sortedFloors = ratios.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).ToList();
@@ -199,16 +199,16 @@ namespace CentralControl.RobotControl
             return distribution;
         }
         
-        // 获取指定楼层的有效初始位置
+        // 获取指定Floor的有效初始位置
         private Vector3 GetValidInitialPosition(string floorLevel)
         {
-            // 确保楼层对应的集合已初始化
+            // 确保Floor对应的集合已初始化
             if (!usedSpawnPointsByFloor.ContainsKey(floorLevel))
             {
                 usedSpawnPointsByFloor[floorLevel] = new HashSet<CellSpace>();
             }
             
-            // 获取该楼层的所有可用通道CellSpace
+            // 获取该Floor的所有可用通道CellSpace
             List<CellSpace> spawnPoints = indoorSpace.GetCellSpaceFromLayerTypeAndFloor("aisle", floorLevel);
             
             if (spawnPoints == null || spawnPoints.Count == 0)
@@ -227,7 +227,7 @@ namespace CentralControl.RobotControl
                 .Where(sp => !usedSpawnPointsByFloor[floorLevel].Contains(sp))
                 .ToList();
             
-            // 如果没有可用的生成点，尝试重置该楼层的使用记录
+            // 如果没有可用的生成点，尝试重置该Floor的使用记录
             if (availableSpawnPoints.Count == 0)
             {
                 // 考虑部分重置或完全重置
@@ -244,7 +244,7 @@ namespace CentralControl.RobotControl
             // 获取选定CellSpace的中心点
             Point cellSpaceCenterPoint = (Point)selectedCellSpace.Node;
             
-            // 计算Y坐标 (基于楼层)
+            // 计算Y坐标 (基于Floor)
             float y = GetFloorYPosition(floorLevel);
             
             Vector3 cellSpacePosition = new Vector3(
@@ -333,17 +333,17 @@ namespace CentralControl.RobotControl
                 robot.targetIndicator = targetIndicatorInstance;
 
                 robots.Add(robot);
-                Debug.Log($"创建机器人 {id} 在位置 {position}");
+                Debug.Log($"Create Robot {id} at {position}");
             }
             else
             {
-                Debug.LogError($"无法获取机器人 {id} 的RobotController组件");
+                Debug.LogError($"Cannot get Robot {id}'s RobotController component");
             }
         }
 
         public RobotController GetClosestRobot(Vector3 position, string floorLevel = null)
         {
-            // 如果指定了楼层，优先返回同楼层的机器人
+            // 如果指定了Floor，优先返回同Floor的Robot
             if (!string.IsNullOrEmpty(floorLevel))
             {
                 var closestRobotOnFloor = GetClosestRobotByCondition(
@@ -357,7 +357,7 @@ namespace CentralControl.RobotControl
                 }
             }
             
-            // 找任意楼层的可用机器人
+            // 找任意Floor的可用Robot
             var closestAvailableRobot = GetClosestRobotByCondition(
                 position, 
                 robot => robot.IsAvailable
@@ -368,7 +368,7 @@ namespace CentralControl.RobotControl
                 return closestAvailableRobot;
             }
 
-            // 找空闲机器人
+            // 找空闲Robot
             var closestFreeRobot = GetClosestRobotByCondition(
                 position, 
                 robot => robot.IsFree
@@ -379,7 +379,7 @@ namespace CentralControl.RobotControl
                 return closestFreeRobot;
             }
 
-            Debug.Log("没有找到合适的机器人。");
+            Debug.Log("No available or free robots found.");
             return null;
         }
 
@@ -392,7 +392,7 @@ namespace CentralControl.RobotControl
             return closestRobot;
         }
         
-        // 计算考虑楼层的3D距离
+        // 计算考虑Floor的3D距离
         private float Calculate3DDistance(Vector3 robotPos, Vector3 targetPos, string robotFloor)
         {
             // 水平距离
@@ -417,13 +417,13 @@ namespace CentralControl.RobotControl
             return robots.Where(r => r.IsAvailable).ToList();
         }
         
-        // 获取指定楼层的可用机器人
+        // 获取指定Floor的可用Robot
         public List<RobotController> GetAvailableRobotsOnFloor(string floorLevel)
         {
             return robots.Where(r => r.IsAvailable && r.CurrentFloor == floorLevel).ToList();
         }
         
-        // 获取所有楼层的机器人数量统计
+        // 获取所有Floor的Robot数量统计
         public Dictionary<string, int> GetRobotCountByFloor()
         {
             return robots.GroupBy(r => r.CurrentFloor)
@@ -450,7 +450,7 @@ namespace CentralControl.RobotControl
                 if (!robot.IsAvailable && (robot.lastReportedAvailability || 
                     robot.lastReportedOrderCount != robot.GetRobotOrdersQueueCount))
                 {
-                    Debug.Log($"机器人 {robot.Id} (楼层 {robot.CurrentFloor}) 正忙于 {robot.GetRobotOrdersQueueCount} 个订单: " +
+                    Debug.Log($"Robot {robot.Id} (Floor {robot.CurrentFloor}) is busy with {robot.GetRobotOrdersQueueCount} orders: " +
                             $"{string.Join(", ", robot.listOrdersQueue)}");
                     statusChanged = true;
                 }
@@ -458,14 +458,14 @@ namespace CentralControl.RobotControl
                 // Check if robot is free
                 if (robot.IsFree && !robot.lastReportedFreeStatus)
                 {
-                    Debug.Log($"机器人 {robot.Id} (楼层 {robot.CurrentFloor}) 现在空闲，位置 {robot.transform.position}");
+                    Debug.Log($"Robot {robot.Id} (Floor {robot.CurrentFloor}) is free now at {robot.transform.position}");
                     statusChanged = true;
                 }
 
                 // Check if robot is stuck
                 if (robot.IsFree && !robot.IsProcessingOrders && robot.GetRobotOrdersQueueCount > 0)
                 {
-                    Debug.LogWarning($"机器人 {robot.Id} (楼层 {robot.CurrentFloor}) 空闲但未处理订单队列，这可能表明存在问题。");
+                    Debug.LogWarning($"Robot {robot.Id} (Floor {robot.CurrentFloor}) is free but not in process of order");
                     statusChanged = true;
                 }
 
@@ -486,7 +486,7 @@ namespace CentralControl.RobotControl
             {
                 if (robot.IsFree && !robot.IsProcessingOrders && robot.GetRobotOrdersQueueCount > 0)
                 {
-                    Debug.LogWarning($"重置卡住的机器人 {robot.Id} (楼层 {robot.CurrentFloor})");
+                    Debug.LogWarning($"Reset stuck Robot {robot.Id} (Floor {robot.CurrentFloor})");
                     robot.ResetRobot();
                 }
             }
@@ -497,14 +497,14 @@ namespace CentralControl.RobotControl
             return robots.Where(r => r.IsFree).ToList();
         }
         
-        // 获取特定楼层的空闲机器人
+        // 获取特定Floor的空闲Robot
         public List<RobotController> GetFreeRobotsOnFloor(string floorLevel)
         {
             return robots.Where(r => r.IsFree && r.CurrentFloor == floorLevel).ToList();
         }
     }
     
-    // 用于Inspector设置楼层分布的辅助类
+    // 用于Inspector设置Floor分布的辅助类
     [System.Serializable]
     public class RobotFloorDistribution
     {

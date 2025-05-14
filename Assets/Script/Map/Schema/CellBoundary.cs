@@ -62,7 +62,7 @@ namespace Map {
             this.TransitionTypeString = transitionType;
         }
         
-        public ConnectionPoint ConvertToConnectionPoint(string FloorLevel)
+        public ConnectionPoint ConvertToConnectionPoint(string FloorLevel, bool isStair, bool isElevator)
         {
             // For vertical transitions, we create a synthetic centroid since there's no geometry
             if (TransitionType == TransitionType.Vertical)
@@ -70,11 +70,11 @@ namespace Map {
                 // Create a synthetic point as centroid
                 var geometryFactory = new GeometryFactory();
                 Point syntheticPoint = geometryFactory.CreatePoint(new Coordinate(0, 0));
-                return new ConnectionPoint(this.Id, this, syntheticPoint, FloorLevel);
+                return new ConnectionPoint(this.Id, this, syntheticPoint, FloorLevel, isStair, isElevator);
             }
             
             // For horizontal transitions, use the existing boundary centroid
-            return new ConnectionPoint(this.Id, this, this.Boundary != null ? this.Boundary.Centroid : null, FloorLevel);
+            return new ConnectionPoint(this.Id, this, this.Boundary != null ? this.Boundary.Centroid : null, FloorLevel, isStair, isElevator);
         }
         
         // Check if this is a vertical transition

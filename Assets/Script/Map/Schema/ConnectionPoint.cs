@@ -11,13 +11,17 @@ namespace Map {
         public CellBoundary CellBoundary { get; private set; }
         public Geometry Point { get; private set; }
         public string FloorLevel { get; private set; }
+        public bool IsStair { get; private set; }
+        public bool IsElevator { get; private set; }
 
-        public ConnectionPoint(string connectionPointId, CellBoundary cellBoundary, Geometry point, string floorLevel)
+        public ConnectionPoint(string connectionPointId, CellBoundary cellBoundary, Geometry point, string floorLevel, bool isStair, bool isElevator)
         {
             this.Id = connectionPointId;
             this.CellBoundary = cellBoundary;
             this.Point = point;
             this.FloorLevel = floorLevel;
+            this.IsStair = isStair;
+            this.IsElevator = isElevator;
         }
         
         // Check if this connection point represents a vertical transition
