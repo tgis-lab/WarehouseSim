@@ -149,7 +149,7 @@ namespace PathPlanning
         /// <summary>
         /// Anytime SIPP Algorithm Entry Point
         /// </summary>
-        public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId) SIPPAlgorithm(
+        public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) SIPPAlgorithm(
             Graph graph,
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer personalOccupancyLayer,
@@ -167,7 +167,7 @@ namespace PathPlanning
             if (graph == null || indoorSpace == null || startPosition == null || endPosition == null)
             {
                 Debug.LogError($"Robot {robotId}: SIPP parameters are invalid");
-                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
+                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null, null);
             }
 
             // Initialize
@@ -176,7 +176,7 @@ namespace PathPlanning
             string newPlanId = $"SIPPPlan_{robotId}_{DateTime.Now.Ticks}";
 
             float timeLimit = 1.0f;
-            float initialEpsilon = 5.0f;
+            float initialEpsilon = 3.0f;
             float finalEpsilon = 1.0f;
             float epsilonStep = 0.5f;
 
@@ -190,6 +190,7 @@ namespace PathPlanning
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
             Debug.Log($"Robot {robotId}: startPoint {startPosition.ConnectionPoint.Id}: {startPosition.ConnectionPoint.ToJson()}, endPoint {endPosition.ConnectionPoint.Id}: {endPosition.ConnectionPoint.ToJson()}");
 
+            PathPlanningMetrics metrics = new PathPlanningMetrics(robotId, newPlanId ?? "unknown");
             Debug.Log($"Robot {robotId}: Start 3D path planning，from Floor {startFloor} to Floor {endFloor}");
 
             // Start Anytime SIPP
@@ -210,7 +211,8 @@ namespace PathPlanning
                 initialEpsilon,
                 finalEpsilon,
                 epsilonStep,
-                globalOccupancyLayer);
+                globalOccupancyLayer,
+                metrics);
 
             // Check if the path is found, if yes, set the occupancy layer
             if (result.success && globalOccupancyLayer != null)
@@ -232,7 +234,7 @@ namespace PathPlanning
                 }
             }
 
-            return (result.path, result.times, result.speeds, newPlanId);
+            return (result.path, result.times, result.speeds, newPlanId, metrics);
         }
 
         /// <summary>
@@ -255,7 +257,8 @@ namespace PathPlanning
             float initialEpsilon,
             float finalEpsilon,
             float epsilonStep,
-            DynamicOccupancyLayer globalOccupancyLayer)
+            DynamicOccupancyLayer globalOccupancyLayer, 
+            PathPlanningMetrics metrics = null)
         {
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
@@ -270,6 +273,10 @@ namespace PathPlanning
 
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
+
+            // Calculate the ideal path length
+            float idealPathLength = CalculateHeuristicDistance(startPosition, endPosition, searchMethod);
+            metrics.IdealPathLength = idealPathLength;
 
             // 1-3: OPEN = CLOSED = INCONS = ∅
             PriorityQueue<SIPPState> openSet = new PriorityQueue<SIPPState>();
@@ -411,6 +418,23 @@ namespace PathPlanning
 
             stopwatch.Stop();
             Debug.Log($"Robot {robotId}: SIPP success! Time: {stopwatch.ElapsedMilliseconds}ms, epsilon={bestEpsilon:F1}");
+
+            float actualPathLength = CalculatePathLength(bestPath);
+            metrics.ActualPathLength = actualPathLength;
+            metrics.TravelTime = bestTimes.Last() - bestTimes.First();
+            metrics.PlanningTime = stopwatch.ElapsedMilliseconds / 1000f;
+            
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.ReportPathPlanningMetrics(
+                    robotId,
+                    metrics.PlanId,
+                    metrics.PlanningTime,
+                    metrics.ActualPathLength,
+                    metrics.TravelTime,
+                    metrics.IdealPathLength
+                );
+            }
 
             return (foundSolution, bestPath, bestTimes, bestSpeeds, bestEpsilon);
         }
@@ -1022,16 +1046,47 @@ namespace PathPlanning
         }
 
         /// <summary>
+        /// Calculate the heuristic distance between two connection points
+        /// </summary>
+        private static float CalculateHeuristicDistance(
+            RoutePoint from,
+            RoutePoint to,
+            SearchMethod searchMethod)
+        {
+            float horizontalDistance = 0;
+
+            switch (searchMethod)
+            {
+                case SearchMethod.Euclidean_Distance:
+                    horizontalDistance = Vector3.Distance(
+                        GetPointVector(from.ConnectionPoint),
+                        GetPointVector(to.ConnectionPoint));
+                    break;
+                case SearchMethod.Manhattan_Distance:
+                    Vector3 fromPos = GetPointVector(from.ConnectionPoint);
+                    Vector3 toPos = GetPointVector(to.ConnectionPoint);
+                    horizontalDistance = Math.Abs(fromPos.x - toPos.x) + Math.Abs(fromPos.z - toPos.z);
+                    break;
+                default:
+                    horizontalDistance = Vector3.Distance(
+                        GetPointVector(from.ConnectionPoint),
+                        GetPointVector(to.ConnectionPoint));
+                    break;
+            }
+            return horizontalDistance;
+        }
+
+        /// <summary>
         /// Calculate distance between two connection points
         /// </summary>
         private static float CalculateDistance(ConnectionPoint from, ConnectionPoint to)
         {
             Vector3 fromPos = GetPointVector(from);
             Vector3 toPos = GetPointVector(to);
-            
+
             return Vector3.Distance(fromPos, toPos);
         }
-
+        
         /// <summary>
         /// Get the Vector3 representation of a connection point
         /// </summary>
@@ -1041,8 +1096,23 @@ namespace PathPlanning
             {
                 return new Vector3((float)point.X, 0, (float)point.Y);
             }
-            
+
             return Vector3.zero;
+        }
+        
+        /// <summary>
+        /// Calculate the length of a path
+        /// </summary>
+        private static float CalculatePathLength(List<ConnectionPoint> path)
+        {
+            float length = 0f;
+            
+            for (int i = 1; i < path.Count; i++)
+            {
+                length += CalculateDistance(path[i - 1], path[i]);
+            }
+            
+            return length;
         }
 
         /// <summary>
@@ -1052,7 +1122,7 @@ namespace PathPlanning
         {
             if (string.IsNullOrEmpty(floorLevel))
                 return 0;
-                
+
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
@@ -1067,7 +1137,7 @@ namespace PathPlanning
                     return level;
                 }
             }
-            
+
             return 0;
         }
         #endregion

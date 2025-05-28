@@ -28,7 +28,7 @@ Transform:
   m_GameObject: {fileID: 8841361260369869970}
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.12, y: 0.12, z: 0.12}
+  m_LocalScale: {x: 0.1, y: 0.1, z: 0.1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2172288449818197660}
@@ -56,14 +56,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetIndicator: {fileID: 0}
-  selectedAlgorithm: 3
-  selectedSearchMethod: 1
+  selectedAlgorithm: 2
+  selectedSearchMethod: 0
   baseDetectionRadius: 0.5
   emergencyStopDistance: 0.2
-  defaultSpeed: 3
-  maxAcceleration: 2
-  maxDeceleration: 5
-  MaxOrder: 100
+  defaultSpeed: 1.5
+  maxAcceleration: 1
+  maxDeceleration: 1
+  MaxOrder: 200
   floorHeight: 3
 --- !u!54 &4801726294540973590
 Rigidbody:

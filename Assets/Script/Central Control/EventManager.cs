@@ -1,10 +1,12 @@
 using System;
+using System.IO;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
 using Map;
 using CentralControl.RobotControl;
 using CentralControl.PickerControl;
+using PathPlanning;
 
 namespace CentralControl
 {
@@ -81,6 +83,16 @@ namespace CentralControl
             NewSpeeds = new List<float>();
         }
     }
+    
+    public class PathPlanningMetricsEventArgs : EventArgs
+    {
+        public PathPlanningMetrics Metrics { get; private set; }
+        
+        public PathPlanningMetricsEventArgs(PathPlanningMetrics metrics)
+        {
+            Metrics = metrics;
+        }
+    }
 
     public class GlobalOccupancyLayerEventArgs : EventArgs
     {
@@ -140,10 +152,13 @@ namespace CentralControl
         public event EventHandler<RobotPathEventArgs> OnRobotPathPlanned;
         public event EventHandler<RobotPathModificationEventArgs> OnRobotPathModified;
         public event EventHandler<RobotPathAcceptedEventArgs> OnRobotPathAccepted;
+        public event EventHandler<PathPlanningMetricsEventArgs> OnPathPlanningMetricsRecorded;
+
+        private Dictionary<string, PathPlanningMetrics> pathPlanningMetrics = new Dictionary<string, PathPlanningMetrics>();
 
         // Collision-related events
         public event EventHandler<CollisionEventArgs> OnRobotCollisionDetected;
-        
+
         // Collision records
         private Dictionary<string, CollisionEventArgs> robotCollisions = new Dictionary<string, CollisionEventArgs>();
         private Dictionary<string, CollisionEventArgs> environmentCollisions = new Dictionary<string, CollisionEventArgs>();
@@ -171,7 +186,7 @@ namespace CentralControl
         {
             OnRobotsInitialized?.Invoke();
         }
-        
+
         public void TriggerPickersInitialized()
         {
             OnPickersInitialized?.Invoke();
@@ -187,7 +202,7 @@ namespace CentralControl
         public void TriggerRobotReadyForPicking(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
             Debug.Log($"EventManager: Robot {robotId} ready for picking at {location}");
-            
+
             // Check for invalid listeners
             if (OnRobotReadyForPicking != null)
             {
@@ -198,7 +213,7 @@ namespace CentralControl
                     if (picker != null)
                     {
                         Debug.Log($"EventManager: Event will notify Picker {picker.Id}");
-                        
+
                         // Check for invalid Picker (ID=0 or destroyed GameObject)
                         if (picker.Id == 0 || picker == null || picker.gameObject == null)
                         {
@@ -208,7 +223,7 @@ namespace CentralControl
                     }
                 }
             }
-            
+
             OnRobotReadyForPicking?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
         }
 
@@ -224,13 +239,13 @@ namespace CentralControl
             Debug.Log($"EventManager: Robot {robotId} planned a path with {path.Count} points");
             OnRobotPathPlanned?.Invoke(this, new RobotPathEventArgs(robotId, planId, path, times, speeds));
         }
-        
+
         public void TriggerRobotPathModified(RobotPathModificationEventArgs args)
         {
             Debug.Log($"EventManager: Triggered robot path modification event: Robot {args.RobotId}, Type {args.ModificationType}, Value {args.ModificationValue}");
             OnRobotPathModified?.Invoke(this, args);
         }
-        
+
         public void TriggerRobotPathAccepted(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
         {
             Debug.Log($"EventManager: Robot {robotId}'s path {planId} has been accepted, with {path.Count} points");
@@ -245,15 +260,15 @@ namespace CentralControl
             string[] robotIds = new string[] { robotId1, robotId2 };
             Array.Sort(robotIds);
             string collisionId = $"{robotIds[0]}_collided_with_{robotIds[1]}_{time:F5}";
-            
+
             // If already recorded, do not process again
             if (robotCollisions.ContainsKey(collisionId))
             {
                 return;
             }
-            
+
             Debug.LogWarning($"EventManager: Reported collision between Robot {robotId1} and Robot {robotId2}, ID: {collisionId}");
-            
+
             CollisionEventArgs args = new CollisionEventArgs(
                 collisionId,
                 robotId1,
@@ -262,23 +277,23 @@ namespace CentralControl
                 true,
                 collisionObject
             );
-            
+
             robotCollisions[collisionId] = args;
-            
+
             OnRobotCollisionDetected?.Invoke(this, args);
         }
 
         public void ReportEnvironmentCollision(string robotId, string environmentObjectId, GameObject collisionObject, float time)
         {
             string collisionId = $"{robotId}_collided_with_env_{environmentObjectId}_{time:F5}";
-            
+
             if (environmentCollisions.ContainsKey(collisionId))
             {
                 return;
             }
-            
+
             Debug.LogWarning($"EventManager: Reported collision between Robot {robotId} and Environment {environmentObjectId}, ID: {collisionId}");
-            
+
             CollisionEventArgs args = new CollisionEventArgs(
                 collisionId,
                 robotId,
@@ -287,9 +302,9 @@ namespace CentralControl
                 false,
                 collisionObject
             );
-            
+
             environmentCollisions[collisionId] = args;
-            
+
             OnRobotCollisionDetected?.Invoke(this, args);
         }
 
@@ -306,7 +321,7 @@ namespace CentralControl
         public List<CollisionEventArgs> GetRobotCollisions(string robotId)
         {
             List<CollisionEventArgs> result = new List<CollisionEventArgs>();
-            
+
             foreach (var record in robotCollisions.Values)
             {
                 if (record.RobotId1 == robotId || record.RobotId2 == robotId)
@@ -314,7 +329,7 @@ namespace CentralControl
                     result.Add(record);
                 }
             }
-            
+
             foreach (var record in environmentCollisions.Values)
             {
                 if (record.RobotId1 == robotId)
@@ -322,14 +337,14 @@ namespace CentralControl
                     result.Add(record);
                 }
             }
-            
+
             return result;
         }
 
         public (int totalRobotCollisions, int totalEnvironmentCollisions, Dictionary<string, int> robotCollisionCounts) GetCollisionStatistics()
         {
             Dictionary<string, int> robotCounts = new Dictionary<string, int>();
-            
+
             foreach (var collision in robotCollisions.Values)
             {
                 if (!robotCounts.ContainsKey(collision.RobotId1))
@@ -337,14 +352,14 @@ namespace CentralControl
                     robotCounts[collision.RobotId1] = 0;
                 }
                 robotCounts[collision.RobotId1]++;
-                
+
                 if (!robotCounts.ContainsKey(collision.RobotId2))
                 {
                     robotCounts[collision.RobotId2] = 0;
                 }
                 robotCounts[collision.RobotId2]++;
             }
-            
+
             foreach (var collision in environmentCollisions.Values)
             {
                 if (!robotCounts.ContainsKey(collision.RobotId1))
@@ -353,7 +368,7 @@ namespace CentralControl
                 }
                 robotCounts[collision.RobotId1]++;
             }
-            
+
             return (robotCollisions.Count, environmentCollisions.Count, robotCounts);
         }
 
@@ -361,8 +376,91 @@ namespace CentralControl
         {
             robotCollisions.Clear();
             environmentCollisions.Clear();
-            
+
             Debug.Log("EventManager: All collision records have been cleared");
+        }
+
+        // Path planning metrics
+        public void ReportPathPlanningMetrics(string robotId, string planId, float planningTime, float plannedPathLength, float estimatedTravelTime, float idealPathLength)
+        {
+            string metricsId = $"{robotId}_plan_{planId}";
+
+            if (pathPlanningMetrics.ContainsKey(metricsId))
+            {
+                return;
+            }
+
+            Debug.Log($"EventManager: Reported path planning metrics for Robot {robotId}, Plan {planId}, Path Length: {plannedPathLength:F2}");
+
+            PathPlanningMetrics metrics = new PathPlanningMetrics(
+                robotId,
+                planId
+            )
+            {
+                PlanningTime = planningTime,
+                ActualPathLength = plannedPathLength,
+                TravelTime = estimatedTravelTime,
+                IdealPathLength = idealPathLength
+            };
+
+            pathPlanningMetrics[metricsId] = metrics;
+
+            OnPathPlanningMetricsRecorded?.Invoke(this, new PathPlanningMetricsEventArgs(metrics));
+        }
+
+        public List<PathPlanningMetrics> GetAllPathPlanningMetrics()
+        {
+            return pathPlanningMetrics.Values.ToList();
+        }
+
+        public List<PathPlanningMetrics> GetRobotPathPlanningMetrics(string robotId)
+        {
+            List<PathPlanningMetrics> result = new List<PathPlanningMetrics>();
+            
+            foreach (var metrics in pathPlanningMetrics.Values)
+            {
+                if (metrics.RobotId == robotId)
+                {
+                    result.Add(metrics);
+                }
+            }
+            
+            return result;
+        }
+
+        public (int totalPlans, Dictionary<string, int> robotPlanCounts, float avgPlanningTime, float avgPathLength, float avgIdealLength) GetPathPlanningStatistics()
+        {
+            Dictionary<string, int> robotCounts = new Dictionary<string, int>();
+            float totalPlanningTime = 0;
+            float totalPathLength = 0;
+            float totalIdealLength = 0;
+            
+            foreach (var metrics in pathPlanningMetrics.Values)
+            {
+                if (!robotCounts.ContainsKey(metrics.RobotId))
+                {
+                    robotCounts[metrics.RobotId] = 0;
+                }
+                robotCounts[metrics.RobotId]++;
+                
+                totalPlanningTime += metrics.PlanningTime;
+                totalPathLength += metrics.ActualPathLength;
+                totalIdealLength += metrics.IdealPathLength;
+            }
+            
+            int count = pathPlanningMetrics.Count;
+            float avgPlanningTime = count > 0 ? totalPlanningTime / count : 0;
+            float avgPathLength = count > 0 ? totalPathLength / count : 0;
+            float avgIdealLength = count > 0 ? totalIdealLength / count : 0;
+            
+            return (count, robotCounts, avgPlanningTime, avgPathLength, avgIdealLength);
+        }
+
+        public void ClearPathPlanningRecords()
+        {
+            pathPlanningMetrics.Clear();
+            
+            Debug.Log("EventManager: All path planning metrics have been cleared");
         }
     }
 }

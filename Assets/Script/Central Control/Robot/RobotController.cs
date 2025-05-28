@@ -466,7 +466,7 @@ namespace CentralControl.RobotControl
             return new Vector3((float)point.X, y, (float)point.Y);
         }
 
-        private (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId) PlanPath(Vector3 targetPosition, string targetFloorLevel = null)
+        private (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) PlanPath(Vector3 targetPosition, string targetFloorLevel = null)
         {
             currentPath.Clear();
             currentMovement.Clear();
@@ -481,7 +481,7 @@ namespace CentralControl.RobotControl
             if (startPoint == null || endPoint == null)
             {
                 Debug.LogError($"Robot {Id} cannot find valid route points");
-                return (null, null, null, null);
+                return (null, null, null, null, null);
             }
             
             var result = pathPlanner.FindPathWithDynamicObstacles(
@@ -620,10 +620,10 @@ namespace CentralControl.RobotControl
             rb.velocity = targetVelocity;
             
             Vector3 horizontalDirection = new Vector3(direction.x, 0, direction.z).normalized;
-            if (horizontalDirection.magnitude > 0.1f)
+            if (horizontalDirection.magnitude > 0.2f)
             {
                 Quaternion targetRotation = Quaternion.LookRotation(horizontalDirection);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 5f);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 10f);
             }
         }
 
@@ -1011,15 +1011,17 @@ namespace CentralControl.RobotControl
             {
                 if (hitCollider.gameObject == gameObject)
                     continue;
-                    
+                        
                 float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
                 closestObstacleDistance = Mathf.Min(closestObstacleDistance, distance);
-                    
+                        
                 RobotController otherRobot = hitCollider.GetComponent<RobotController>();
                 float currentEmergencyStopDistance = (otherRobot != null) ? 
                     emergencyStopDistance : emergencyStopDistance * 1.5f;
-                    
-                if (distance < currentEmergencyStopDistance)
+                        
+                bool shouldRespond = UnityEngine.Random.value <= 0.75f;
+                
+                if (distance < currentEmergencyStopDistance && shouldRespond)
                 {
                     emergencySituation = true;
                     EmergencyStop();
@@ -1169,20 +1171,68 @@ namespace CentralControl.RobotControl
         {
             navigationEnabled = false;
             
-            yield return new WaitForSeconds(1.0f);
+            // 记录碰撞发生时的信息
+            Vector3 collisionDirection = (otherRobot.transform.position - transform.position).normalized;
+            float dotProduct = Vector3.Dot(transform.forward, collisionDirection);
+            bool isHeadOn = dotProduct < -0.3f;
+            bool isTailgating = dotProduct > 0.7f;
+            bool isBeingTailgated = dotProduct < -0.7f;
+            bool isSideCollision = Mathf.Abs(dotProduct) <= 0.3f;
             
-            float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
-            if (distance < emergencyStopDistance * 1.2f)
-            {
-                Debug.Log($"Robot {Id}: Still too close to Robot {otherRobot.Id}, waiting longer");
-                yield return new WaitForSeconds(2.0f);
-            }
-
-            Vector3 backupDirection = -transform.forward;
-            rb.velocity = backupDirection * defaultSpeed * 0.5f;
+            Debug.Log($"Robot {Id}: Collision with Robot {otherRobot.Id}, type: {(isHeadOn ? "head-on" : isTailgating ? "tailgating" : isBeingTailgated ? "being tailgated" : "side")}");
             
             yield return new WaitForSeconds(0.5f);
-            rb.velocity = Vector3.zero;
+            
+            float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
+            
+            Vector3 backupDirection = Vector3.zero;
+            
+            if (isHeadOn)
+            {
+                backupDirection = -transform.forward;
+            }
+            else if (isTailgating)
+            {
+                backupDirection = -transform.forward;
+            }
+            else if (isBeingTailgated)
+            {
+                yield return new WaitForSeconds(1.0f);
+                
+                distance = Vector3.Distance(transform.position, otherRobot.transform.position);
+                if (distance < emergencyStopDistance)
+                {
+                    backupDirection = transform.forward;
+                }
+            }
+            else if (isSideCollision)
+            {
+                backupDirection = -collisionDirection + (-transform.forward * 0.5f);
+                backupDirection.Normalize();
+            }
+            
+            if (distance < emergencyStopDistance || backupDirection != Vector3.zero)
+            {
+                if (backupDirection != Vector3.zero)
+                {
+                    rb.velocity = backupDirection * defaultSpeed * 0.4f;
+                    yield return new WaitForSeconds(0.7f);
+                    rb.velocity = Vector3.zero;
+                }
+                
+                distance = Vector3.Distance(transform.position, otherRobot.transform.position);
+                if (distance < emergencyStopDistance * 0.8f)
+                {
+                    Debug.Log($"Robot {Id}: Still too close to Robot {otherRobot.Id} after initial maneuver, trying random direction");
+                    
+                    float randomAngle = UnityEngine.Random.Range(0f, 360f);
+                    backupDirection = Quaternion.Euler(0, randomAngle, 0) * Vector3.forward;
+                    
+                    rb.velocity = backupDirection * defaultSpeed * 0.3f;
+                    yield return new WaitForSeconds(0.6f);
+                    rb.velocity = Vector3.zero;
+                }
+            }
             
             navigationEnabled = true;
             
@@ -1190,6 +1240,9 @@ namespace CentralControl.RobotControl
             currentPath.Clear();
             currentMovement.Clear();
             currentPathIndex = 0;
+            
+            float replanDelay = UnityEngine.Random.Range(0.1f, 0.5f);
+            yield return new WaitForSeconds(replanDelay);
             
             if (currentOrder != null)
             {
@@ -1205,9 +1258,20 @@ namespace CentralControl.RobotControl
         {
             navigationEnabled = false;
             
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(0.3f);
             
-            Collider[] hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance, obstacleLayer);
+            Vector3 obstacleDir = (obstacle.transform.position - transform.position).normalized;
+            obstacleDir.y = 0;
+            if (obstacleDir.magnitude < 0.1f)
+            {
+                obstacleDir = -transform.forward;
+            }
+            else
+            {
+                obstacleDir.Normalize();
+            }
+            
+            Collider[] hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance * 0.8f, obstacleLayer);
             bool stillColliding = false;
             
             foreach (var hitCollider in hitColliders)
@@ -1221,18 +1285,50 @@ namespace CentralControl.RobotControl
             
             if (stillColliding)
             {
-                Vector3 backupDirection = -transform.forward;
-                rb.velocity = backupDirection * defaultSpeed * 0.5f;
+                Vector3 lateralDir = Vector3.Cross(Vector3.up, obstacleDir).normalized;
                 
-                yield return new WaitForSeconds(0.5f);
+                if (UnityEngine.Random.value > 0.5f)
+                {
+                    lateralDir = -lateralDir;
+                }
+                
+                Vector3 backupDirection = (-obstacleDir * 0.7f + lateralDir * 0.3f).normalized;
+                
+                rb.velocity = backupDirection * defaultSpeed * 0.5f;
+                yield return new WaitForSeconds(0.7f);
                 rb.velocity = Vector3.zero;
+                
+                hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance * 0.8f, obstacleLayer);
+                stillColliding = false;
+                
+                foreach (var hitCollider in hitColliders)
+                {
+                    if (hitCollider.gameObject == obstacle)
+                    {
+                        stillColliding = true;
+                        break;
+                    }
+                }
+                
+                if (stillColliding)
+                {
+                    Debug.Log($"Robot {Id}: Still colliding with obstacle after first maneuver, trying another direction");
+                    
+                    lateralDir = -lateralDir;
+                    backupDirection = (-obstacleDir * 0.6f + lateralDir * 0.4f).normalized;
+                    
+                    rb.velocity = backupDirection * defaultSpeed * 0.4f;
+                    yield return new WaitForSeconds(0.6f);
+                    rb.velocity = Vector3.zero;
+                }
             }
             
             navigationEnabled = true;
             
+            yield return new WaitForSeconds(0.3f);
+            
             if (currentOrder != null)
             {
-                yield return new WaitForSeconds(0.5f);
                 StartCoroutine(ReplanPath());
             }
             else
@@ -1514,8 +1610,8 @@ namespace CentralControl.RobotControl
                 // Draw the entire path
                 for (int i = 0; i < currentPath.Count - 1; i++)
                 {
-                    Vector3 start = GetPointVector3((Point)currentPath[i].Point);
-                    Vector3 end = GetPointVector3((Point)currentPath[i + 1].Point);
+                    Vector3 start = GetConnectionPointPosition(currentPath[i]);
+                    Vector3 end = GetConnectionPointPosition(currentPath[i + 1]);
                     
                     Gizmos.DrawLine(start, end);
                 }

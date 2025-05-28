@@ -9,6 +9,7 @@ using Map;
 using CentralControl.OrderAssignment;
 using CentralControl.RobotControl;
 using CentralControl.PickerControl;
+using PathPlanning;
 
 namespace CentralControl
 {
@@ -72,8 +73,10 @@ namespace CentralControl
         private int totalRobotCollisions = 0;
         private int totalEnvironmentCollisions = 0;
         private Dictionary<string, int> robotCollisionCounts = new Dictionary<string, int>();
+        private Dictionary<string, PathPlanningMetrics> pathPlanningMetrics = new Dictionary<string, PathPlanningMetrics>();
+
         #endregion
-        
+
         #region Unity Lifecycle
         private void Start()
         {
@@ -84,13 +87,13 @@ namespace CentralControl
         private IEnumerator InitializeSystem()
         {
             Debug.Log("[CentralControl] Initializing system...");
-            
+
             // Wait for the first frame to complete
             yield return null;
-            
+
             // Load map
             StartCoroutine(LoadMap());
-            
+
             // Wait for map to be loaded AND NavMesh to be ready
             yield return new WaitUntil(() => indoorSpace != null && mapLoader.IsNavMeshReady);
 
@@ -98,61 +101,64 @@ namespace CentralControl
             if (globalOccupancyLayer == null)
             {
                 globalOccupancyLayer = new DynamicOccupancyLayer(
-                    mapLoader.indoorSpace, 
-                    windowDuration, 
-                    Time.time, 
+                    mapLoader.indoorSpace,
+                    windowDuration,
+                    Time.time,
                     true); // Enable 3D support
             }
 
             // Initialize Intersection Area Manager
             InitializeIntersectionAreaManager();
-            
+
             // Initialize conflict resolver
             InitializeConflictDetector();
-            
+
             // Initialize robot manager with elevator manager
             InitializeRobotManager();
-            
+
             // Initialize picker manager
             InitializePickerManager();
-            
+
             // Initialize order generator
             InitializeOrderGenerator();
-            
+
             // Start generating orders
             if (orderGenerationCoroutine != null) StopCoroutine(orderGenerationCoroutine);
             orderGenerationCoroutine = StartCoroutine(GenerateOrders());
 
             // Initialize collision tracker
             InitializeCollisionTracking();
-            
+
             // Mark initialization as complete
             isInitialized = true;
-            
+
             Debug.Log("[CentralControl] System initialization complete!");
-            
+
             // Notify system components that initialization is complete
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.TriggerMapLoaded();
                 EventManager.Instance.TriggerRobotsInitialized();
                 EventManager.Instance.TriggerPickersInitialized();
+                EventManager.Instance.OnPathPlanningMetricsRecorded += OnPathPlanningMetricsRecorded;
             }
 
             // Start auto-saving collision reports
-            StartCoroutine(AutoSaveCollisionReports(60f)); // Save every 60 seconds
+            StartCoroutine(AutoSaveCollisionReports(60f));
+            StartCoroutine(AutoSavePathPlanningReports(60f));
         }
         
         void Update()
         {
             if (!isInitialized) return;
-            
+
             // Update dynamic occupancy layer
-            if (Time.time >= nextUpdateTime)
-            {
-                UpdateDynamicOccupancyLayer();
-                nextUpdateTime = Time.time + dynamicUpdateInterval;
-            }
+            // if (Time.time >= nextUpdateTime)
+            // {
+            //     UpdateDynamicOccupancyLayer();
+            //     nextUpdateTime = Time.time + dynamicUpdateInterval;
+            // }
+            UpdateDynamicOccupancyLayer();
             
             // Rebuild NavMesh if needed
             if (autoRebuildNavMesh && Time.time >= nextNavMeshRebuildTime)
@@ -848,15 +854,21 @@ namespace CentralControl
             
             Debug.Log("[CentralControl] Collision statistics reset");
         }
-        #endregion
         
+
+        private void OnPathPlanningMetricsRecorded(object sender, PathPlanningMetricsEventArgs e)
+        {
+            RecordPathPlanningMetrics(e.Metrics);
+        }
+        #endregion
+
         #region Utility Methods
         public void SaveCollisionReportToFile()
         {
             string report = GenerateCollisionReport();
             string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
             string filepath = $"{Application.persistentDataPath}/collision_report_{timestamp}.txt";
-            
+
             try
             {
                 System.IO.File.WriteAllText(filepath, report);
@@ -874,6 +886,66 @@ namespace CentralControl
             {
                 yield return new WaitForSeconds(interval);
                 SaveCollisionReportToFile();
+            }
+        }
+
+        public void RecordPathPlanningMetrics(PathPlanningMetrics metrics)
+        {
+            string key = $"{metrics.RobotId}_{metrics.PlanId}";
+            
+            if (pathPlanningMetrics.ContainsKey(key))
+            {
+                pathPlanningMetrics[key] = metrics;
+            }
+            else
+            {
+                pathPlanningMetrics.Add(key, metrics);
+            }
+            
+            Debug.Log($"[CentralControl] Path planning metrics recorded for Robot {metrics.RobotId}, Plan {metrics.PlanId}");
+        }
+
+        public string GeneratePathPlanningReport()
+        {
+            System.Text.StringBuilder report = new System.Text.StringBuilder();
+            report.AppendLine($"Path Planning Metrics Report - Generated at {DateTime.Now}");
+            report.AppendLine($"Simulation Time: {Time.time:F2} seconds");
+            report.AppendLine($"Total Plans Recorded: {pathPlanningMetrics.Count}");
+            report.AppendLine();
+            
+            report.AppendLine("Robot ID,Plan ID,Planning Time (s),Actual Path Length,Travel Time (s),Ideal Path Length,Timestamp");
+            
+            foreach (var metrics in pathPlanningMetrics.Values.OrderBy(m => m.RobotId).ThenBy(m => m.Timestamp))
+            {
+                report.AppendLine($"{metrics.RobotId},{metrics.PlanId},{metrics.PlanningTime:F4},{metrics.ActualPathLength:F2},{metrics.TravelTime:F2},{metrics.IdealPathLength:F2},{metrics.Timestamp}");
+            }
+            
+            return report.ToString();
+        }
+
+        public void SavePathPlanningReportToFile()
+        {
+            string report = GeneratePathPlanningReport();
+            string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string filepath = $"{Application.persistentDataPath}/path_planning_metrics_{timestamp}.csv";
+            
+            try
+            {
+                System.IO.File.WriteAllText(filepath, report);
+                Debug.Log($"Path planning metrics report saved to: {filepath}");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error saving path planning metrics report: {e.Message}");
+            }
+        }
+
+        private IEnumerator AutoSavePathPlanningReports(float interval)
+        {
+            while (true)
+            {
+                yield return new WaitForSeconds(interval);
+                SavePathPlanningReportToFile();
             }
         }
 

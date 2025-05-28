@@ -110,7 +110,7 @@ namespace PathPlanning
         /// <summary>
         /// Cross-floor Time-Space A* Algorithm Entry Point
         /// </summary>
-        public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId) TimeSpaceAStarAlgorithm(
+        public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) TimeSpaceAStarAlgorithm(
             Graph graph,
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer personalOccupancyLayer,
@@ -128,7 +128,7 @@ namespace PathPlanning
             if (graph == null || indoorSpace == null || startPosition == null || endPosition == null)
             {
                 Debug.LogError($"Robot {robotId}: TimeSpaceAStar parameters are invalid");
-                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null);
+                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null, null);
             }
 
             // Initialize
@@ -141,7 +141,7 @@ namespace PathPlanning
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
             
             Debug.Log($"Robot {robotId}: Starting TimeSpaceAStar path planning from Floor {startFloor} to Floor {endFloor}");
-            Debug.Log($"Robot {robotId}: Start point {startPosition.ConnectionPoint.Id}: {startPosition.ConnectionPoint.ToJson()}, end point {endPosition.ConnectionPoint.Id}: {endPosition.ConnectionPoint.ToJson()}");
+            PathPlanningMetrics metrics = new PathPlanningMetrics(robotId, newPlanId ?? "unknown");
 
             // Run Time-Space A* search
             var result = RunTimeSpaceAStar(
@@ -157,7 +157,8 @@ namespace PathPlanning
                 maxAcceleration,
                 maxDeceleration,
                 searchMethod,
-                trafficRules);
+                trafficRules, 
+                metrics);
             
             // Check if the path is found, if yes, set the occupancy layer for vertical connectors
             if (result.success && globalOccupancyLayer != null)
@@ -179,7 +180,7 @@ namespace PathPlanning
                 }
             }
             
-            return (result.path, result.times, result.speeds, newPlanId);
+            return (result.path, result.times, result.speeds, newPlanId, metrics);
         }
         
         /// <summary>
@@ -198,7 +199,8 @@ namespace PathPlanning
             float maxAcceleration,
             float maxDeceleration,
             SearchMethod searchMethod,
-            TrafficRuleKnowledge trafficRules)
+            TrafficRuleKnowledge trafficRules, 
+            PathPlanningMetrics metrics = null)
         {
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
@@ -209,6 +211,9 @@ namespace PathPlanning
             
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
+
+            float idealPathLength = CalculateHeuristicDistance(startPosition, endPosition, searchMethod);
+            metrics.IdealPathLength = idealPathLength;
             
             // Calculate initial heuristic
             float initialHeuristic = CalculateHeuristic(
@@ -319,6 +324,23 @@ namespace PathPlanning
             
             // Reconstruct the path
             var pathResult = ReconstructPath(goalState, defaultSpeed);
+
+            float actualPathLength = CalculatePathLength(pathResult.path);
+            metrics.ActualPathLength = actualPathLength;
+            metrics.TravelTime = pathResult.times.Last() - pathResult.times.First();
+            metrics.PlanningTime = stopwatch.ElapsedMilliseconds / 1000f;
+            
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.ReportPathPlanningMetrics(
+                    robotId,
+                    metrics.PlanId,
+                    metrics.PlanningTime,
+                    metrics.ActualPathLength,
+                    metrics.TravelTime,
+                    metrics.IdealPathLength
+                );
+            }
             
             Debug.Log($"Robot {robotId}: TimeSpaceAStar found a path with {pathResult.path.Count} points. Time: {stopwatch.ElapsedMilliseconds}ms");
             Debug.Log($"Robot {robotId}: Path: {string.Join(" -> ", pathResult.path.Select(p => p.Id))}");
@@ -678,14 +700,60 @@ namespace PathPlanning
         }
         
         /// <summary>
+        /// Calculate the heuristic distance between two connection points
+        /// </summary>
+        private static float CalculateHeuristicDistance(
+            RoutePoint from,
+            RoutePoint to,
+            SearchMethod searchMethod)
+        {
+            float horizontalDistance = 0;
+
+            switch (searchMethod)
+            {
+                case SearchMethod.Euclidean_Distance:
+                    horizontalDistance = Vector3.Distance(
+                        GetPointVector(from.ConnectionPoint),
+                        GetPointVector(to.ConnectionPoint));
+                    break;
+                case SearchMethod.Manhattan_Distance:
+                    Vector3 fromPos = GetPointVector(from.ConnectionPoint);
+                    Vector3 toPos = GetPointVector(to.ConnectionPoint);
+                    horizontalDistance = Math.Abs(fromPos.x - toPos.x) + Math.Abs(fromPos.z - toPos.z);
+                    break;
+                default:
+                    horizontalDistance = Vector3.Distance(
+                        GetPointVector(from.ConnectionPoint),
+                        GetPointVector(to.ConnectionPoint));
+                    break;
+            }
+            return horizontalDistance;
+        }
+        
+        /// <summary>
         /// Calculate distance between two connection points
         /// </summary>
         private static float CalculateDistance(ConnectionPoint from, ConnectionPoint to)
         {
             Vector3 fromPos = GetPointVector(from);
             Vector3 toPos = GetPointVector(to);
-            
+
             return Vector3.Distance(fromPos, toPos);
+        }
+        
+        /// <summary>
+        /// Calculate the length of a path
+        /// </summary>
+        private static float CalculatePathLength(List<ConnectionPoint> path)
+        {
+            float length = 0f;
+            
+            for (int i = 1; i < path.Count; i++)
+            {
+                length += CalculateDistance(path[i - 1], path[i]);
+            }
+            
+            return length;
         }
         
         /// <summary>
@@ -697,7 +765,7 @@ namespace PathPlanning
             {
                 return new Vector3((float)point.X, 0, (float)point.Y);
             }
-            
+
             return Vector3.zero;
         }
         

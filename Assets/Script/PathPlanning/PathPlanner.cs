@@ -57,7 +57,7 @@ namespace PathPlanning
             this.maxDeceleration = maxDeceleration;
         }
 
-        public (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId) FindPathWithDynamicObstacles(
+        public (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) FindPathWithDynamicObstacles(
             DynamicOccupancyLayer personalOccupancyLayer, 
             DynamicOccupancyLayer globalOccupancyLayer,
             RoutePoint startPoint, 
@@ -113,7 +113,7 @@ namespace PathPlanning
                     
                 default:
                     Debug.LogError($"Unknown search algorithm: {this.searchAlgorithm}");
-                    return (null, null, null, null);
+                    return (null, null, null, null, null);
             }
         }
     }

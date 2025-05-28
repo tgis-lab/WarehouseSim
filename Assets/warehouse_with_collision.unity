@@ -426,7 +426,7 @@ MonoBehaviour:
   width: 29
   length: 20
   interval: 10
-  orderCount: 15
+  orderCount: 30
   floorOrderDistribution:
   - floorLevel: 1F
     ratio: 0.3333
@@ -707,7 +707,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 8841361260369869970, guid: eb24a2b82e9fe46a2b4f48fa3ce1987a, type: 3}
-  numberOfRobots: 10
+  numberOfRobots: 30
   targetIndicatorPrefab: {fileID: 1239929927}
   distributeEvenly: 1
   customRobotFloorDistributions:
