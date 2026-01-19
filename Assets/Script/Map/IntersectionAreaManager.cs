@@ -20,11 +20,11 @@ namespace Map
             var processedCells = new HashSet<string>();
             var intersectionLayers = indoorSpace.GetLayerFromType("intersection");
 
-            // Debug.Log($"找到 {intersectionLayers.Count} 个交叉区域图层");
+            // Debug.Log($"Found {intersectionLayers.Count} intersection layers");
 
             foreach (var layer in intersectionLayers)
             {
-                // Debug.Log($"处理图层 {layer.Id} 中的 {layer.CellSpaces.Count} 个单元格");
+                // Debug.Log($"Processing {layer.CellSpaces.Count} cells in layer {layer.Id}");
                 foreach (var cellId in layer.CellSpaces)
                 {
                     if (processedCells.Contains(cellId))
@@ -35,7 +35,7 @@ namespace Map
             }
 
             _isInitialized = true;
-            // Debug.Log($"成功初始化 {_intersectionAreas.Count} 个交叉区域");
+            // Debug.Log($"Successfully initialized {_intersectionAreas.Count} intersection areas");
         }
 
         private void CreateIntersectionArea(string startCellId, HashSet<string> processedCells)
@@ -46,8 +46,8 @@ namespace Map
             queue.Enqueue(startCellId);
             processedCells.Add(startCellId);
 
-            // 记录该交叉区域的楼层
-            string floorLevel = "1F"; // 默认值
+            // Record the floor of this intersection area
+            string floorLevel = "1F"; // Default value
             var startCell = indoorSpace.GetCellSpaceFromId(startCellId);
             if (startCell != null)
             {
@@ -55,7 +55,7 @@ namespace Map
             }
             intersectionArea.FloorLevel = floorLevel;
 
-            // Debug.Log($"创建交叉区域，起始单元格: {startCellId}，楼层: {floorLevel}");
+            // Debug.Log($"Creating intersection area, start cell: {startCellId}, floor: {floorLevel}");
 
             while (queue.Count > 0)
             {
@@ -68,7 +68,7 @@ namespace Map
                 }
                 else
                 {
-                    Debug.LogWarning($"无法找到单元格 {currentCellId}");
+                    Debug.LogWarning($"Unable to find cell {currentCellId}");
                     continue;
                 }
 
@@ -78,7 +78,7 @@ namespace Map
             if (intersectionArea.IntersectionCells.Count > 0)
             {
                 _intersectionAreas.Add(intersectionArea.Id, intersectionArea);
-                // Debug.Log($"添加交叉区域 {intersectionArea.Id}，包含 {intersectionArea.IntersectionCells.Count} 个单元格");
+                // Debug.Log($"Adding intersection area {intersectionArea.Id}, containing {intersectionArea.IntersectionCells.Count} cells");
             }
         }
 
@@ -90,7 +90,7 @@ namespace Map
 
             foreach (var boundary in boundaries)
             {
-                // 跳过垂直边界
+                // Skip vertical boundaries
                 if (boundary.IsVertical())
                 {
                     continue;
@@ -101,11 +101,11 @@ namespace Map
                 
                 if (nextCell == null)
                 {
-                    Debug.LogWarning($"无法找到相邻单元格 {nextCellId}");
+                    Debug.LogWarning($"Unable to find adjacent cell {nextCellId}");
                     continue;
                 }
                 
-                // 确保相邻单元格在同一楼层
+                // Ensure adjacent cells are on the same floor
                 string nextCellFloor = nextCell.GetLocatedFloor();
                 if (nextCellFloor != intersectionArea.FloorLevel)
                 {
@@ -144,27 +144,27 @@ namespace Map
         {
             if (!_isInitialized)
             {
-                Debug.LogWarning("交叉区域未初始化");
+                Debug.LogWarning("Intersection areas not initialized");
                 return false;
             }
 
-            // 获取机器人位置
+            // Get robot position
             GameObject robotObj = GameObject.Find($"Robot_{robotId}");
             if (robotObj == null)
             {
-                Debug.LogWarning($"找不到机器人 {robotId}");
+                Debug.LogWarning($"Cannot find robot {robotId}");
                 return false;
             }
                 
             Vector3 robotPosition = robotObj.transform.position;
             
-            // 提取楼层信息
+            // Extract floor information
             string floorLevel = GetFloorLevelFromPosition(robotPosition);
             
-            // 检查机器人是否在任何交叉区域内
+            // Check if robot is inside any intersection area
             foreach (var intersection in _intersectionAreas.Values)
             {
-                // 只检查同一楼层的交叉区域
+                // Only check intersection areas on the same floor
                 if (intersection.FloorLevel == floorLevel && intersection.Contains(robotPosition))
                 {
                     return true;
@@ -178,7 +178,7 @@ namespace Map
         {
             if (!_isInitialized)
             {
-                Debug.LogWarning("交叉区域未初始化");
+                Debug.LogWarning("Intersection areas not initialized");
                 return false;
             }
 
@@ -186,7 +186,7 @@ namespace Map
 
             foreach (var intersection in _intersectionAreas.Values)
             {
-                // 只检查同一楼层的交叉区域
+                // Only check intersection areas on the same floor
                 if (intersection.FloorLevel == floorLevel && intersection.IsNear(position, activationDistance))
                 {
                     return true;
@@ -200,7 +200,7 @@ namespace Map
         {
             if (!_isInitialized)
             {
-                Debug.LogWarning("交叉区域未初始化");
+                Debug.LogWarning("Intersection areas not initialized");
                 return null;
             }
 
@@ -208,7 +208,7 @@ namespace Map
 
             foreach (var intersection in _intersectionAreas.Values)
             {
-                // 只检查同一楼层的交叉区域
+                // Only check intersection areas on the same floor
                 if (intersection.FloorLevel == floorLevel && intersection.Contains(position))
                 {
                     return intersection;
@@ -218,7 +218,7 @@ namespace Map
             return null;
         }
 
-        // 保留接口兼容性，但移除DWA逻辑
+        // Maintain interface compatibility but remove DWA logic
         public bool ShouldActivateDWA(Vector3 position, out IntersectionArea activeIntersection)
         {
             activeIntersection = GetNearestIntersection(position);
@@ -229,7 +229,7 @@ namespace Map
         {
             if (!_isInitialized)
             {
-                Debug.LogError("交叉区域未初始化");
+                Debug.LogError("Intersection areas not initialized");
                 return null;
             }
 
@@ -239,13 +239,13 @@ namespace Map
 
             foreach (var intersection in _intersectionAreas.Values)
             {
-                // 只检查同一楼层的交叉区域
+                // Only check intersection areas on the same floor
                 if (intersection.FloorLevel != floorLevel)
                     continue;
                     
                 if (intersection.IsNear(position, intersection.ActivationDistance))
                 {
-                    float y = position.y; // 保持原始高度
+                    float y = position.y; // Keep original height
                     var centroidPos = new Vector3(
                         (float)intersection.IntersectionGeometry.Centroid.X, 
                         y, 
@@ -268,34 +268,34 @@ namespace Map
         {
             if (!_isInitialized)
             {
-                Debug.LogError("交叉区域未初始化");
+                Debug.LogError("Intersection areas not initialized");
                 return new Dictionary<string, IntersectionArea>();
             }
             return _intersectionAreas;
         }
         
-        // 根据Y坐标获取楼层
+        // Get floor level based on Y coordinate
         private string GetFloorLevelFromPosition(Vector3 position)
         {
             if (indoorSpace == null)
-                return "1F"; // 默认
+                return "1F"; // Default
                 
-            float floorHeight = 3.0f; // 默认楼层高度
+            float floorHeight = 3.0f; // Default floor height
             
-            // 尝试从CentralController获取楼层高度设置
+            // Try to get floor height setting from CentralController
             var centralController = FindObjectOfType<CentralControl.CentralController>();
             if (centralController != null)
             {
                 floorHeight = centralController.floorHeight;
             }
             
-            // 计算楼层数
+            // Calculate floor number
             int floorNumber = Mathf.RoundToInt(position.y / floorHeight);
             
             if (floorNumber <= 0)
-                return "1F"; // 地面或地下默认为1F
+                return "1F"; // Default to 1F for ground or basement
                 
-            return $"{floorNumber + 1}F"; // +1因为通常1F是最底层
+            return $"{floorNumber + 1}F"; // +1 because 1F is usually the lowest floor
         }
     }
 }

@@ -5,13 +5,13 @@ using UnityEngine;
 using System.Collections;
 
 /// <summary>
-/// 优先队列实现
+/// Priority queue implementation
 /// </summary>
 
 namespace PathPlanning
 {
     /// <summary>
-    /// 优先队列实现
+    /// Priority queue implementation
     /// </summary>
     public class PriorityQueue<T>
     {
@@ -34,12 +34,12 @@ namespace PathPlanning
                 
             T item = elements[0].Item;
             
-            // 将最后一个元素移到顶部
+            // Move last element to top
             int lastIndex = elements.Count - 1;
             elements[0] = elements[lastIndex];
             elements.RemoveAt(lastIndex);
             
-            // 更新索引映射
+            // Update index map
             indexMap.Remove(item);
             
             if (elements.Count > 0)
@@ -63,12 +63,12 @@ namespace PathPlanning
             item = elements[0].Item;
             priority = elements[0].Priority;
             
-            // 将最后一个元素移到顶部
+            // Move last element to top
             int lastIndex = elements.Count - 1;
             elements[0] = elements[lastIndex];
             elements.RemoveAt(lastIndex);
             
-            // 更新索引映射
+            // Update index map
             indexMap.Remove(item);
             
             if (elements.Count > 0)
@@ -79,7 +79,7 @@ namespace PathPlanning
             
             return true;
         }
-
+        
         public T Peek()
         {
             if (Count == 0)
@@ -131,7 +131,7 @@ namespace PathPlanning
                 int rightChildIndex = 2 * index + 2;
                 int smallestIndex = index;
                 
-                // 找出三个节点中优先级最小的
+                // Find the one with minimum priority among the three nodes
                 if (leftChildIndex <= lastIndex && elements[leftChildIndex].Priority < elements[smallestIndex].Priority)
                     smallestIndex = leftChildIndex;
                     
@@ -152,7 +152,7 @@ namespace PathPlanning
             elements[i] = elements[j];
             elements[j] = temp;
             
-            // 更新索引映射
+            // Update index map
             indexMap[elements[i].Item] = i;
             indexMap[elements[j].Item] = j;
         }

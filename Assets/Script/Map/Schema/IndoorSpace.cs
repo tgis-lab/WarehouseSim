@@ -49,7 +49,7 @@ namespace Map {
             return new List<string>(floors).OrderBy(f => ParseFloorLevel(f)).ToList();
         }
         
-        // 解析楼层级别为数字(例如:"1F" -> 1, "B1" -> -1)
+        // Parses floor level string into an integer (e.g., "1F" -> 1, "B1" -> -1)
         private int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel))
@@ -57,7 +57,7 @@ namespace Map {
                 
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
-                // 地下楼层
+                // Basement floors
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
                 {
                     return -level;
@@ -65,14 +65,14 @@ namespace Map {
             }
             else
             {
-                // 地上楼层
+                // Regular floors
                 if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
                 {
                     return level;
                 }
             }
             
-            return 0; // 默认
+            return 0; // Default
         }
         
         public List<CellSpace> GetCellSpacesOnFloor(string floorLevel)

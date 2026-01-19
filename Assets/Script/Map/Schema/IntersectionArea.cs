@@ -43,12 +43,12 @@ namespace Map
             _exitPoints = new List<ConnectionPoint>();
             _intersectionCells = new List<CellSpace>();
             _activationDistance = 2.0f;
-            _floorLevel = "1F"; // 默认为1F楼层
+            _floorLevel = "1F"; // Defaults to floor 1F
         }
 
         public (Vector3 entryDirection, Vector3 suggestedExitDirection) CalculateTraversalDirections(Vector3 robotPosition, Vector3 robotVelocity)
         {
-            // 识别机器人进入的方向
+            // Identify direction robot enters from
             ConnectionPoint nearestEntryPoint = null;
             float minDistance = float.MaxValue;
             
@@ -65,7 +65,7 @@ namespace Map
                 }
             }
             
-            // 如果没有找到入口点，使用当前速度方向
+            // If no entry point found, use current velocity direction
             Vector3 entryDirection = robotVelocity.normalized;
             if (nearestEntryPoint != null)
             {
@@ -74,7 +74,7 @@ namespace Map
                 entryDirection = (robotPosition - entryPos).normalized;
             }
             
-            // 寻找最佳出口方向（大致与入口方向相反）
+            // Find optimal exit direction (roughly opposite to entry direction)
             Vector3 suggestedExitDirection = -entryDirection;
             float bestAlignment = -1f;
             
@@ -84,7 +84,7 @@ namespace Map
                 Vector3 exitPos = new Vector3((float)exit.X, robotPosition.y, (float)exit.Y);
                 Vector3 exitDir = (exitPos - robotPosition).normalized;
                 
-                // 寻找与入口方向延续最接近的出口
+                // Find exit point best aligned with entry direction
                 float alignment = Vector3.Dot(entryDirection, exitDir);
                 if (alignment > bestAlignment)
                 {

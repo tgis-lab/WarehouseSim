@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using C5;
-// 使用别名避免冲突
+// Use alias to avoid conflict
 using SystemCollections = System.Collections.Generic;
 
 namespace Map
 {
     /// <summary>
-    /// 时间占用记录，表示特定时间段内的占用情况
+    /// Time occupancy record, representing occupancy within a specific time period
     /// </summary>
     public class TimeOccupancy : IComparable<TimeOccupancy>
     {
@@ -35,7 +35,7 @@ namespace Map
             IsEndCell = isEndCell;
         }
 
-        // 更新结束时间（用于实时跟踪）
+        // Update end time (for real-time tracking)
         public void UpdateEndTime(float newEndTime)
         {
             if (newEndTime < StartTime)
@@ -45,44 +45,44 @@ namespace Map
             EndTime = newEndTime;
         }
 
-        // IComparable接口实现，用于C5集合
+        // IComparable interface implementation for C5 collections
         public int CompareTo(TimeOccupancy other)
         {
             if (other == null) return 1;
             
-            // 首先比较开始时间
+            // Compare start time first
             int startComparison = StartTime.CompareTo(other.StartTime);
             if (startComparison != 0) return startComparison;
             
-            // 开始时间相同，比较结束时间
+            // Start times same, compare end times
             int endComparison = EndTime.CompareTo(other.EndTime);
             if (endComparison != 0) return endComparison;
             
-            // 时间完全相同，使用ID比较确保唯一性
+            // Times identical, use ID to ensure uniqueness
             return Id.CompareTo(other.Id);
         }
     }
 
     /// <summary>
-    /// 时间索引 - 管理单一位置的时间占用
-    /// 使用C5库实现的基于区间树概念的时间索引
+    /// Temporal Index - Manages time occupancy for a single location.
+    /// Temporal index implemented using the C5 library based on interval tree concepts.
     /// </summary>
     public class TemporalIndex
     {
-        // 存储所有占用的字典，键为GUID，值为TimeOccupancy
+        // Dictionary storing all occupancies, key is GUID, value is TimeOccupancy
         private readonly HashDictionary<Guid, TimeOccupancy> allOccupancies;
         
-        // 按开始时间排序的占用索引
+        // Occupancy index sorted by start time
         private readonly TreeDictionary<float, HashedLinkedList<TimeOccupancy>> startTimeIndex;
         
-        // 按结束时间排序的占用索引
+        // Occupancy index sorted by end time
         private readonly TreeDictionary<float, HashedLinkedList<TimeOccupancy>> endTimeIndex;
         
-        // 当前进行中的占用
+        // Ongoing occupancies
         private readonly Dictionary<string, TimeOccupancy> ongoingOccupancies;
 
         /// <summary>
-        /// 创建新的时间索引
+        /// Create a new temporal index
         /// </summary>
         public TemporalIndex()
         {
@@ -93,23 +93,23 @@ namespace Map
         }
 
         /// <summary>
-        /// 添加时间区间到索引
+        /// Add time interval to index
         /// </summary>
         public void AddInterval(TimeOccupancy interval)
         {
             if (interval == null) return;
             
-            // 添加到所有占用字典
+            // Add to all occupancies dictionary
             allOccupancies[interval.Id] = interval;
             
-            // 添加到开始时间索引
+            // Add to start time index
             if (!startTimeIndex.Contains(interval.StartTime))
             {
                 startTimeIndex[interval.StartTime] = new HashedLinkedList<TimeOccupancy>();
             }
             startTimeIndex[interval.StartTime].Add(interval);
             
-            // 添加到结束时间索引
+            // Add to end time index
             if (!endTimeIndex.Contains(interval.EndTime))
             {
                 endTimeIndex[interval.EndTime] = new HashedLinkedList<TimeOccupancy>();
@@ -118,37 +118,37 @@ namespace Map
         }
 
         /// <summary>
-        /// 从索引中移除时间区间
+        /// Remove time interval from index
         /// </summary>
         public void RemoveInterval(TimeOccupancy interval)
         {
             if (interval == null) return;
             
-            // 从所有占用字典移除
+            // Remove from all occupancies dictionary
             if (allOccupancies.Contains(interval.Id))
             {
                 allOccupancies.Remove(interval.Id);
                 
-                // 从开始时间索引移除
+                // Remove from start time index
                 if (startTimeIndex.Contains(interval.StartTime))
                 {
                     var list = startTimeIndex[interval.StartTime];
                     list.Remove(interval);
                     
-                    // 如果该时间点没有更多占用，删除整个条目
+                    // If no more occupancies at this time, remove the entry
                     if (list.Count == 0)
                     {
                         startTimeIndex.Remove(interval.StartTime);
                     }
                 }
                 
-                // 从结束时间索引移除
+                // Remove from end time index
                 if (endTimeIndex.Contains(interval.EndTime))
                 {
                     var list = endTimeIndex[interval.EndTime];
                     list.Remove(interval);
                     
-                    // 如果该时间点没有更多占用，删除整个条目
+                    // If no more occupancies at this time, remove the entry
                     if (list.Count == 0)
                     {
                         endTimeIndex.Remove(interval.EndTime);
@@ -158,30 +158,30 @@ namespace Map
         }
 
         /// <summary>
-        /// 查询与指定时间段重叠的所有占用
+        /// Query all occupancies overlapping with specified time period
         /// </summary>
         public List<TimeOccupancy> QueryOverlapping(float startTime, float endTime)
         {
             List<TimeOccupancy> result = new List<TimeOccupancy>();
             
-            // 提前检查特殊情况
+            // Check special cases early
             if (startTime > endTime || startTimeIndex.IsEmpty)
             {
                 return result;
             }
             
-            // 收集所有可能重叠的区间
+            // Collect all potentially overlapping intervals
             var potentialOverlaps = new SystemCollections.HashSet<TimeOccupancy>();
             
             try
             {
-                // 遍历所有开始时间早于等于查询结束时间的区间
+                // Traverse all intervals with start time <= query end time
                 var enumerator = startTimeIndex.RangeFrom(startTimeIndex.FindMin().Key).GetEnumerator();
                 while (enumerator.MoveNext())
                 {
                     var entry = enumerator.Current;
                     if (entry.Key > endTime)
-                        break;  // 如果开始时间大于查询结束时间，可以停止
+                        break;  // If start time > query end time, can stop
                     
                     foreach (var interval in entry.Value)
                     {
@@ -189,7 +189,7 @@ namespace Map
                     }
                 }
                 
-                // 筛选出确实重叠的区间
+                // Filter out intervals that truly overlap
                 foreach (var interval in potentialOverlaps)
                 {
                     if (interval.EndTime >= startTime)
@@ -200,14 +200,14 @@ namespace Map
             }
             catch (Exception ex)
             {
-                Debug.LogError($"查询时间重叠时出错: {ex.Message}");
+                Debug.LogError($"Error querying time overlap: {ex.Message}");
             }
             
             return result;
         }
 
         /// <summary>
-        /// 检查时间冲突，可排除指定机器人的占用
+        /// Check for time conflicts, optionally excluding a robot's occupancy
         /// </summary>
         public List<TimeOccupancy> CheckConflict(
             float startTime, 
@@ -216,47 +216,47 @@ namespace Map
             bool isStartCell = false, 
             bool isEndCell = false)
         {
-            // 查询重叠的占用
+            // Query overlapping occupancies
             var overlappingOccupancies = QueryOverlapping(startTime, endTime);
             var conflicts = new List<TimeOccupancy>();
             
             foreach (var occupancy in overlappingOccupancies)
             {
-                // 排除指定机器人的占用
+                // Exclude occupancy of specific robot
                 if (!string.IsNullOrEmpty(excludeRobotId) && occupancy.Occupier.RobotId == excludeRobotId)
                 {
                     continue;
                 }
                 
-                // 应用特殊规则处理
+                // Apply special rules
                 
-                // 规则1: 如果当前检查的是起点单元格，我们只在特定情况下报告冲突
+                // Rule 1: If checking start cell, only report conflict in specific cases
                 if (isStartCell && !occupancy.IsEndCell)
                 {
-                    // 在起点允许与非终点的其他占用共存
+                    // Allow coexistence at start cell with non-end occupancies
                     continue;
                 }
                 
-                // 规则2: 如果当前检查的是终点单元格，我们只在特定情况下报告冲突
+                // Rule 2: If checking end cell, only report conflict in specific cases
                 if (isEndCell && !occupancy.IsStartCell)
                 {
-                    // 在终点允许与非起点的其他占用共存
+                    // Allow coexistence at end cell with non-start occupancies
                     continue;
                 }
                 
-                // 规则3: 如果被检查的占用是起点，而我们不是终点，则允许共存
+                // Rule 3: If overlap is a start cell and we are not an end cell, allow coexistence
                 if (occupancy.IsStartCell && !isEndCell)
                 {
                     continue;
                 }
                 
-                // 规则4: 如果被检查的占用是终点，而我们不是起点，则允许共存
+                // Rule 4: If overlap is an end cell and we are not a start cell, allow coexistence
                 if (occupancy.IsEndCell && !isStartCell)
                 {
                     continue;
                 }
                 
-                // 所有规则验证后仍存在，则为真实冲突
+                // Actual conflict if it remains after all rules
                 conflicts.Add(occupancy);
             }
             
@@ -264,7 +264,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 更新进行中的占用
+        /// Update ongoing occupancy
         /// </summary>
         public void UpdateCurrentOccupancy(string robotId, float currentTime)
         {
@@ -272,18 +272,18 @@ namespace Map
             
             if (ongoingOccupancies.TryGetValue(key, out TimeOccupancy current))
             {
-                // 从索引中移除（因为结束时间会变）
+                // Remove from index (as end time will change)
                 RemoveInterval(current);
                 
-                // 更新结束时间
+                // Update end time
                 current.UpdateEndTime(currentTime);
                 
-                // 重新添加到索引
+                // Re-add to index
                 AddInterval(current);
             }
             else
             {
-                // 创建新的占用记录
+                // Create new occupancy record
                 var occupier = new OccupancyIdentifier(robotId);
                 var newOccupancy = new TimeOccupancy(currentTime, currentTime, occupier);
                 ongoingOccupancies[key] = newOccupancy;
@@ -292,7 +292,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 结束当前占用
+        /// End current occupancy
         /// </summary>
         public void EndCurrentOccupancy(string robotId, float endTime)
         {
@@ -300,22 +300,22 @@ namespace Map
             
             if (ongoingOccupancies.TryGetValue(key, out TimeOccupancy current))
             {
-                // 从索引中移除
+                // Remove from index
                 RemoveInterval(current);
                 
-                // 更新结束时间
+                // Update end time
                 current.UpdateEndTime(endTime);
                 
-                // 重新添加到索引
+                // Re-add to index
                 AddInterval(current);
                 
-                // 从当前占用中移除
+                // Remove from ongoing occupancies
                 ongoingOccupancies.Remove(key);
             }
         }
 
         /// <summary>
-        /// 获取此索引中的所有时间占用
+        /// Get all time occupancies in this index
         /// </summary>
         public List<TimeOccupancy> GetAllOccupancies()
         {
@@ -323,11 +323,11 @@ namespace Map
         }
 
         /// <summary>
-        /// 移除指定时间之前的所有时间间隔
+        /// Remove all time intervals before a specified time
         /// </summary>
         public void RemoveIntervalsBefore(float cutoffTime)
         {
-            // 查找早于cutoffTime的所有结束时间
+            // Find all end times earlier than cutoffTime
             var endTimes = endTimeIndex.RangeFrom(float.MinValue).TakeWhile(kvp => kvp.Key <= cutoffTime).ToList();
             
             foreach (var kvp in endTimes)
@@ -337,14 +337,14 @@ namespace Map
                 
                 foreach (var interval in intervals)
                 {
-                    // 移除这个时间间隔
+                    // Remove this time interval
                     RemoveInterval(interval);
                 }
             }
         }
 
         /// <summary>
-        /// 获取指定时间范围内的所有占用记录
+        /// Get all occupancy records within the specified time range
         /// </summary>
         public List<TimeOccupancy> GetOccupancies(float startTime, float endTime)
         {
@@ -352,7 +352,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 清理过期数据
+        /// Clean up expired data
         /// </summary>
         public void Cleanup(float currentTime, float windowDuration)
         {
@@ -361,7 +361,7 @@ namespace Map
             
             try
             {
-                // 查找所有结束时间早于阈值的占用
+                // Find all occupancies with end time earlier than threshold
                 if (!endTimeIndex.IsEmpty)
                 {
                     var minKey = endTimeIndex.FindMin().Key;
@@ -384,17 +384,17 @@ namespace Map
                     }
                 }
                 
-                // 移除过期的占用
+                // Remove expired occupancies
                 foreach (var interval in toRemove)
                 {
                     RemoveInterval(interval);
                 }
                 
-                Debug.Log($"已清理 {toRemove.Count} 个过期占用记录");
+                Debug.Log($"Cleaned up {toRemove.Count} expired occupancy records");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"清理占用记录时出错: {ex.Message}");
+                Debug.LogError($"Error cleaning up occupancy records: {ex.Message}");
             }
         }
     }

@@ -7,7 +7,7 @@ using Map;
 namespace CentralControl
 {
     /// <summary>
-    /// 冲突消解策略实现
+    /// Conflict resolution strategy implementation
     /// </summary>
     public class ConflictResolver
     {
@@ -15,9 +15,9 @@ namespace CentralControl
         private CellSpaceConflictDetector conflictDetector;
         private IndoorSpace indoorSpace;
         
-        // 时间偏移增量参数（可调整）
+        // Time shift increment parameter (adjustable)
         private float timeShiftIncrement = 0.1f;
-        // 最大尝试次数
+        // Maximum number of attempts
         private int maxShiftAttempts = 10;
         
         public ConflictResolver(
@@ -31,9 +31,9 @@ namespace CentralControl
         }
         
         /// <summary>
-        /// 时间偏移策略 - 整体平移路径的时间维度以避免冲突
+        /// Time Shift Strategy - Shifts the time dimension of the entire path to avoid conflicts
         /// </summary>
-        /// <returns>结果元组 (是否成功, 新的时间列表, 时间偏移量)</returns>
+        /// <returns>Result tuple (success, new times list, time offset)</returns>
         public (bool success, List<float> newTimes, float appliedShift) ResolveConflictByTimeShift(
             string robotId, 
             List<ConnectionPoint> path, 
@@ -41,68 +41,68 @@ namespace CentralControl
             Dictionary<string, List<TimeOccupancy>> conflicts,
             float maxAcceptableDelay = 10.0f)
         {
-            // 参数验证
+            // Parameter validation
             if (path == null || path.Count < 2 || times == null || times.Count != path.Count)
             {
-                Debug.LogError("无效的路径或时间数据");
+                Debug.LogError("Invalid path or time data");
                 return (false, null, 0);
             }
             
-            // 检查冲突字典是否为null
+            // Check if conflicts dictionary is null
             if (conflicts == null)
             {
-                Debug.LogError("冲突字典为null");
+                Debug.LogError("Conflicts dictionary is null");
                 return (false, null, 0);
             }
             
-            // 检查依赖项
+            // Check dependencies
             if (globalOccupancyLayer == null)
             {
-                Debug.LogError("全局占用层为null");
+                Debug.LogError("Global occupancy layer is null");
                 return (false, null, 0);
             }
             
             if (conflictDetector == null)
             {
-                Debug.LogError("冲突检测器为null");
+                Debug.LogError("Conflict detector is null");
                 return (false, null, 0);
             }
             
             if (indoorSpace == null)
             {
-                Debug.LogError("室内空间为null");
+                Debug.LogError("Indoor space is null");
                 return (false, null, 0);
             }
             
-            // 当前尝试的时间偏移
+            // Current time shift attempt
             float currentShift = 0;
             
-            // 尝试不同的时间偏移直到找到无冲突的解决方案或达到最大尝试次数
+            // Try different time shifts until a conflict-free solution is found or max attempts reached
             for (int attempt = 0; attempt < maxShiftAttempts; attempt++)
             {
-                // 计算下一个尝试的时间偏移
-                // 使用自适应增量：针对不同冲突程度调整增量大小
+                // Calculate next time shift attempt
+                // Use adaptive increment: adjust increment size for different conflict levels
                 if (attempt > 0)
                 {
-                    // 计算冲突的总持续时间作为调整依据
+                    // Calculate total conflict duration as basis for adjustment
                     float totalConflictDuration = CalculateTotalConflictDuration(conflicts);
                     float adaptiveIncrement = Math.Max(timeShiftIncrement, totalConflictDuration * 0.5f);
                     
-                    // 增加当前偏移量
+                    // Increase current offset
                     currentShift += adaptiveIncrement;
                     
-                    // 检查是否超过最大可接受延迟
+                    // Check if max acceptable delay exceeded
                     if (currentShift > maxAcceptableDelay)
                     {
-                        Debug.LogWarning($"时间偏移超过最大可接受值: {currentShift}s > {maxAcceptableDelay}s");
+                        Debug.LogWarning($"Time shift exceeds maximum acceptable value: {currentShift}s > {maxAcceptableDelay}s");
                         return (false, null, currentShift);
                     }
                 }
                 
-                // 应用时间偏移创建新的时间列表
+                // Apply time shift to create new times list
                 List<float> shiftedTimes = ApplyTimeShift(times, currentShift);
                 
-                // 使用CellSpaceConflictDetector检查偏移后的路径是否仍有冲突
+                // Use CellSpaceConflictDetector to check if shifted path still has conflicts
                 Dictionary<string, List<TimeOccupancy>> newConflicts = conflictDetector.DetectConflicts(
                     globalOccupancyLayer,
                     indoorSpace,
@@ -111,24 +111,24 @@ namespace CentralControl
                     robotId, 
                     "TimeShiftVerification");
                 
-                // 如果没有冲突，返回成功和偏移后的时间
+                // If no conflicts, return success and shifted times
                 if (newConflicts.Count == 0)
                 {
-                    Debug.Log($"成功通过时间偏移解决冲突: 偏移量 = {currentShift}s");
+                    Debug.Log($"Successfully resolved conflict by time shift: offset = {currentShift}s");
                     return (true, shiftedTimes, currentShift);
                 }
                 
-                // 如果仍有冲突，记录信息并继续尝试
-                Debug.Log($"时间偏移尝试 {attempt+1}/{maxShiftAttempts}: 偏移量 = {currentShift}s, 仍有 {newConflicts.Count} 个冲突");
+                // If conflicts still exist, log info and continue trying
+                Debug.Log($"Time shift attempt {attempt+1}/{maxShiftAttempts}: offset = {currentShift}s, {newConflicts.Count} conflicts remaining");
             }
             
-            // 达到最大尝试次数仍未解决冲突
-            Debug.LogWarning($"无法通过时间偏移解决冲突，已达到最大尝试次数: {maxShiftAttempts}");
+            // Max attempts reached without resolving conflict
+            Debug.LogWarning($"Unable to resolve conflict by time shift, max attempts reached: {maxShiftAttempts}");
             return (false, null, currentShift);
         }
         
         /// <summary>
-        /// 对时间列表应用时间偏移
+        /// Apply time shift to times list
         /// </summary>
         private List<float> ApplyTimeShift(List<float> times, float shift)
         {
@@ -136,7 +136,7 @@ namespace CentralControl
         }
         
         /// <summary>
-        /// 计算冲突的总持续时间，用于自适应时间偏移增量
+        /// Calculates total conflict duration for adaptive time shift increment
         /// </summary>
         private float CalculateTotalConflictDuration(Dictionary<string, List<TimeOccupancy>> conflicts)
         {
@@ -154,7 +154,7 @@ namespace CentralControl
         }
 
         /// <summary> 
-        /// 速度调整策略 - 通过调整速度来避免冲突
+        /// Speed Adjustment Strategy - Adjusts speed to avoid conflicts
         /// </summary>
         public (bool success, List<float> newTimes, List<float> newSpeeds, bool hasChanges) ResolveConflictBySpeedAdjustment(
             string robotId,
@@ -165,23 +165,23 @@ namespace CentralControl
             float maxSpeedAdjustmentRatio = 1.5f,
             float minSpeedAdjustmentRatio = 0.5f)
         {
-            // 参数验证
+            // Parameter validation
             if (path == null || path.Count < 2 || times == null || times.Count != path.Count)
             {
-                Debug.LogError("无效的路径或时间数据");
+                Debug.LogError("Invalid path or time data");
                 return (false, null, null, false);
             }
             
             if (conflicts == null || conflicts.Count == 0)
             {
-                // 没有冲突，直接返回原始数据
+                // No conflicts, return original data directly
                 return (true, new List<float>(times), new List<float>(), false);
             }
             
-            // 创建新的时间列表副本
+            // Create copy of new times list
             List<float> newTimes = new List<float>(times);
             
-            // 创建默认速度列表
+            // Create default speeds list
             List<float> speeds = new List<float>();
             for (int i = 0; i < path.Count; i++)
             {
@@ -191,17 +191,17 @@ namespace CentralControl
             List<float> newSpeeds = new List<float>(speeds);
             bool hasChanges = false;
             
-            // 识别冲突区域及其对应的路径段
+            // Identify conflict areas and corresponding path segments
             Dictionary<int, (string cellId, float conflictStartTime, float conflictEndTime)> conflictSegments = 
                 IdentifyConflictSegments(path, times, conflicts);
             
             if (conflictSegments.Count == 0)
             {
-                Debug.LogWarning("无法确定冲突区域对应的路径段");
+                Debug.LogWarning("Unable to determine path segment corresponding to conflict area");
                 return (false, null, null, false);
             }
             
-            // 对每个冲突段进行速度调整
+            // Adjust speed for each conflict segment
             foreach (var kvp in conflictSegments)
             {
                 int segmentIndex = kvp.Key;
@@ -209,12 +209,12 @@ namespace CentralControl
                 float conflictStartTime = kvp.Value.conflictStartTime;
                 float conflictEndTime = kvp.Value.conflictEndTime;
                 
-                // 确定需要调整的路径段范围
-                // 我们希望提前几个段开始调整速度，以便有足够的时间加速或减速
+                // Determine range of path segments to adjust
+                // We want to start adjusting speed a few segments early for enough acceleration/deceleration time
                 int adjustmentStartIndex = Math.Max(0, segmentIndex - 2);
                 int adjustmentEndIndex = Math.Min(path.Count - 1, segmentIndex + 2);
                 
-                // 尝试不同的速度调整方案
+                // Try different speed adjustment schemes
                 (bool adjusted, List<float> adjustedTimes, List<float> adjustedSpeeds) = 
                     TrySpeedAdjustment(
                         path, 
@@ -231,14 +231,14 @@ namespace CentralControl
                 
                 if (adjusted)
                 {
-                    // 更新时间和速度
+                    // Update times and speeds
                     for (int i = adjustmentStartIndex; i <= adjustmentEndIndex && i < adjustedTimes.Count; i++)
                     {
                         newTimes[i] = adjustedTimes[i - adjustmentStartIndex];
                         newSpeeds[i] = adjustedSpeeds[i - adjustmentStartIndex];
                     }
                     
-                    // 更新后续所有点的时间
+                    // Update times for all subsequent points
                     float timeDiff = 0;
                     if (adjustmentEndIndex < newTimes.Count - 1)
                     {
@@ -251,7 +251,7 @@ namespace CentralControl
                     
                     hasChanges = true;
                     
-                    // 检查调整后是否仍有冲突
+                    // Check if conflicts still exist after adjustment
                     Dictionary<string, List<TimeOccupancy>> newConflicts = conflictDetector.DetectConflicts(
                         globalOccupancyLayer,
                         indoorSpace,
@@ -260,19 +260,19 @@ namespace CentralControl
                         robotId, 
                         "SpeedAdjustmentVerification");
                     
-                    // 如果仍有冲突，继续调整；否则返回调整后的结果
+                    // If conflicts still exist, continue adjusting; otherwise return adjusted result
                     if (newConflicts.Count == 0)
                     {
-                        Debug.Log($"成功通过速度调整解决冲突: 调整区间 [{adjustmentStartIndex}-{adjustmentEndIndex}]");
+                        Debug.Log($"Successfully resolved conflict by speed adjustment: range [{adjustmentStartIndex}-{adjustmentEndIndex}]");
                         return (true, newTimes, newSpeeds, true);
                     }
                     
-                    Debug.Log($"速度调整后仍有冲突，继续尝试其他冲突段");
+                    Debug.Log($"Conflicts still exist after speed adjustment, continuing with other segments");
                     conflicts = newConflicts;
                 }
             }
             
-            // 如果所有冲突段都尝试过了，但仍有未解决的冲突
+            // If all conflict segments tried but unresolved conflicts remain
             if (hasChanges)
             {
                 Dictionary<string, List<TimeOccupancy>> finalConflicts = conflictDetector.DetectConflicts(
@@ -284,17 +284,17 @@ namespace CentralControl
                 
                 if (finalConflicts.Count == 0)
                 {
-                    Debug.Log("所有冲突都通过速度调整成功解决");
+                    Debug.Log("All conflicts successfully resolved by speed adjustment");
                     return (true, newTimes, newSpeeds, true);
                 }
             }
             
-            Debug.LogWarning("无法通过速度调整完全解决冲突");
+            Debug.LogWarning("Unable to fully resolve conflicts by speed adjustment");
             return (false, hasChanges ? newTimes : null, hasChanges ? newSpeeds : null, hasChanges);
         }
 
         /// <summary>
-        /// 识别冲突区域对应的路径段
+        /// Identify path segment corresponding to conflict area
         /// </summary>
         private Dictionary<int, (string cellId, float conflictStartTime, float conflictEndTime)> IdentifyConflictSegments(
             List<ConnectionPoint> path,
@@ -304,7 +304,7 @@ namespace CentralControl
             Dictionary<int, (string cellId, float conflictStartTime, float conflictEndTime)> conflictSegments = 
                 new Dictionary<int, (string cellId, float conflictStartTime, float conflictEndTime)>();
             
-            // 获取路径上每个点对应的CellSpace
+            // Get corresponding CellSpace for each path point
             var pathCells = new List<string>();
             for (int i = 0; i < path.Count; i++)
             {
@@ -312,7 +312,7 @@ namespace CentralControl
                 string sourceCellId = cp.CellBoundary.Source;
                 string targetCellId = cp.CellBoundary.Target;
                 
-                // 对于路径上的第一个点，考虑起点单元格
+                // For first path point, consider start cell
                 if (i == 0)
                 {
                     pathCells.Add(sourceCellId);
@@ -321,26 +321,26 @@ namespace CentralControl
                 pathCells.Add(targetCellId);
             }
             
-            // 对于每个冲突的CellSpace，找到对应的路径段
+            // For each conflicting CellSpace, find the corresponding path segment
             foreach (var kvp in conflicts)
             {
                 string cellId = kvp.Key;
                 var cellConflicts = kvp.Value;
                 
-                // 跳过没有具体冲突的单元格
+                // Skip cells without specific conflicts
                 if (cellConflicts.Count == 0)
                     continue;
                 
-                // 找到该单元格在路径中的位置
+                // Find cell position in path
                 for (int i = 0; i < pathCells.Count; i++)
                 {
                     if (pathCells[i] == cellId)
                     {
-                        // 确定进入和离开这个单元格的时间
+                        // Determine entry and exit times for this cell
                         float entryTime = (i == 0) ? times[0] : times[i - 1];
                         float exitTime = (i >= times.Count) ? times[times.Count - 1] : times[i];
                         
-                        // 对该单元格的所有冲突，找出最早的开始时间和最晚的结束时间
+                        // Find earliest start and latest end for all conflicts in this cell
                         float earliestConflictStart = float.MaxValue;
                         float latestConflictEnd = float.MinValue;
                         
@@ -350,8 +350,8 @@ namespace CentralControl
                             latestConflictEnd = Mathf.Max(latestConflictEnd, conflict.EndTime);
                         }
                         
-                        // 记录冲突段
-                        // 我们使用路径点的索引，而不是CellSpace的索引
+                        // Record conflict segment
+                        // We use path point indices instead of CellSpace indices
                         int segmentIndex = Mathf.Min(i, path.Count - 1);
                         
                         if (!conflictSegments.ContainsKey(segmentIndex))
@@ -360,7 +360,7 @@ namespace CentralControl
                         }
                         else
                         {
-                            // 如果已经有这个段的冲突记录，扩展冲突时间范围
+                            // If conflict record exists for this segment, extend conflict time range
                             var existing = conflictSegments[segmentIndex];
                             earliestConflictStart = Mathf.Min(earliestConflictStart, existing.conflictStartTime);
                             latestConflictEnd = Mathf.Max(latestConflictEnd, existing.conflictEndTime);
@@ -374,7 +374,7 @@ namespace CentralControl
         }
 
         /// <summary>
-        /// 尝试速度调整方案
+        /// Try speed adjustment schemes
         /// </summary>
         private (bool success, List<float> adjustedTimes, List<float> adjustedSpeeds) TrySpeedAdjustment(
             List<ConnectionPoint> path,
@@ -389,7 +389,7 @@ namespace CentralControl
             float maxSpeedRatio,
             float minSpeedRatio)
         {
-            // 提取需要调整的段
+            // Extract segment to be adjusted
             int segmentCount = endIndex - startIndex + 1;
             List<float> segmentTimes = new List<float>();
             List<float> segmentSpeeds = new List<float>();
@@ -400,37 +400,37 @@ namespace CentralControl
                 segmentSpeeds.Add(speeds[i]);
             }
             
-            // 计算当前到达冲突区域的时间
+            // Calculate current arrival time at conflict area
             float currentArrivalTime = segmentTimes[segmentTimes.Count - 1];
             
-            // 首先尝试的策略方向取决于当前位置
+            // First strategy attempt direction depends on current position
             bool tryAccelerationFirst = currentArrivalTime < conflictStartTime;
             
-            // 尝试第一种策略（基于当前位置决定是加速还是减速）
+            // Try first strategy (accelerate or decelerate based on current position)
             var result = TrySingleDirectionAdjustment(
                 path, segmentTimes, segmentSpeeds, startIndex, 
                 conflictStartTime, conflictEndTime, 
-                tryAccelerationFirst, // 如果在冲突前，先尝试加速
+                tryAccelerationFirst, // If before conflict, try acceleration first
                 defaultSpeed, maxSpeedRatio, minSpeedRatio);
             
             if (result.success)
             {
-                // 第一种策略成功
+                // First strategy succeeded
                 return result;
             }
             
-            // 如果第一种策略失败，尝试相反方向
-            Debug.Log($"首选{(tryAccelerationFirst ? "加速" : "减速")}策略失败，尝试{(tryAccelerationFirst ? "减速" : "加速")}");
+            // If first strategy fails, try opposite direction
+            Debug.Log($"Primary {(tryAccelerationFirst ? "acceleration" : "deceleration")} strategy failed, trying {(tryAccelerationFirst ? "deceleration" : "acceleration")}");
             
             return TrySingleDirectionAdjustment(
                 path, segmentTimes, segmentSpeeds, startIndex, 
                 conflictStartTime, conflictEndTime, 
-                !tryAccelerationFirst, // 尝试相反的策略
+                !tryAccelerationFirst, // Try opposite strategy
                 defaultSpeed, maxSpeedRatio, minSpeedRatio);
         }
 
         /// <summary>
-        /// 尝试单一方向的速度调整（加速或减速）
+        /// Try single-direction speed adjustment (acceleration or deceleration)
         /// </summary>
         private (bool success, List<float> adjustedTimes, List<float> adjustedSpeeds) TrySingleDirectionAdjustment(
             List<ConnectionPoint> path,
@@ -439,7 +439,7 @@ namespace CentralControl
             int startIndex,
             float conflictStartTime,
             float conflictEndTime,
-            bool accelerate, // true为加速，false为减速
+            bool accelerate, // true for acceleration, false for deceleration
             float defaultSpeed,
             float maxSpeedRatio,
             float minSpeedRatio)
@@ -448,65 +448,65 @@ namespace CentralControl
             
             if (accelerate)
             {
-                // 加速策略：目标是在冲突开始前通过
-                targetArrivalTime = conflictStartTime - 0.5f; // 提前0.5秒通过
+                // Acceleration strategy: goal is to pass before conflict starts
+                targetArrivalTime = conflictStartTime - 0.5f; // Pass 0.5s early
                 
-                // 检查是否已经太迟，无法通过加速解决
+                // Check if too late for acceleration to resolve
                 if (segmentTimes[0] + (targetArrivalTime - segmentTimes[0]) / maxSpeedRatio > conflictStartTime)
                 {
-                    Debug.Log($"即使最大加速也无法在冲突前通过，当前开始时间: {segmentTimes[0]:F2}，" +
-                            $"冲突开始: {conflictStartTime:F2}，最快可能到达: {segmentTimes[0] + (targetArrivalTime - segmentTimes[0]) / maxSpeedRatio:F2}");
+                    Debug.Log($"Unable to pass before conflict even with max acceleration, current start: {segmentTimes[0]:F2}, " +
+                            $"conflict start: {conflictStartTime:F2}, earliest arrival: {segmentTimes[0] + (targetArrivalTime - segmentTimes[0]) / maxSpeedRatio:F2}");
                     return (false, segmentTimes, segmentSpeeds);
                 }
             }
             else
             {
-                // 减速策略：目标是在冲突结束后通过
-                targetArrivalTime = conflictEndTime + 0.5f; // 延后0.5秒通过
+                // Deceleration strategy: goal is to pass after conflict ends
+                targetArrivalTime = conflictEndTime + 0.5f; // Pass 0.5s late
                 
-                // 检查减速是否有意义（例如，如果已经会在冲突结束后到达）
+                // Check if deceleration is meaningful (e.g., if already arriving after conflict)
                 if (segmentTimes[segmentTimes.Count - 1] > conflictEndTime)
                 {
-                    Debug.Log($"机器人已经会在冲突结束后到达，无需减速");
+                    Debug.Log($"Robot will already arrive after conflict, no deceleration needed");
                     return (false, segmentTimes, segmentSpeeds);
                 }
             }
             
-            // 计算需要的平均速度比例调整
+            // Calculate required average speed ratio adjustment
             float originalDuration = segmentTimes[segmentTimes.Count - 1] - segmentTimes[0];
             float targetDuration = targetArrivalTime - segmentTimes[0];
             float speedRatio = originalDuration / targetDuration;
             
-            Debug.Log($"尝试{(accelerate ? "加速" : "减速")}策略: 原始持续时间={originalDuration:F2}s, " +
-                    $"目标持续时间={targetDuration:F2}s, 速度比例={speedRatio:F2}");
+            Debug.Log($"Trying {(accelerate ? "acceleration" : "deceleration")} strategy: original duration={originalDuration:F2}s, " +
+                    $"target duration={targetDuration:F2}s, speed ratio={speedRatio:F2}");
             
-            // 检查是否在可接受的范围内
+            // Check if within acceptable range
             if (accelerate && speedRatio > maxSpeedRatio)
             {
-                Debug.Log($"所需加速比例 {speedRatio:F2} 超过最大允许值 {maxSpeedRatio:F2}");
+                Debug.Log($"Required acceleration ratio {speedRatio:F2} exceeds max allowed {maxSpeedRatio:F2}");
                 return (false, segmentTimes, segmentSpeeds);
             }
             else if (!accelerate && speedRatio < minSpeedRatio)
             {
-                Debug.Log($"所需减速比例 {speedRatio:F2} 低于最小允许值 {minSpeedRatio:F2}");
+                Debug.Log($"Required deceleration ratio {speedRatio:F2} below min allowed {minSpeedRatio:F2}");
                 return (false, segmentTimes, segmentSpeeds);
             }
             
-            // 应用速度调整
+            // Apply speed adjustment
             List<float> adjustedTimes = new List<float>();
             List<float> adjustedSpeeds = new List<float>();
             
-            // 第一个时间点保持不变
+            // First time point remains unchanged
             adjustedTimes.Add(segmentTimes[0]);
             
-            // 调整速度并重新计算时间
+            // Adjust speeds and recalculate times
             for (int i = 0; i < segmentSpeeds.Count; i++)
             {
-                // 调整速度
+                // Adjust speed
                 float newSpeed = segmentSpeeds[i] * speedRatio;
                 adjustedSpeeds.Add(newSpeed);
                 
-                // 计算新的到达时间
+                // Calculate new arrival time
                 if (i > 0)
                 {
                     float distance = Vector3.Distance(
@@ -519,24 +519,24 @@ namespace CentralControl
                 }
             }
             
-            // 验证调整后的时间是否符合目标
+            // Verify adjusted time meets target
             float adjustedArrivalTime = adjustedTimes[adjustedTimes.Count - 1];
             
             if (accelerate && adjustedArrivalTime >= conflictStartTime)
             {
-                Debug.Log($"加速失败: 调整后到达时间 {adjustedArrivalTime:F2} >= 冲突开始时间 {conflictStartTime:F2}");
+                Debug.Log($"Acceleration failed: adjusted arrival {adjustedArrivalTime:F2} >= conflict start {conflictStartTime:F2}");
                 return (false, segmentTimes, segmentSpeeds);
             }
             else if (!accelerate && adjustedArrivalTime <= conflictEndTime)
             {
-                Debug.Log($"减速失败: 调整后到达时间 {adjustedArrivalTime:F2} <= 冲突结束时间 {conflictEndTime:F2}");
+                Debug.Log($"Deceleration failed: adjusted arrival {adjustedArrivalTime:F2} <= conflict end {conflictEndTime:F2}");
                 return (false, segmentTimes, segmentSpeeds);
             }
             
-            Debug.Log($"{(accelerate ? "加速" : "减速")}调整成功: 调整前到达时间={segmentTimes[segmentTimes.Count-1]:F2}, " +
-                    $"调整后到达时间={adjustedArrivalTime:F2}, 速度比例={speedRatio:F2}");
+            Debug.Log($"{(accelerate ? "Acceleration" : "Deceleration")} adjustment successful: prior arrival={segmentTimes[segmentTimes.Count-1]:F2}, " +
+                    $"adjusted arrival={adjustedArrivalTime:F2}, speed ratio={speedRatio:F2}");
             
-            // 调整成功
+            // Adjustment successful
             return (true, adjustedTimes, adjustedSpeeds);
         }
     }

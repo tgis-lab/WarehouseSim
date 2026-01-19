@@ -7,8 +7,8 @@ using NetTopologySuite.Geometries;
 namespace Map
 {
     /// <summary>
-    /// 动态占用层 - 管理多个CellSpace的时间占用情况，支持多楼层结构
-    /// 作为空间索引和时间索引的统一接口
+    /// Dynamic Occupancy Layer - Manages time-based occupancy for multiple CellSpaces with multi-floor support.
+    /// Serves as a unified interface for spatial and temporal indexing.
     /// </summary>
     public class DynamicOccupancyLayer
     {
@@ -20,7 +20,7 @@ namespace Map
         private bool enable3D;
 
         /// <summary>
-        /// 创建新的动态占用层
+        /// Creates a new dynamic occupancy layer
         /// </summary>
         public DynamicOccupancyLayer(IndoorSpace indoorSpace, float windowDuration, float initialTime, bool enable3D = false)
         {
@@ -29,28 +29,28 @@ namespace Map
             this.lastCleanupTime = initialTime;
             this.enable3D = enable3D;
             
-            // 初始化时间索引
+            // Initialize temporal index
             cellTimeIndices = new Dictionary<string, TemporalIndex>();
             
-            // 初始化空间索引
+            // Initialize spatial index
             spatialIndex = new SpatialIndex(enable3D);
             
-            // 如果提供了IndoorSpace，初始化索引
+            // If IndoorSpace is provided, initialize indices
             if (indoorSpace != null && indoorSpace.CellSpaces != null)
             {
                 foreach (var cellSpace in indoorSpace.CellSpaces)
                 {
-                    // 添加到时间索引
+                    // Add to temporal index
                     cellTimeIndices[cellSpace.Id] = new TemporalIndex();
                     
-                    // 添加到空间索引
+                    // Add to spatial index
                     spatialIndex.Insert(cellSpace);
                 }
             }
         }
         
         /// <summary>
-        /// 默认构造函数
+        /// Default constructor
         /// </summary>
         public DynamicOccupancyLayer()
         {
@@ -63,7 +63,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 设置是否启用3D多楼层模式
+        /// Sets whether to enable 3D multi-floor mode
         /// </summary>
         public void SetEnable3D(bool enable)
         {
@@ -75,7 +75,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 获取是否启用3D多楼层模式
+        /// Gets whether 3D multi-floor mode is enabled
         /// </summary>
         public bool IsEnable3D()
         {
@@ -83,7 +83,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 获取指定CellSpace的时间索引，如果不存在则创建
+        /// Gets the temporal index for the specified CellSpace, creating one if it doesn't exist
         /// </summary>
         private TemporalIndex GetCellTimeIndex(string cellId)
         {
@@ -100,11 +100,11 @@ namespace Map
         }
 
         /// <summary>
-        /// 清除指定机器人和计划的占用
+        /// Clears occupancies for the specified robot and plan
         /// </summary>
         public void ClearPlannedOccupancy(string robotId, string planId, float currentTime)
         {
-            // 只清除从当前时间开始的占用，保留已过去的历史记录
+            // Only clear occupancies from current time onwards, preserve past history
             foreach (var entry in cellTimeIndices)
             {
                 string cellId = entry.Key;
@@ -123,7 +123,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 清除指定时间窗口内的所有占用
+        /// Clears all occupancies within the specified time window
         /// </summary>
         public void ClearOccupancyInTimeWindow(float startTime, float endTime, string excludeRobotId = null)
         {
@@ -140,7 +140,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 检查指定的占用是否与同一CellSpace中已有的占用冲突
+        /// Checks if the specified occupancy conflicts with existing occupancies in the same CellSpace
         /// </summary>
         public List<TimeOccupancy> CheckCellConflict(
             string cellId, 
@@ -150,20 +150,20 @@ namespace Map
             bool isStartCell = false,
             bool isEndCell = false)
         {
-            // 获取时间索引
+            // Get temporal index
             var timeIndex = GetCellTimeIndex(cellId);
             if (timeIndex == null)
                 return new List<TimeOccupancy>();
             
-            // 查询时间段内的所有占用
+            // Query all occupancies within the time range
             var existingOccupancies = timeIndex.GetOccupancies(startTime, endTime);
             
-            // 过滤掉来自同一机器人的占用
+            // Filter out occupancies from the same robot
             return existingOccupancies.Where(o => o.Occupier.RobotId != robotId).ToList();
         }
 
         /// <summary>
-        /// 设置CellSpace的动态占用
+        /// Sets dynamic occupancy for a CellSpace
         /// </summary>
         public void SetDynamicOccupancy(
             string cellId, 
@@ -184,24 +184,24 @@ namespace Map
         }
 
         /// <summary>
-        /// 周期性清理旧数据
+        /// Periodically cleans up old data
         /// </summary>
         public void UpdateTime(float currentTime)
         {
-            if (currentTime - lastCleanupTime > 30f) // 每30秒清理一次
+            if (currentTime - lastCleanupTime > 30f) // Clean up every 30 seconds
             {
                 Cleanup(currentTime);
             }
         }
 
         /// <summary>
-        /// 清理旧数据
+        /// Cleans up old data
         /// </summary>
         private void Cleanup(float currentTime)
         {
             lastCleanupTime = currentTime;
             
-            // 清理CellSpace时间索引
+            // Clean up CellSpace temporal indices
             float cutoffTime = currentTime - windowDuration;
             foreach (var timeIndex in cellTimeIndices.Values)
             {
@@ -210,22 +210,22 @@ namespace Map
         }
 
         /// <summary>
-        /// 清除指定时间之前的过期占用
+        /// Clears expired occupancies before the specified time
         /// </summary>
         public void PruneExpiredOccupancies(float cutoffTime)
         {
-            // 清理CellSpace时间索引
+            // Clean up CellSpace temporal indices
             foreach (var timeIndex in cellTimeIndices.Values)
             {
                 timeIndex.RemoveIntervalsBefore(cutoffTime);
             }
             
-            // 更新最后清理时间
+            // Update last cleanup time
             lastCleanupTime = Time.time;
         }
 
         /// <summary>
-        /// 更新实时占用
+        /// Updates real-time occupancy
         /// </summary>
         public void UpdateRealTimeOccupancy(string cellId, string robotId, float currentTime)
         {
@@ -237,8 +237,8 @@ namespace Map
         }
 
         /// <summary>
-        /// 获取指定CellSpace在时间范围内的所有占用记录
-        /// 兼容性方法，与GetOccupancies功能相同
+        /// Gets all occupancy records for the specified CellSpace within the time range.
+        /// Compatibility method, same functionality as GetOccupancies.
         /// </summary>
         public List<TimeOccupancy> GetTimeOccupanciesForCellSpace(string cellId, float startTime, float endTime)
         {
@@ -246,7 +246,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 获取指定CellSpace在时间段内的所有占用记录
+        /// Gets all occupancy records for the specified CellSpace within the time range
         /// </summary>
         public List<TimeOccupancy> GetOccupancies(string cellId, float startTime, float endTime)
         {
@@ -258,7 +258,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 合并另一个占用层
+        /// Merges another occupancy layer
         /// </summary>
         public void MergeLayer(DynamicOccupancyLayer other, float startTime, float endTime)
         {
@@ -271,7 +271,7 @@ namespace Map
                 
                 foreach (var occupancy in otherOccupancies)
                 {
-                    // 添加到当前层，保留起点/终点信息
+                    // Add to current layer, preserving start/end cell info
                     var timeIndex = GetCellTimeIndex(cellId);
                     var newOccupancy = new TimeOccupancy(
                         occupancy.StartTime,
@@ -288,31 +288,31 @@ namespace Map
         #region Spatial Queries
         
         /// <summary>
-        /// 查询与ConnectionPoint路径相交的所有CellSpace
+        /// Queries all CellSpaces that intersect with the ConnectionPoint path
         /// </summary>
         public List<CellSpace> GetPathIntersectingCells(List<ConnectionPoint> connectionPointPath)
         {
             if (connectionPointPath == null || connectionPointPath.Count < 2)
                 return new List<CellSpace>();
                 
-            // 提取路径几何信息
+            // Extract path geometry information
             var pathInfo = ExtractPathGeometry(connectionPointPath);
             
-            // 使用SpatialIndex查询相交的CellSpace
+            // Use SpatialIndex to query intersecting CellSpaces
             if (enable3D && pathInfo.Floors.Count > 0)
             {
                 return spatialIndex.QueryPath(pathInfo.PathPoints, pathInfo.Floors.ToArray());
             }
             else
             {
-                // 降级为2D查询
+                // Fallback to 2D query
                 var path2D = pathInfo.PathPoints.Select(p => new Vector2(p.x, p.y)).ToList();
                 return spatialIndex.QueryPath(path2D);
             }
         }
         
         /// <summary>
-        /// 查询包含点的所有CellSpace
+        /// Queries all CellSpaces containing the specified point
         /// </summary>
         public List<CellSpace> GetPointContainingCells(Vector2 point)
         {
@@ -320,7 +320,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 查询包含3D点的所有CellSpace
+        /// Queries all CellSpaces containing the specified 3D point
         /// </summary>
         public List<CellSpace> GetPointContainingCells(Vector3 point, string floor = null)
         {
@@ -335,7 +335,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 查询与边界框相交的所有CellSpace
+        /// Queries all CellSpaces intersecting with the specified bounding box
         /// </summary>
         public List<CellSpace> GetIntersectingCells(Envelope envelope, params string[] floors)
         {
@@ -351,10 +351,10 @@ namespace Map
         
         #endregion
         
-        #region 路径处理方法
+        #region Path Processing Methods
         
         /// <summary>
-        /// 查询路径占用冲突
+        /// Queries path occupancy conflicts
         /// </summary>
         public Dictionary<string, List<TimeOccupancy>> QueryPathOccupancyConflicts(
             List<ConnectionPoint> connectionPointPath, 
@@ -372,13 +372,13 @@ namespace Map
             
             try
             {
-                // 计算路径经过的CellSpace及其时间窗口
+                // Calculate CellSpaces the path passes through and their time windows
                 var pathOccupancies = CalculatePathCellOccupancies(connectionPointPath, times);
                 
-                // 检查每个CellSpace的冲突
+                // Check conflicts for each CellSpace
                 foreach (var cellOccupancy in pathOccupancies)
                 {
-                    // 检查冲突
+                    // Check for conflicts
                     var cellConflicts = CheckCellConflict(
                         cellOccupancy.CellId, 
                         cellOccupancy.EntryTime, 
@@ -387,7 +387,7 @@ namespace Map
                         cellOccupancy.IsStartCell,
                         cellOccupancy.IsEndCell);
                     
-                    // 如果有冲突，按机器人ID合并并保存
+                    // If there are conflicts, merge by robot ID and save
                     if (cellConflicts.Count > 0)
                     {
                         var mergedConflicts = MergeConflictsByRobot(cellConflicts);
@@ -404,7 +404,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 记录路径占用
+        /// Records path occupancy
         /// </summary>
         public void RecordPathOccupancy(
             List<ConnectionPoint> connectionPointPath, 
@@ -421,10 +421,10 @@ namespace Map
             
             try
             {
-                // 计算路径经过的CellSpace及其时间窗口
+                // Calculate CellSpaces the path passes through and their time windows
                 var pathOccupancies = CalculatePathCellOccupancies(connectionPointPath, times);
                 
-                // 记录每个CellSpace的占用
+                // Record occupancy for each CellSpace
                 foreach (var cellOccupancy in pathOccupancies)
                 {
                     SetDynamicOccupancy(
@@ -446,7 +446,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 计算路径经过的CellSpace及其时间窗口
+        /// Calculates the CellSpaces the path passes through and their time windows
         /// </summary>
         private List<CellOccupancy> CalculatePathCellOccupancies(
             List<ConnectionPoint> connectionPointPath, 
@@ -456,7 +456,7 @@ namespace Map
             
             try
             {
-                // 获取路径经过的所有CellSpace
+                // Get all CellSpaces the path passes through
                 var pathCells = GetPathIntersectingCells(connectionPointPath);
                 
                 if (pathCells.Count == 0)
@@ -465,12 +465,12 @@ namespace Map
                     return result;
                 }
                 
-                // 存储每个CellSpace的入口和出口时间
+                // Store entry and exit times for each CellSpace
                 Dictionary<string, float> entryTimes = new Dictionary<string, float>();
                 Dictionary<string, float> exitTimes = new Dictionary<string, float>();
                 HashSet<string> processedCellIds = new HashSet<string>();
                 
-                // 处理路径点
+                // Process path points
                 for (int i = 0; i < connectionPointPath.Count; i++)
                 {
                     ConnectionPoint cp = connectionPointPath[i];
@@ -478,17 +478,17 @@ namespace Map
                     
                     if (cp?.Point is Point point)
                     {
-                        // 获取点的坐标
+                        // Get point coordinates
                         Vector3 position = new Vector3((float)point.X, (float)point.Y, 0);
                         
-                        // 如果启用了3D，获取点的楼层
+                        // If 3D is enabled, get point floor
                         string floor = null;
                         if (enable3D)
                         {
                             floor = GetConnectionPointFloor(cp);
                         }
                         
-                        // 查询包含此点的CellSpace
+                        // Query CellSpace containing this point
                         List<CellSpace> containingCells;
                         if (enable3D && !string.IsNullOrEmpty(floor))
                         {
@@ -499,13 +499,13 @@ namespace Map
                             containingCells = GetPointContainingCells(new Vector2(position.x, position.y));
                         }
                         
-                        // 如果没有直接包含点的CellSpace，使用路径相交的CellSpace
+                        // If no direct containing CellSpace, use path intersecting CellSpaces
                         if (containingCells.Count == 0)
                         {
                             containingCells = pathCells;
                         }
                         
-                        // 更新每个CellSpace的时间
+                        // Update times for each CellSpace
                         foreach (var cell in containingCells)
                         {
                             if (!entryTimes.ContainsKey(cell.Id) || pointTime < entryTimes[cell.Id])
@@ -523,7 +523,7 @@ namespace Map
                     }
                 }
                 
-                // 处理路径线段
+                // Process path segments
                 for (int i = 0; i < connectionPointPath.Count - 1; i++)
                 {
                     ConnectionPoint cp1 = connectionPointPath[i];
@@ -531,13 +531,13 @@ namespace Map
                     
                     if (cp1?.Point is Point point1 && cp2?.Point is Point point2)
                     {
-                        // 获取线段端点和时间
+                        // Get segment endpoints and times
                         Vector3 p1 = new Vector3((float)point1.X, (float)point1.Y, 0);
                         Vector3 p2 = new Vector3((float)point2.X, (float)point2.Y, 0);
                         float t1 = times[i];
                         float t2 = times[i + 1];
                         
-                        // 获取线段的楼层信息
+                        // Get segment floor info
                         List<string> segmentFloors = new List<string>();
                         if (enable3D)
                         {
@@ -551,7 +551,7 @@ namespace Map
                                 segmentFloors.Add(floor2);
                         }
                         
-                        // 查询与线段相交的CellSpace
+                        // Query CellSpaces intersecting the segment
                         List<CellSpace> intersectingCells;
                         if (enable3D && segmentFloors.Count > 0)
                         {
@@ -565,7 +565,7 @@ namespace Map
                                 new List<Vector2> { new Vector2(p1.x, p1.y), new Vector2(p2.x, p2.y) });
                         }
                         
-                        // 更新每个相交CellSpace的时间
+                        // Update times for each intersecting CellSpace
                         foreach (var cell in intersectingCells)
                         {
                             if (!entryTimes.ContainsKey(cell.Id) || t1 < entryTimes[cell.Id])
@@ -583,13 +583,13 @@ namespace Map
                     }
                 }
                 
-                // 确定起点和终点CellSpace
+                // Determine start and end CellSpace
                 string startCellId = null;
                 string endCellId = null;
                 
                 if (connectionPointPath.Count > 0)
                 {
-                    // 起点
+                    // Start point
                     ConnectionPoint startCP = connectionPointPath[0];
                     if (startCP?.Point is Point startPoint)
                     {
@@ -606,7 +606,7 @@ namespace Map
                         }
                     }
                     
-                    // 终点
+                    // End point
                     ConnectionPoint endCP = connectionPointPath[connectionPointPath.Count - 1];
                     if (endCP?.Point is Point endPoint)
                     {
@@ -624,16 +624,16 @@ namespace Map
                     }
                 }
                 
-                // 创建CellOccupancy对象
+                // Create CellOccupancy objects
                 foreach (string cellId in processedCellIds)
                 {
                     if (entryTimes.TryGetValue(cellId, out float entryTime) && 
                         exitTimes.TryGetValue(cellId, out float exitTime))
                     {
-                        // 确保出口时间大于入口时间
+                        // Ensure exit time is greater than entry time
                         if (exitTime <= entryTime)
                         {
-                            exitTime = entryTime + 0.001f; // 增加一个微小差值
+                            exitTime = entryTime + 0.001f; // Add a tiny epsilon
                         }
                         
                         var cellOccupancy = new CellOccupancy
@@ -658,36 +658,36 @@ namespace Map
         }
         
         /// <summary>
-        /// 从ConnectionPoint提取路径的几何信息
+        /// Extracts geometric information from a ConnectionPoint path
         /// </summary>
         private (List<Vector3> PathPoints, HashSet<string> Floors) ExtractPathGeometry(List<ConnectionPoint> connectionPointPath)
         {
             List<Vector3> pathPoints = new List<Vector3>();
             HashSet<string> floors = new HashSet<string>();
             
-            // 跟踪当前ConnectionPoint所在楼层
+            // Track the floor of the current ConnectionPoint
             string currentFloor = null;
             
             foreach (var cp in connectionPointPath)
             {
                 if (cp?.Point is Point point)
                 {
-                    // 确定当前ConnectionPoint的楼层
+                    // Determine floor of current ConnectionPoint
                     if (enable3D)
                     {
                         string pointFloor = GetConnectionPointFloor(cp);
                         
-                        // 如果找到了有效的楼层
+                        // If valid floor found
                         if (!string.IsNullOrEmpty(pointFloor))
                         {
                             currentFloor = pointFloor;
                             floors.Add(currentFloor);
                         }
                         
-                        // 如果是垂直ConnectionPoint (连接不同楼层)
+                        // If vertical ConnectionPoint (connects different floors)
                         if (IsVerticalConnectionPoint(cp))
                         {
-                            // 获取连接的两个楼层
+                            // Get connected floors
                             var connectedFloors = GetConnectedFloors(cp);
                             foreach (var floor in connectedFloors)
                             {
@@ -696,7 +696,7 @@ namespace Map
                         }
                     }
                     
-                    // 添加路径点
+                    // Add path point
                     pathPoints.Add(new Vector3((float)point.X, (float)point.Y, 0));
                 }
             }
@@ -705,17 +705,17 @@ namespace Map
         }
         
         /// <summary>
-        /// 按机器人ID合并冲突
+        /// Merges conflicts by robot ID
         /// </summary>
         private List<TimeOccupancy> MergeConflictsByRobot(List<TimeOccupancy> conflicts)
         {
             if (conflicts == null || conflicts.Count == 0)
                 return new List<TimeOccupancy>();
                 
-            // 按机器人ID分组
+            // Group by robot ID
             var groupedConflicts = conflicts.GroupBy(c => c.Occupier.RobotId);
             
-            // 合并同一机器人的多个冲突
+            // Merge multiple conflicts for same robot
             List<TimeOccupancy> result = new List<TimeOccupancy>();
             
             foreach (var group in groupedConflicts)
@@ -725,12 +725,12 @@ namespace Map
                 
                 if (robotConflicts.Count == 1)
                 {
-                    // 只有一个冲突，直接添加
+                    // Single conflict, add directly
                     result.Add(robotConflicts[0]);
                 }
                 else
                 {
-                    // 合并多个冲突
+                    // Merge multiple conflicts
                     float minStartTime = robotConflicts.Min(c => c.StartTime);
                     float maxEndTime = robotConflicts.Max(c => c.EndTime);
                     
@@ -739,7 +739,7 @@ namespace Map
                         minStartTime,
                         maxEndTime,
                         firstConflict.Occupier,
-                        false,  // 合并后不再标记为起点/终点
+                        false,  // No longer start/end cell after merge
                         false);
                         
                     result.Add(mergedOccupancy);
@@ -754,23 +754,23 @@ namespace Map
         #region Floor Handling
         
         /// <summary>
-        /// 获取ConnectionPoint所在的楼层
+        /// Gets the floor where the ConnectionPoint is located
         /// </summary>
         private string GetConnectionPointFloor(ConnectionPoint cp)
         {
-            // 添加空检查
+            // Add null check
             if (cp == null)
             {
                 Debug.LogWarning("GetConnectionPointFloor: ConnectionPoint is null");
-                return "1F"; // 返回默认楼层
+                return "1F"; // Return default floor
             }
 
-            // 获取ConnectionPoint关联的CellBoundary
+            // Get CellBoundary associated with ConnectionPoint
             CellBoundary cellBoundary = cp.CellBoundary;
             if (cellBoundary == null)
             {
                 Debug.LogWarning($"GetConnectionPointFloor: CellBoundary is null for ConnectionPoint {cp.Id}");
-                return "1F"; // 返回默认楼层
+                return "1F"; // Return default floor
             }
 
             string sourceFloor = "1F";
@@ -778,7 +778,7 @@ namespace Map
             bool sourceFound = false;
             bool targetFound = false;
 
-            // 安全地获取Source和Target CellSpace的楼层
+            // Safely get floor of Source and Target CellSpace
             try
             {
                 if (cellBoundary.Source != null)
@@ -804,22 +804,22 @@ namespace Map
             catch (Exception ex)
             {
                 Debug.LogError($"Error getting floor for ConnectionPoint {cp.Id}: {ex.Message}");
-                return "1F"; // 出错时返回默认楼层
+                return "1F"; // Return default floor on error
             }
 
-            // 如果找到了源和目标，检查是否是垂直连接
+            // If both source and target found, check if it's a vertical connection
             if (sourceFound && targetFound && sourceFloor != targetFloor)
             {
-                // 是垂直连接，返回源楼层（调用者需要处理垂直连接的特殊情况）
+                // It's a vertical connection, return source floor (caller needs to handle special case for vertical connections)
                 return sourceFloor;
             }
             
-            // 返回找到的楼层，优先返回源楼层
+            // Return found floor, prioritize source floor
             return sourceFound ? sourceFloor : (targetFound ? targetFloor : "1F");
         }
         
         /// <summary>
-        /// 获取CellSpace所在的楼层
+        /// Gets the floor where the CellSpace is located
         /// </summary>
         private string GetCellSpaceFloor(CellSpace cellSpace)
         {
@@ -834,14 +834,14 @@ namespace Map
         }
         
         /// <summary>
-        /// 判断是否为垂直连接点(连接不同楼层的ConnectionPoint)
+        /// Checks if it is a vertical connection point (ConnectionPoint connecting different floors)
         /// </summary>
         private bool IsVerticalConnectionPoint(ConnectionPoint cp)
         {
             if (cp?.CellBoundary == null)
                 return false;
                 
-            // 检查CellBoundary是否连接两个不同楼层的CellSpace
+            // Check if CellBoundary connects two CellSpaces on different floors
             string sourceFloor = null;
             string targetFloor = null;
             
@@ -857,14 +857,14 @@ namespace Map
                 targetFloor = GetCellSpaceFloor(targetCellSpace);
             }
                 
-            // 如果源和目标都有楼层且不同，则为垂直连接
+            // If both source and target have floors and they are different, it is a vertical connection
             if (!string.IsNullOrEmpty(sourceFloor) && !string.IsNullOrEmpty(targetFloor) && 
                 sourceFloor != targetFloor)
             {
                 return true;
             }
             
-            // 检查CellBoundary的transitionType是否为"Vertical"
+            // Check if transitionType property of CellBoundary is "Vertical"
             if (cp.CellBoundary.Properties != null && 
                 cp.CellBoundary.Properties.TryGetValue("transitionType", out var transitionType) && 
                 transitionType != null && 
@@ -877,7 +877,7 @@ namespace Map
         }
         
         /// <summary>
-        /// 获取ConnectionPoint连接的楼层列表
+        /// Gets the list of floors connected by the ConnectionPoint
         /// </summary>
         private List<string> GetConnectedFloors(ConnectionPoint cp)
         {
@@ -886,7 +886,7 @@ namespace Map
             if (cp?.CellBoundary == null)
                 return floors;
                 
-            // 添加源CellSpace的楼层
+            // Add floor of source CellSpace
             if (cp.CellBoundary.Source != null)
             {
                 var sourceCellSpace = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Source);
@@ -895,7 +895,7 @@ namespace Map
                     floors.Add(sourceFloor);
             }
             
-            // 添加目标CellSpace的楼层
+            // Add floor of target CellSpace
             if (cp.CellBoundary.Target != null)
             {
                 var targetCellSpace = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Target);
@@ -904,7 +904,7 @@ namespace Map
                     floors.Add(targetFloor);
             }
             
-            // 如果是垂直连接，可能涉及更多楼层
+            // If it's a vertical connection, it might involve more floors
             if (floors.Count > 1)
             {
                 var sourceCellSpace = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Source);
@@ -912,7 +912,7 @@ namespace Map
 
                 if (sourceCellSpace?.IsVerticalConnection() == true || targetCellSpace?.IsVerticalConnection() == true)
                 {
-                    // 如果是电梯或楼梯，获取所有连接的楼层
+                    // If it's an elevator or staircase, get all connected floors
                     if (sourceCellSpace?.IsVerticalConnection() == true)
                     {
                         var connected = sourceCellSpace.GetConnectedFloors();
@@ -939,21 +939,21 @@ namespace Map
         }
         
         /// <summary>
-        /// 检查字符串是否为有效的楼层ID
+        /// Checks if a string is a valid floor ID
         /// </summary>
         private bool IsValidFloorId(string id)
         {
             if (string.IsNullOrEmpty(id))
                 return false;
                 
-            // 地下楼层格式 (B1, B1F 等)
+            // Basement floor format (B1, B1F etc.)
             if (id.StartsWith("B") && id.Length > 1)
             {
                 string numPart = id.Substring(1).Replace("F", "").Replace("f", "");
                 return int.TryParse(numPart, out _);
             }
             
-            // 地上楼层格式 (1F, 1 等)
+            // Above ground floor format (1F, 1 etc.)
             string levelPart = id.Replace("F", "").Replace("f", "");
             return int.TryParse(levelPart, out _);
         }
@@ -963,7 +963,7 @@ namespace Map
         #region CellOccupancy
         
         /// <summary>
-        /// CellSpace占用信息类
+        /// CellSpace occupancy information class
         /// </summary>
         private class CellOccupancy
         {

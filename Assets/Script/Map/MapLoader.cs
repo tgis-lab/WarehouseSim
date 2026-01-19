@@ -41,17 +41,17 @@ namespace Map {
 
         private async void Start()
         {
-            Debug.Log("开始加载地图...");
+            Debug.Log("Starting map load...");
             indoorSpace = await LoadJsonAsync();
 
             if (indoorSpace == null)
             {
-                throw new ArgumentNullException(nameof(indoorSpace), "IndoorSpace不能为null.");
+                throw new ArgumentNullException(nameof(indoorSpace), "IndoorSpace cannot be null.");
             }
             
             if (indoorSpace.CellSpaces == null)
             {
-                throw new ArgumentNullException(nameof(indoorSpace.CellSpaces), "CellSpaces不能为null.");
+                throw new ArgumentNullException(nameof(indoorSpace.CellSpaces), "CellSpaces cannot be null.");
             }
             
             if (mapVisualizer != null)
@@ -63,7 +63,7 @@ namespace Map {
             }
             else
             {
-                Debug.LogError("MapVisualizer未分配!");
+                Debug.LogError("MapVisualizer not assigned!");
             }
             
             this.graph = GenerateRouteGraph(indoorSpace);
@@ -72,22 +72,22 @@ namespace Map {
 
             CreateMapBoundary();
 
-            // 设置并构建NavMesh
+            // Setup and build NavMesh
             SetupNavMesh();
             
-            // 现在NavMesh已构建完成，添加垂直连接
+            // NavMesh build complete, adding vertical links
             if (IsNavMeshReady)
             {
                 CreateVerticalNavMeshLinks();
             }
             else
             {
-                Debug.LogError("NavMesh未准备好，无法创建垂直连接");
+                Debug.LogError("NavMesh not ready, cannot create vertical links");
             }
 
-            // 检查NavMesh可用性
+            // Check NavMesh availability
             CheckNavMeshAvailability();
-            Debug.Log("NavMesh可用性检查完成");
+            Debug.Log("NavMesh availability check complete");
 
             IsMapLoaded = true;
             
@@ -95,7 +95,7 @@ namespace Map {
             {
                 EventManager.Instance.TriggerMapLoaded();
             }
-            Debug.Log("地图加载完成");
+            Debug.Log("Map load complete");
         }
 
         # region JSON Loading
@@ -163,7 +163,7 @@ namespace Map {
                 throw new InvalidOperationException("Hypergraph or its components must not be null.");
             }
             
-            // 为所有连接点创建RoutePoint
+            // Create RoutePoint for all connection points
             Debug.Log($"Creating RoutePoints for {hypergraph.HyperNodes.Count} connection points");
             foreach(var cpNode in hypergraph.HyperNodes)
             {
@@ -171,7 +171,7 @@ namespace Map {
                 graph.AddNode(rpNode);
             }
             
-            // 为所有RLineGroup创建边
+            // Create edges for all RLineGroups
             int edgeCount = 0;
             Debug.Log($"Processing {hypergraph.HyperEdges.Count} RLineGroups");
             foreach(var rlineGroup in hypergraph.HyperEdges)
@@ -190,7 +190,7 @@ namespace Map {
                     ConnectionPoint sourceCP = null;
                     ConnectionPoint targetCP = null;
                     
-                    // 查找ConnectionPoint
+                    // Find ConnectionPoint
                     foreach (var cp in hypergraph.HyperNodes)
                     {
                         if (cp.Id == sourceId)
@@ -295,7 +295,7 @@ namespace Map {
             {
                 if (separateNavMeshPerFloor)
                 {
-                    // 重建各楼层的NavMesh
+                    // Rebuild NavMesh for each floor
                     foreach (var kvp in navMeshSurfaces)
                     {
                         string floorLevel = kvp.Key;
@@ -310,7 +310,7 @@ namespace Map {
                 }
                 else
                 {
-                    // 重建统一的NavMesh
+                    // Rebuild unified NavMesh
                     if (navMeshSurfaces.Count > 0)
                     {
                         navMeshSurfaces.First().Value.BuildNavMesh();
@@ -330,15 +330,15 @@ namespace Map {
         {
             try
             {
-                Debug.Log("开始设置NavMesh...");
+                Debug.Log("Starting NavMesh setup...");
                 
-                // 获取所有楼层
+                // Get all floor levels
                 List<string> floorLevels = indoorSpace.GetAllFloorLevels();
-                Debug.Log($"为 {floorLevels.Count} 个楼层设置NavMesh: {string.Join(", ", floorLevels)}");
+                Debug.Log($"Setting up NavMesh for {floorLevels.Count} floors: {string.Join(", ", floorLevels)}");
                 
                 if (separateNavMeshPerFloor)
                 {
-                    // 清除现有的NavMeshSurfaces（如果有）
+                    // Clear existing NavMeshSurfaces if any
                     foreach (var surface in navMeshSurfaces.Values)
                     {
                         if (surface != null)
@@ -348,38 +348,38 @@ namespace Map {
                     }
                     navMeshSurfaces.Clear();
                     
-                    // 为每个楼层创建单独的NavMeshSurface
+                    // Create separate NavMeshSurface for each floor
                     foreach (var floorLevel in floorLevels)
                     {
-                        // 创建楼层导航网格对象（不依赖于Floor_X容器）
+                        // Create floor navigation mesh object (independent of Floor_X container)
                         GameObject navMeshObj = new GameObject($"NavMesh_{floorLevel}");
                         navMeshObj.transform.SetParent(transform);
                         
-                        // 获取该楼层的高度
+                        // Get floor height
                         int floorIndex = ParseFloorLevel(floorLevel);
                         float floorY = floorIndex * floorSeparation;
                         navMeshObj.transform.position = new Vector3(0, floorY, 0);
                         
-                        // 添加NavMeshSurface组件
+                        // Add NavMeshSurface component
                         NavMeshSurface navMeshSurface = navMeshObj.AddComponent<NavMeshSurface>();
                         
-                        // 配置NavMeshSurface，使用ALL以确保捕获更多对象
+                        // Configure NavMeshSurface, use ALL to ensure more objects are captured
                         navMeshSurface.collectObjects = CollectObjects.All;
                         navMeshSurface.layerMask = LayerMask.GetMask("Default", "GroundLayer");
                         navMeshSurface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
                         navMeshSurface.defaultArea = 0; // Walkable
                         
-                        // 存储引用
+                        // Store reference
                         navMeshSurfaces[floorLevel] = navMeshSurface;
                         
-                        // 烘焙NavMesh
+                        // Bake NavMesh
                         navMeshSurface.BuildNavMesh();
-                        Debug.Log($"已为楼层 {floorLevel} 构建NavMesh");
+                        Debug.Log($"NavMesh built for floor {floorLevel}");
                     }
                 }
                 else
                 {
-                    // 使用单一NavMeshSurface
+                    // Use single NavMeshSurface
                     GameObject navMeshObj = new GameObject("NavMesh");
                     navMeshObj.transform.SetParent(transform);
                     
@@ -388,40 +388,40 @@ namespace Map {
                     navMeshSurface.layerMask = LayerMask.GetMask("Default", "GroundLayer");
                     navMeshSurface.useGeometry = NavMeshCollectGeometry.PhysicsColliders;
                     
-                    // 存储引用
+                    // Store reference
                     navMeshSurfaces["unified"] = navMeshSurface;
                     
                     navMeshSurface.BuildNavMesh();
-                    Debug.Log("已为所有楼层构建统一的NavMesh");
+                    Debug.Log("Unified NavMesh built for all floors");
                 }
                 
-                // 设置标志表明NavMesh已准备好
+                // Set flag indicating NavMesh is ready
                 IsNavMeshReady = true;
                 
-                Debug.Log("NavMesh设置完成");
+                Debug.Log("NavMesh setup complete");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"设置NavMesh时出错: {ex.Message}\n{ex.StackTrace}");
+                Debug.LogError($"Error setting up NavMesh: {ex.Message}\n{ex.StackTrace}");
                 IsNavMeshReady = false;
             }
         }
 
         private void CreateVerticalNavMeshLinks()
         {
-            Debug.Log("创建垂直NavMesh链接...");
+            Debug.Log("Creating vertical NavMesh links...");
             
             if (indoorSpace == null || !IsNavMeshReady) 
             {
-                Debug.LogWarning("无法创建垂直连接：IndoorSpace为空或NavMesh未准备好");
+                Debug.LogWarning("Cannot create vertical connections: IndoorSpace is null or NavMesh is not ready");
                 return;
             }
             
-            // 获取所有垂直连接
+            // Get all vertical connections
             var elevators = indoorSpace.CellSpaces.Where(cs => cs.IsElevator()).ToList();
             var verticalBoundaries = indoorSpace.CellBoundaries.Where(cb => cb.IsVertical()).ToList();
             
-            // 创建电梯的NavMesh链接
+            // Create NavMesh links for elevators
             foreach (var elevator in elevators)
             {
                 var connectedFloors = elevator.GetConnectedFloors();
@@ -431,7 +431,7 @@ namespace Map {
                 }
             }
             
-            // 创建楼梯的NavMesh链接
+            // Create NavMesh links for stairs
             var stairLayers = indoorSpace.GetStairLayers();
             int stairCount = 0;
             
@@ -459,13 +459,13 @@ namespace Map {
                             CreateNavMeshLinksForVerticalSpace(referenceStair, floors, "stair");
                             stairCount++;
                             
-                            Debug.Log($"为楼梯层 {stairLayer.Id} 创建了连接楼层的NavMesh链接: {string.Join(", ", floors)}");
+                            Debug.Log($"Created NavMesh links for stair layer {stairLayer.Id} connecting floors: {string.Join(", ", floors)}");
                         }
                     }
                 }
             }
             
-            // 创建垂直边界（自动扶梯等）的NavMesh链接
+            // Create NavMesh links for vertical boundaries (escalators, etc.)
             foreach (var boundary in verticalBoundaries)
             {
                 CellSpace sourceCell = indoorSpace.GetCellSpaceFromId(boundary.Source);
@@ -478,7 +478,7 @@ namespace Map {
                     
                     if (sourceFloor != targetFloor)
                     {
-                        // 从边界创建连接点
+                        // Create connection points from boundary
                         ConnectionPoint connectionPoint = indoorSpace.GetConnectionPointFromCellBoundary(boundary.Id);
                         
                         if (connectionPoint != null && connectionPoint.Point != null)
@@ -494,7 +494,7 @@ namespace Map {
                             sourcePos.y = sourceY;
                             targetPos.y = targetY;
                             
-                            // 创建楼层间的NavMesh链接
+                            // Create NavMesh links between floors
                             CreateNavMeshLink(
                                 sourcePos,
                                 targetPos,
@@ -506,18 +506,18 @@ namespace Map {
                 }
             }
             
-            Debug.Log($"已为 {elevators.Count} 个电梯, {stairCount} 个楼梯, 和 {verticalBoundaries.Count} 个垂直边界创建NavMesh链接");
+            Debug.Log($"Created NavMesh links for {elevators.Count} elevators, {stairCount} stairs, and {verticalBoundaries.Count} vertical boundaries");
         }
 
         private void CreateNavMeshLinksForVerticalSpace(CellSpace space, List<string> connectedFloors, string linkType)
         {
             if (connectedFloors.Count < 2) return;
             
-            // 获取中心位置
+            // Get center position
             Point centerPos = (Point)space.Node;
             Vector3 position = new Vector3((float)centerPos.X, 0, (float)centerPos.Y);
             
-            // 在所有连接的楼层之间创建链接
+            // Create links between all connected floors
             for (int i = 0; i < connectedFloors.Count; i++)
             {
                 for (int j = i + 1; j < connectedFloors.Count; j++)
@@ -525,15 +525,15 @@ namespace Map {
                     string floor1 = connectedFloors[i];
                     string floor2 = connectedFloors[j];
                     
-                    // 计算楼层高度
+                    // Calculate floor heights
                     float height1 = ParseFloorLevel(floor1) * floorHeight + 0.05f;
                     float height2 = ParseFloorLevel(floor2) * floorHeight + 0.05f;
                     
-                    // 创建具有适当Y坐标的位置
+                    // Create positions with appropriate Y coordinates
                     Vector3 pos1 = new Vector3(position.x, height1, position.z);
                     Vector3 pos2 = new Vector3(position.x, height2, position.z);
                     
-                    // 创建双向链接
+                    // Create bidirectional links
                     CreateNavMeshLink(pos1, pos2, floor1, floor2, linkType);
                     CreateNavMeshLink(pos2, pos1, floor2, floor1, linkType);
                 }
@@ -542,36 +542,36 @@ namespace Map {
 
         private void CreateNavMeshLink(Vector3 start, Vector3 end, string startFloor, string endFloor, string linkType)
         {
-            // 为链接创建新的GameObject
+            // Create new GameObject for link
             GameObject linkObject = new GameObject($"NavMeshLink_{linkType}_{startFloor}_to_{endFloor}");
             linkObject.transform.SetParent(transform);
             
-            // 添加NavMeshLink组件
+            // Add NavMeshLink component
             NavMeshLink link = linkObject.AddComponent<NavMeshLink>();
             link.startPoint = start;
             link.endPoint = end;
             link.width = 1.0f;
-            link.bidirectional = false; // 我们为每个方向创建单独的链接
-            link.costModifier = linkType == "elevator" ? 1 : 2; // 电梯比楼梯/自动扶梯便宜
+            link.bidirectional = false; // We create separate links for each direction
+            link.costModifier = linkType == "elevator" ? 1 : 2; // Elevators are cheaper than stairs/escalators
             link.agentTypeID = NavMesh.GetSettingsByIndex(0).agentTypeID;
         }
 
         public void CheckNavMeshAvailability()
         {
-            Debug.Log("检查NavMesh可用性...");
+            Debug.Log("Checking NavMesh availability...");
             
             if (indoorSpace == null)
             {
-                Debug.LogError("IndoorSpace为空，无法检查NavMesh");
+                Debug.LogError("IndoorSpace is null, cannot check NavMesh");
                 return;
             }
             
             List<string> floorLevels = indoorSpace.GetAllFloorLevels();
-            Debug.Log($"找到 {floorLevels.Count} 个楼层: {string.Join(", ", floorLevels)}");
+            Debug.Log($"Found {floorLevels.Count} floor levels: {string.Join(", ", floorLevels)}");
             
             foreach (string floor in floorLevels)
             {
-                // 获取该楼层上的一个CellSpace
+                // Get a CellSpace on this floor
                 var cellSpacesOnFloor = indoorSpace.CellSpaces
                     .Where(cs => cs.GetLocatedFloor() == floor && !cs.IsVerticalConnection())
                     .ToList();
@@ -581,25 +581,25 @@ namespace Map {
                     var testCell = cellSpacesOnFloor[0];
                     Point center = (Point)testCell.Node;
                     
-                    // 计算楼层高度
+                    // Calculate floor height
                     float floorY = ParseFloorLevel(floor) * floorHeight + 0.05f;
                     Vector3 testPos = new Vector3((float)center.X, floorY, (float)center.Y);
                     
-                    // 测试NavMesh可用性
+                    // Test NavMesh availability
                     NavMeshHit hit;
                     bool hasNavMesh = NavMesh.SamplePosition(testPos, out hit, 5.0f, NavMesh.AllAreas);
                     
-                    string status = hasNavMesh ? "有效" : "无效";
-                    Debug.Log($"楼层 {floor} 上的NavMesh状态: {status}");
+                    string status = hasNavMesh ? "Valid" : "Invalid";
+                    Debug.Log($"NavMesh status on floor {floor}: {status}");
                     
                     if (hasNavMesh)
                     {
-                        Debug.Log($"   最近的点: {hit.position}, 距离: {hit.distance}");
+                        Debug.Log($"   Closest point: {hit.position}, distance: {hit.distance}");
                     }
                 }
                 else
                 {
-                    Debug.LogWarning($"楼层 {floor} 上没有找到可导航的CellSpace");
+                    Debug.LogWarning($"No navigable CellSpace found on floor {floor}");
                 }
             }
         }

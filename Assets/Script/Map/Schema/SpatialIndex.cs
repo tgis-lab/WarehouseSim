@@ -8,7 +8,7 @@ using NetTopologySuite.Index.Strtree;
 namespace Map
 {
     /// <summary>
-    /// SpatialIndex - 纯粹的空间索引数据结构，支持2D和3D(多楼层)查询
+    /// SpatialIndex - Pure spatial index data structure, supports 2D and 3D (multi-floor) queries
     /// </summary>
     public class SpatialIndex
     {
@@ -18,7 +18,7 @@ namespace Map
         private bool enable3D;
 
         /// <summary>
-        /// 创建空间索引
+        /// Create spatial index
         /// </summary>
         public SpatialIndex(bool enable3D = false)
         {
@@ -29,7 +29,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 启用或禁用3D模式
+        /// Enable or disable 3D mode
         /// </summary>
         public void SetEnable3D(bool enable)
         {
@@ -37,7 +37,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 将CellSpace添加到空间索引
+        /// Add CellSpace to spatial index
         /// </summary>
         public void Insert(CellSpace cellSpace)
         {
@@ -50,17 +50,17 @@ namespace Map
                 return;
             }
 
-            // 获取CellSpace的边界框
+            // Get bounding box of CellSpace
             var envelope = cellSpace.Space.EnvelopeInternal;
             cellSpaceEnvelopes[cellSpace.Id] = envelope;
             
-            // 添加到STRtree
+            // Add to STRtree
             tree.Insert(envelope, cellSpace);
             
-            // 如果启用3D，存储楼层信息
+            // If 3D enabled, store floor information
             if (enable3D)
             {
-                // 存储楼层信息（仅提取不处理）
+                // Store floor information (extract only, no processing)
                 var floors = new HashSet<string>();
                 string locatedFloor = cellSpace.GetLocatedFloor();
                 
@@ -69,7 +69,7 @@ namespace Map
                     floors.Add(locatedFloor);
                 }
                 
-                // 对于垂直连接元素，可能关联多个楼层
+                // For vertical connection elements, multiple floors may be associated
                 if (cellSpace.IsVerticalConnection())
                 {
                     var verticalFeatures = cellSpace.GetVerticalFeatures();
@@ -85,13 +85,13 @@ namespace Map
                     }
                 }
                 
-                // 保存楼层信息
+                // Save floor information
                 cellSpaceFloors[cellSpace.Id] = floors;
             }
         }
 
         /// <summary>
-        /// 从索引中移除CellSpace
+        /// Remove CellSpace from index
         /// </summary>
         public void Remove(string cellSpaceId)
         {
@@ -100,11 +100,11 @@ namespace Map
                 
             cellSpaceEnvelopes.Remove(cellSpaceId);
             cellSpaceFloors.Remove(cellSpaceId);
-            // STRtree不支持直接删除
+            // STRtree does not support direct deletion
         }
 
         /// <summary>
-        /// 清空索引
+        /// Clear index
         /// </summary>
         public void Clear()
         {
@@ -114,7 +114,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 重建索引
+        /// Rebuild index
         /// </summary>
         public void RebuildIndex(List<CellSpace> allCellSpaces)
         {
@@ -130,24 +130,24 @@ namespace Map
         }
 
         /// <summary>
-        /// 查找包含指定点的所有CellSpace
+        /// Find all CellSpaces containing specified point
         /// </summary>
         public List<CellSpace> QueryPoint(Vector2 point)
         {
-            // 创建点查询的包围盒
+            // Create bounding box for point query
             var queryEnvelope = new Envelope(point.x, point.x, point.y, point.y);
             
-            // 获取潜在的包含此点的CellSpace
+            // Get potential CellSpaces containing this point
             var candidates = tree.Query(queryEnvelope);
             
-            // 过滤掉已从索引中删除的项
+            // Filter out items removed from index
             var validCandidates = candidates.Where(cell => 
                 cellSpaceEnvelopes.ContainsKey(cell.Id)).ToList();
             
-            // 创建点几何对象
+            // Create point geometry object
             var searchPoint = new Point(point.x, point.y);
             
-            // 精确测试（点在多边形内）
+            // Exact test (point inside polygon)
             var result = new List<CellSpace>();
             
             foreach (var cell in validCandidates)
@@ -162,7 +162,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 查找包含指定3D点的所有CellSpace
+        /// Find all CellSpaces containing specified 3D point
         /// </summary>
         public List<CellSpace> QueryPoint(Vector3 point, string floor)
         {
@@ -171,21 +171,21 @@ namespace Map
                 return QueryPoint(new Vector2(point.x, point.y));
             }
             
-            // 创建点查询的包围盒
+            // Create bounding box for point query
             var queryEnvelope = new Envelope(point.x, point.x, point.y, point.y);
             
-            // 获取潜在的包含此点的CellSpace
+            // Get potential CellSpaces containing this point
             var candidates = tree.Query(queryEnvelope);
             
-            // 过滤掉已从索引中删除的项和不在指定楼层的项
+            // Filter out items removed from index or not on specified floor
             var validCandidates = candidates.Where(cell => 
                 cellSpaceEnvelopes.ContainsKey(cell.Id) && 
                 (cellSpaceFloors.TryGetValue(cell.Id, out var floors) && floors.Contains(floor))).ToList();
             
-            // 创建点几何对象
+            // Create point geometry object
             var searchPoint = new Point(point.x, point.y);
             
-            // 精确测试（点在多边形内）
+            // Exact test (point inside polygon)
             var result = new List<CellSpace>();
             
             foreach (var cell in validCandidates)
@@ -200,22 +200,22 @@ namespace Map
         }
 
         /// <summary>
-        /// 查找与指定边界框相交的所有CellSpace
+        /// Find all CellSpaces intersecting with specified bounding box
         /// </summary>
         public List<CellSpace> QueryIntersect(Envelope envelope)
         {
             if (envelope == null)
                 return new List<CellSpace>();
                 
-            // 执行查询
+            // Execute query
             var candidates = tree.Query(envelope);
             
-            // 过滤掉已从索引中删除的项
+            // Filter out items removed from index
             return candidates.Where(cell => cellSpaceEnvelopes.ContainsKey(cell.Id)).ToList();
         }
 
         /// <summary>
-        /// 查找与指定边界框相交的所有CellSpace，按楼层过滤
+        /// Find all CellSpaces intersecting with specified bounding box, filtered by floor
         /// </summary>
         public List<CellSpace> QueryIntersect(Envelope envelope, params string[] floors)
         {
@@ -227,10 +227,10 @@ namespace Map
                 return QueryIntersect(envelope);
             }
             
-            // 执行查询
+            // Execute query
             var candidates = tree.Query(envelope);
             
-            // 过滤掉已从索引中删除的项和不在指定楼层的项
+            // Filter out items removed from index or not on specified floor
             return candidates.Where(cell => 
                 cellSpaceEnvelopes.ContainsKey(cell.Id) && 
                 cellSpaceFloors.TryGetValue(cell.Id, out var cellFloors) && 
@@ -238,7 +238,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 查找与指定几何图形相交的所有CellSpace
+        /// Find all CellSpaces intersecting with specified geometry
         /// </summary>
         public List<CellSpace> QueryIntersect(Geometry geometry)
         {
@@ -252,7 +252,7 @@ namespace Map
         }
 
         /// <summary>
-        /// 查找与指定几何图形相交的所有CellSpace，按楼层过滤
+        /// Find all CellSpaces intersecting with specified geometry, filtered by floor
         /// </summary>
         public List<CellSpace> QueryIntersect(Geometry geometry, params string[] floors)
         {
@@ -271,26 +271,26 @@ namespace Map
         }
 
         /// <summary>
-        /// 查找与指定路径相交的所有CellSpace
+        /// Find all CellSpaces intersecting with specified path
         /// </summary>
         public List<CellSpace> QueryPath(List<Vector2> path)
         {
             if (path == null || path.Count < 2)
                 return new List<CellSpace>();
                 
-            // 计算路径的包围盒
+            // Calculate bounding box of path
             double minX = path.Min(p => p.x);
             double minY = path.Min(p => p.y);
             double maxX = path.Max(p => p.x);
             double maxY = path.Max(p => p.y);
             
-            // 创建查询的包围盒
+            // Create bounding box for query
             var queryEnvelope = new Envelope(minX, maxX, minY, maxY);
             
-            // 获取可能相交的CellSpace
+            // Get potentially intersecting CellSpaces
             var candidatesList = QueryIntersect(queryEnvelope);
             
-            // 创建表示路径的几何对象
+            // Create geometry object representing path
             var geometryFactory = new GeometryFactory();
             var coordinates = new Coordinate[path.Count];
             
@@ -301,12 +301,12 @@ namespace Map
             
             var pathLineString = geometryFactory.CreateLineString(coordinates);
             
-            // 精确测试相交
+            // Exact intersection test
             return candidatesList.Where(cell => cell.Space.Intersects(pathLineString)).ToList();
         }
 
         /// <summary>
-        /// 查找与指定3D路径相交的所有CellSpace
+        /// Find all CellSpaces intersecting with specified 3D path
         /// </summary>
         public List<CellSpace> QueryPath(List<Vector3> path, params string[] floors)
         {
@@ -315,24 +315,24 @@ namespace Map
                 
             if (!enable3D || floors == null || floors.Length == 0)
             {
-                // 转换为2D路径
+                // Convert to 2D path
                 var path2D = path.Select(p => new Vector2(p.x, p.y)).ToList();
                 return QueryPath(path2D);
             }
             
-            // 计算路径的包围盒
+            // Calculate bounding box of path
             double minX = path.Min(p => p.x);
             double minY = path.Min(p => p.y);
             double maxX = path.Max(p => p.x);
             double maxY = path.Max(p => p.y);
             
-            // 创建查询的包围盒
+            // Create bounding box for query
             var queryEnvelope = new Envelope(minX, maxX, minY, maxY);
             
-            // 获取可能相交的CellSpace
+            // Get potentially intersecting CellSpaces
             var candidatesList = QueryIntersect(queryEnvelope, floors);
             
-            // 创建表示路径的几何对象
+            // Create geometry object representing path
             var geometryFactory = new GeometryFactory();
             var coordinates = new Coordinate[path.Count];
             
@@ -343,7 +343,7 @@ namespace Map
             
             var pathLineString = geometryFactory.CreateLineString(coordinates);
             
-            // 精确测试相交
+            // Exact intersection test
             return candidatesList.Where(cell => cell.Space.Intersects(pathLineString)).ToList();
         }
     }

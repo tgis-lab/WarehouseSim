@@ -14,11 +14,11 @@ using Map;
 namespace CentralControl
 {
     /// <summary>
-    /// 电梯管理器 - 管理所有电梯的状态和调度
+    /// Elevator Manager - Manages the status and scheduling of all elevators
     /// </summary>
     public class ElevatorManager
     {
-        // 电梯状态类
+        // Elevator status class
         public class ElevatorState
         {
             public string ElevatorId { get; private set; }
@@ -28,7 +28,7 @@ namespace CentralControl
             public bool IsMoving { get; set; }
             public string CurrentUserId { get; set; }
             public List<string> ConnectedFloors { get; private set; }
-            public float Speed { get; set; } // 每层楼的移动时间
+            public float Speed { get; set; } // Move time per floor
 
             public ElevatorState(string elevatorId, string initialFloor, List<string> connectedFloors, float speed = 0.5f)
             {
@@ -42,19 +42,19 @@ namespace CentralControl
                 Speed = speed;
             }
 
-            // 计算从一个楼层到另一个楼层的移动时间
+            // Calculates the move time from one floor to another
             public float CalculateMoveTime(string fromFloor, string toFloor)
             {
                 int fromLevel = ParseFloorLevel(fromFloor);
                 int toLevel = ParseFloorLevel(toFloor);
                 int floorDifference = Math.Abs(fromLevel - toLevel);
                 
-                // 基础移动时间 + 楼层距离
+                // Base move time + floor distance
                 return 2.0f + Speed * floorDifference;
             }
         }
 
-        // 电梯预约信息
+        // Elevator reservation information
         public class ElevatorReservation
         {
             public string ElevatorId { get; set; }
@@ -76,10 +76,10 @@ namespace CentralControl
             InitializeElevators();
         }
 
-        // 初始化所有电梯
+        // Initializes all elevators
         private void InitializeElevators()
         {
-            // 从室内空间获取所有电梯单元
+            // Get all elevator units from IndoorSpace
             var allElevators = indoorSpace.CellSpaces.Where(cs => cs.IsElevator()).ToList();
             
             foreach (var elevator in allElevators)
@@ -88,21 +88,21 @@ namespace CentralControl
                 string initialFloor = "1F"; 
                 List<string> connectedFloors = elevator.GetConnectedFloors();
                 
-                // 创建并添加电梯状态
+                // Create and add elevator state
                 elevators[elevatorId] = new ElevatorState(elevatorId, initialFloor, connectedFloors);
                 
                 Debug.Log($"Initialized elevator {elevatorId} at floor {initialFloor}, connected to {string.Join(", ", connectedFloors)}");
             }
         }
 
-        // 获取最佳可用电梯及等待时间
+        // Gets the best available elevator and wait time
         public (string elevatorId, float waitTime, float totalTime) GetBestElevator(
             string fromFloor, 
             string toFloor, 
             float requestTime,
             string userId)
         {
-            // 找出所有能连接这两个楼层的电梯
+            // Find all elevators that can connect these two floors
             var eligibleElevators = elevators.Values
                 .Where(e => e.ConnectedFloors.Contains(fromFloor) && e.ConnectedFloors.Contains(toFloor))
                 .ToList();
@@ -119,29 +119,29 @@ namespace CentralControl
             
             foreach (var elevator in eligibleElevators)
             {
-                // 检查该电梯的预约情况
+                // Check reservations for this elevator
                 var relevantReservations = reservations
                     .Where(r => r.ElevatorId == elevator.ElevatorId && r.EndTime > requestTime)
                     .OrderBy(r => r.StartTime)
                     .ToList();
                 
-                // 计算电梯到达fromFloor的时间
+                // Calculate elevator arrival time at fromFloor
                 float elevatorArrivalTime = CalculateElevatorArrivalTime(
                     elevator, 
                     fromFloor, 
                     requestTime, 
                     relevantReservations);
                 
-                // 计算等待时间
+                // Calculate wait time
                 float waitTime = Math.Max(0, elevatorArrivalTime - requestTime);
                 
-                // 计算从fromFloor到toFloor的移动时间
+                // Calculate move time from fromFloor to toFloor
                 float moveTime = elevator.CalculateMoveTime(fromFloor, toFloor);
                 
-                // 计算总时间
+                // Calculate total time
                 float totalTime = waitTime + moveTime;
                 
-                // 找出最佳电梯
+                // Find the best elevator
                 if (totalTime < minTotalTime)
                 {
                     minTotalTime = totalTime;
@@ -153,59 +153,59 @@ namespace CentralControl
             return (bestElevatorId, minWaitTime, minTotalTime);
         }
         
-        // 计算电梯到达指定楼层的时间
+        // Calculates the arrival time of the elevator at the specified floor
         private float CalculateElevatorArrivalTime(
             ElevatorState elevator, 
             string targetFloor, 
             float currentTime,
             List<ElevatorReservation> relevantReservations)
         {
-            // 如果电梯当前空闲且已在目标楼层
+            // If elevator is idle and already on the target floor
             if (!elevator.IsMoving && elevator.CurrentFloor == targetFloor && currentTime >= elevator.EarliestAvailableTime)
             {
                 return currentTime;
             }
             
-            // 如果电梯当前有预约，需要等待电梯完成当前任务
+            // If elevator has reservations, wait for it to finish current tasks
             if (relevantReservations.Count > 0)
             {
-                // 找到最后一个预约的结束时间
+                // Find the end time of the last reservation
                 float lastReservationEnd = relevantReservations.Max(r => r.EndTime);
                 
-                // 电梯将位于最后一个预约的目标楼层
+                // Elevator will be at the target floor of the last reservation
                 string finalPosition = relevantReservations.Last().ToFloor;
                 
-                // 计算从最后位置到目标楼层的时间
+                // Calculate move time from final position to target floor
                 float moveTimeToTarget = elevator.CalculateMoveTime(finalPosition, targetFloor);
                 
                 return lastReservationEnd + moveTimeToTarget;
             }
             
-            // 如果电梯当前空闲但不在目标楼层
+            // If elevator is idle but not on the target floor
             if (!elevator.IsMoving && elevator.CurrentFloor != targetFloor && currentTime >= elevator.EarliestAvailableTime)
             {
-                // 计算从当前楼层到目标楼层的时间
+                // Calculate move time from current floor to target floor
                 float moveTime = elevator.CalculateMoveTime(elevator.CurrentFloor, targetFloor);
                 return currentTime + moveTime;
             }
             
-            // 如果电梯当前正在移动
+            // If elevator is currently moving
             if (elevator.IsMoving)
             {
-                // 等待电梯到达目标位置
+                // Wait for elevator to reach its target position
                 float timeToFinishCurrentMove = elevator.EarliestAvailableTime;
                 
-                // 然后从该位置移动到请求的楼层
+                // Then move from that position to the requested floor
                 float moveTimeToTarget = elevator.CalculateMoveTime(elevator.TargetFloor, targetFloor);
                 
                 return Math.Max(currentTime, timeToFinishCurrentMove) + moveTimeToTarget;
             }
             
-            // 默认情况：返回当前时间（保守估计）
+            // Default case: return current time (conservative estimate)
             return currentTime;
         }
 
-        // 预约电梯的使用
+        // Reserve elevator use
         public bool ReserveElevator(
             string elevatorId, 
             string userId, 
@@ -223,14 +223,14 @@ namespace CentralControl
             
             var elevator = elevators[elevatorId];
             
-            // 检查电梯是否连接这两个楼层
+            // Check if elevator connects these two floors
             if (!elevator.ConnectedFloors.Contains(fromFloor) || !elevator.ConnectedFloors.Contains(toFloor))
             {
                 Debug.LogError($"Elevator {elevatorId} does not connect floors {fromFloor} and {toFloor}");
                 return false;
             }
             
-            // 检查是否与现有预约冲突
+            // Check for conflicts with existing reservations
             var conflictingReservations = reservations.Where(r => 
                 r.ElevatorId == elevatorId && 
                 ((r.StartTime <= startTime && r.EndTime > startTime) || 
@@ -244,7 +244,7 @@ namespace CentralControl
                 return false;
             }
             
-            // 创建新预约
+            // Create new reservation
             var reservation = new ElevatorReservation
             {
                 ElevatorId = elevatorId,
@@ -258,13 +258,13 @@ namespace CentralControl
             
             reservations.Add(reservation);
             
-            // 更新电梯状态
+            // Update elevator status
             elevator.EarliestAvailableTime = startTime + totalTime;
             elevator.TargetFloor = toFloor;
             elevator.CurrentUserId = userId;
             elevator.IsMoving = true;
             
-            // 调度结束时更新电梯状态
+            // Update elevator status at end of schedule
             UpdateElevatorStateAfterReservation(elevatorId, toFloor, startTime + totalTime);
             
             Debug.Log($"Reserved elevator {elevatorId} for user {userId} from {fromFloor} to {toFloor} " +
@@ -273,16 +273,16 @@ namespace CentralControl
             return true;
         }
         
-        // 在预约完成后更新电梯状态
+        // Updates elevator status after reservation is completed
         private void UpdateElevatorStateAfterReservation(string elevatorId, string finalFloor, float availableTime)
         {
             if (elevators.ContainsKey(elevatorId))
             {
                 var elevator = elevators[elevatorId];
                 
-                // 设置定时器，在预约结束时更新电梯状态
-                // 在实际实现中，这可能需要一个事件或协程
-                // 这里简化为直接设置状态
+                // Set timer to update elevator status when reservation ends
+                // In actual implementation, this may require an event or coroutine
+                // Simplified here as direct status setting
                 elevator.CurrentFloor = finalFloor;
                 elevator.TargetFloor = finalFloor;
                 elevator.EarliestAvailableTime = availableTime;
@@ -291,7 +291,7 @@ namespace CentralControl
             }
         }
         
-        // 取消预约
+        // Cancels reservation
         public bool CancelReservation(string userId, string planId)
         {
             var toRemove = reservations.Where(r => r.UserId == userId && r.PlanId == planId).ToList();
@@ -300,7 +300,7 @@ namespace CentralControl
             {
                 reservations.Remove(reservation);
                 
-                // 如果电梯当前被该用户使用，重置状态
+                // If elevator is currently used by this user, reset status
                 if (elevators.ContainsKey(reservation.ElevatorId) && 
                     elevators[reservation.ElevatorId].CurrentUserId == userId)
                 {
@@ -314,13 +314,13 @@ namespace CentralControl
             return toRemove.Count > 0;
         }
         
-        // 解析楼层编号为整数（用于比较）
+        // Parses floor level string into an integer (for comparison)
         private static int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel))
                 return 0;
                 
-            // 处理地下楼层，如"B1"
+            // Handle basement floors, e.g., "B1"
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
@@ -328,7 +328,7 @@ namespace CentralControl
                     return -level;
                 }
             }
-            // 处理地上楼层，如"1F"
+            // Handle regular floors, e.g., "1F"
             else
             {
                 if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
@@ -337,7 +337,7 @@ namespace CentralControl
                 }
             }
             
-            return 0; // 默认值
+            return 0; // Default value
         }
     }
 }

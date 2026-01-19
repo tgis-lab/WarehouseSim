@@ -61,9 +61,9 @@ namespace Map {
                 if (cp.Id == connectionPoint.Id)
                 {
                     Point point = (Point)connectionPoint.Point;
-                    float y = 0f; // 默认高度
+                    float y = 0f; // Default height
                     
-                    // 确定连接点所在的楼层
+                    // Determine the floor where the connection point is located
                     string floorLevel = GetFloorLevelForConnectionPoint(connectionPoint);
                     if (!string.IsNullOrEmpty(floorLevel))
                     {
@@ -77,10 +77,10 @@ namespace Map {
             return Vector3.zero;
         }
         
-        // 获取连接点所在的楼层
+        // Gets the floor where the connection point is located
         private string GetFloorLevelForConnectionPoint(ConnectionPoint connectionPoint)
         {
-            // 对于垂直连接点，需要特殊处理
+            // Special handling for vertical connection points
             if (connectionPoint.IsVertical())
             {
                 CellSpace sourceCell = indoorSpace.GetCellSpaceFromId(connectionPoint.CellBoundary.Source);
@@ -91,7 +91,7 @@ namespace Map {
                     string sourceFloor = sourceCell.GetLocatedFloor();
                     string targetFloor = targetCell.GetLocatedFloor();
                     
-                    // 返回数字较小的楼层(通常是下层)
+                    // Returns the floor with the smaller number (usually the lower floor)
                     if (!string.IsNullOrEmpty(sourceFloor) && !string.IsNullOrEmpty(targetFloor))
                     {
                         int sourceFloorNum = ParseFloorLevel(sourceFloor);
@@ -102,7 +102,7 @@ namespace Map {
                 }
             }
             
-            // 对于普通连接点，获取相连的CellSpace所在楼层
+            // For regular connection points, get the floor of the connected CellSpace
             CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
             if (cell != null)
             {
@@ -112,7 +112,7 @@ namespace Map {
             return null;
         }
         
-        // 解析楼层级别为数字(例如:"1F" -> 1, "B1" -> -1)
+        // Parses floor level string into an integer (e.g., "1F" -> 1, "B1" -> -1)
         private int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel))
@@ -120,7 +120,7 @@ namespace Map {
                 
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
-                // 地下楼层
+                // Basement floors
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
                 {
                     return -level;
@@ -128,14 +128,14 @@ namespace Map {
             }
             else
             {
-                // 地上楼层
+                // Regular floors
                 if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
                 {
                     return level;
                 }
             }
             
-            return 0; // 默认
+            return 0; // Default
         }
 
         public RoutePoint GetRoutePointFromCoordinate(Vector3 position, bool sequence)
@@ -161,7 +161,7 @@ namespace Map {
                         Point point = (Point)cellSpace.Node;
                         float y = 0f;
                         
-                        // 获取CellSpace所在楼层高度
+                        // Get the world height of the floor where the CellSpace is located
                         string floorLevel = cellSpace.GetLocatedFloor();
                         if (!string.IsNullOrEmpty(floorLevel))
                         {
@@ -195,11 +195,11 @@ namespace Map {
 
         public ConnectionPoint GetConnectionPointFromCoordinates(Vector3 position, bool sequence)
         {
-            // 估计楼层
+            // Estimate floor
             string floorLevel = GetFloorLevelFromPosition(position);
             Point point = new Point(position.x, position.z);
-
-            // 首先在估计的楼层中查找
+            
+            // Search in the estimated floor first
             if (!string.IsNullOrEmpty(floorLevel))
             {
                 var cellSpacesOnFloor = indoorSpace.GetCellSpacesOnFloor(floorLevel);
@@ -217,7 +217,7 @@ namespace Map {
                 }
             }
             
-            // 如果没找到，尝试所有CellSpace
+            // If not found, try all CellSpaces
             foreach (var cellSpace in this.indoorSpace.CellSpaces)
             {
                 if (cellSpace.IsNavigable())
@@ -235,7 +235,7 @@ namespace Map {
             return null;
         }
         
-        // 从高度估计可能的楼层
+        // Estimate potential floor from height
         private string GetFloorLevelFromPosition(Vector3 position)
         {
             float baseHeight = 0.05f;
@@ -290,7 +290,7 @@ namespace Map {
             throw new System.Exception($"Unable to determine location for ConnectionPoint {connectionPoint.Id}");
         }
         
-        // 检查两个连接点是否位于同一楼层
+        // Check if two connection points are on the same floor
         public bool AreOnSameFloor(ConnectionPoint cp1, ConnectionPoint cp2)
         {
             string floor1 = GetFloorLevelForConnectionPoint(cp1);
@@ -299,7 +299,7 @@ namespace Map {
             return !string.IsNullOrEmpty(floor1) && !string.IsNullOrEmpty(floor2) && floor1 == floor2;
         }
         
-        // 获取两个连接点之间的楼层差
+        // Get the floor difference between two connection points
         public int GetFloorDifference(ConnectionPoint cp1, ConnectionPoint cp2)
         {
             string floor1 = GetFloorLevelForConnectionPoint(cp1);
@@ -314,7 +314,7 @@ namespace Map {
             return Math.Abs(floor1Num - floor2Num);
         }
         
-        // 寻找两个楼层之间的垂直连接点
+        // Find vertical connection points between two floors
         public List<ConnectionPoint> FindVerticalConnectionsBetweenFloors(string fromFloor, string toFloor)
         {
             List<ConnectionPoint> result = new List<ConnectionPoint>();

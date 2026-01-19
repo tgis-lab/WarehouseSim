@@ -7,28 +7,28 @@ using NetTopologySuite.Geometries;
 namespace PathPlanning
 {
     /// <summary>
-    /// 交通规则知识库
+    /// Traffic Rule Knowledge Base
     /// </summary>
     public class TrafficRuleKnowledge
     {
-        // 不同区域的速度限制
+        // Speed limits for different areas
         private readonly Dictionary<string, float> areaSpeedLimits = new Dictionary<string, float>
         {
-            { "aisle", 1.0f },           // 通道
-            { "intersection", 0.7f },    // 交叉路口
-            { "queue", 0.6f },           // 队列区
-            { "picking_point", 0.5f },   // 拣货点
-            { "packing_point", 0.5f }    // 包装点
+            { "aisle", 1.0f },           // Aisle
+            { "intersection", 0.7f },    // Intersection
+            { "queue", 0.6f },           // Queue area
+            { "picking_point", 0.5f },   // Picking point
+            { "packing_point", 0.5f }    // Packing point
         };
         
-        // 转弯的速度调整
+        // Speed adjustments for turns
         private readonly Dictionary<float, float> turnSpeedFactors = new Dictionary<float, float>
         {
-            { 30f, 0.9f },   // 小角度转弯速度降为90%
-            { 60f, 0.7f },   // 中等角度转弯速度降为70%
-            { 90f, 0.5f },   // 直角转弯速度降为50%
-            { 120f, 0.4f },  // 大角度转弯速度降为40%
-            { 180f, 0.3f }   // U型转弯速度降为30%
+            { 30f, 0.9f },   // Small angle turn speed reduced to 90%
+            { 60f, 0.7f },   // Medium angle turn speed reduced to 70%
+            { 90f, 0.5f },   // Right angle turn speed reduced to 50%
+            { 120f, 0.4f },  // Large angle turn speed reduced to 40%
+            { 180f, 0.3f }   // U-turn speed reduced to 30%
         };
         
         private IndoorSpace indoorSpace;
@@ -41,7 +41,7 @@ namespace PathPlanning
         }
         
         /// <summary>
-        /// 根据交通规则修改速度和时间
+        /// Modifies speed and time based on traffic rules
         /// </summary>
         public (float modifiedSpeed, float modifiedTime) ModifySpeed(
             RoutePoint current, 
@@ -53,31 +53,31 @@ namespace PathPlanning
             float maxDeceleration,
             RoutePoint prev = null)
         {
-            // 获取交通规则影响下的速度限制
+            // Get speed limit influenced by traffic rules
             float speedLimit = GetSpeedLimit(current, next);
             
-            // 检查转弯影响
+            // Check turn influence
             float turnFactor = 1.0f;
             if (prev != null)
             {
                 turnFactor = GetTurnSpeedFactor(prev, current, next);
             }
             
-            // 应用转弯和区域速度限制
+            // Apply turn and area speed limits
             float targetSpeed = defaultSpeed * Math.Min(speedLimit, turnFactor);
             
-            // 计算加速/减速所需时间
+            // Calculate time required for acceleration/deceleration
             float timeToReachTarget = 0;
             
             if (targetSpeed > currentSpeed)
             {
-                // 加速
+                // Accelerate
                 float accelerationTime = (targetSpeed - currentSpeed) / maxAcceleration;
                 float accelerationDistance = (currentSpeed + targetSpeed) * accelerationTime / 2;
                 
                 if (accelerationDistance > distance)
                 {
-                    // 距离不足以达到目标速度
+                    // Distance insufficient to reach target speed
                     float maxReachableSpeed = CalculateMaxReachableSpeed(
                         currentSpeed, maxAcceleration, distance);
                     targetSpeed = maxReachableSpeed;
@@ -93,13 +93,13 @@ namespace PathPlanning
             }
             else if (targetSpeed < currentSpeed)
             {
-                // 减速
+                // Decelerate
                 float decelerationTime = (currentSpeed - targetSpeed) / maxDeceleration;
                 float decelerationDistance = (currentSpeed + targetSpeed) * decelerationTime / 2;
                 
                 if (decelerationDistance > distance)
                 {
-                    // 距离不足以减速到目标速度
+                    // Distance insufficient to decelerate to target speed
                     float lowestReachableSpeed = CalculateMinReachableSpeed(
                         currentSpeed, maxDeceleration, distance);
                     targetSpeed = lowestReachableSpeed;
@@ -115,7 +115,7 @@ namespace PathPlanning
             }
             else
             {
-                // 匀速
+                // Constant speed
                 timeToReachTarget = distance / currentSpeed;
             }
             
@@ -123,44 +123,44 @@ namespace PathPlanning
         }
         
         /// <summary>
-        /// 获取区域速度限制
+        /// Gets the speed limit for an area
         /// </summary>
         public float GetSpeedLimit(RoutePoint current, RoutePoint next)
         {
-            // 获取相关的CellSpace
+            // Get relevant CellSpaces
             CellSpace currentCell = indoorSpace.GetCellSpaceFromConnectionPoint(current.ConnectionPoint, false);
             CellSpace nextCell = indoorSpace.GetCellSpaceFromConnectionPoint(next.ConnectionPoint, true);
             
             if (currentCell == null || nextCell == null)
                 return 1.0f;
                 
-            // 检查交叉路口
+            // Check intersection
             bool isIntersection = IsIntersection(current, next);
             if (isIntersection)
                 return areaSpeedLimits["intersection"];
                 
-            // 检查拣货点
+            // Check picking point
             if (nextCell.IsPickingPoint())
                 return areaSpeedLimits["picking_point"];
                 
-            // 检查包装点
+            // Check packing point
             if (nextCell.IsPackingPoint())
                 return areaSpeedLimits["packing_point"];
                 
-            // 检查队列区
+            // Check queue area
             if (nextCell.IsQueue())
                 return areaSpeedLimits["queue"];
                 
-            // 默认使用通道速度
+            // Default to aisle speed
             return areaSpeedLimits["aisle"];
         }
         
         /// <summary>
-        /// 获取转弯速度因子
+        /// Gets the turn speed factor
         /// </summary>
         public float GetTurnSpeedFactor(RoutePoint prev, RoutePoint current, RoutePoint next)
         {
-            // 计算转弯角度
+            // Calculate turn angle
             Vector3 prevPos = GetPointPosition(prev);
             Vector3 currentPos = GetPointPosition(current);
             Vector3 nextPos = GetPointPosition(next);
@@ -170,37 +170,37 @@ namespace PathPlanning
             
             float angle = Vector3.Angle(inDirection, outDirection);
             
-            // 应用转弯速度因子
+            // Apply turn speed factor
             foreach (var entry in turnSpeedFactors)
             {
                 if (angle <= entry.Key)
                     return entry.Value;
             }
             
-            return 0.3f; // 默认值，用于极端角度
+            return 0.3f; // Default value for extreme angles
         }
         
         /// <summary>
-        /// 判断是否在交叉路口
+        /// Determines if at an intersection
         /// </summary>
         private bool IsIntersection(RoutePoint current, RoutePoint next)
         {
             try
             {
-                // 使用Graph的PointLocation枚举判断位置类型
+                // Use Graph's PointLocation enum to determine location type
                 var locationType = graph.GetPointLocation(current.ConnectionPoint);
                 return locationType == Graph.PointLocation.InIntersection || 
                        locationType == Graph.PointLocation.ApproachingIntersection;
             }
             catch
             {
-                // 如果出现异常，保守返回false
+                // Return false conservatively on exception
                 return false;
             }
         }
         
         /// <summary>
-        /// 计算加速情况下能达到的最大速度
+        /// Calculates max speed reachable under acceleration
         /// </summary>
         private float CalculateMaxReachableSpeed(float initialSpeed, float acceleration, float distance)
         {
@@ -209,7 +209,7 @@ namespace PathPlanning
         }
         
         /// <summary>
-        /// 计算减速情况下能降低到的最小速度
+        /// Calculates min speed reachable under deceleration
         /// </summary>
         private float CalculateMinReachableSpeed(float initialSpeed, float deceleration, float distance)
         {
@@ -219,12 +219,12 @@ namespace PathPlanning
         }
         
         /// <summary>
-        /// 计算移动指定距离所需的时间
+        /// Calculates time required to move specified distance
         /// </summary>
         private float CalculateTimeForDistance(float initialSpeed, float finalSpeed, float acceleration, float distance)
         {
-            // 使用平均速度公式：s = t * (u + v) / 2
-            // 因此 t = 2s / (u + v)
+            // Using average speed formula: s = t * (u + v) / 2
+            // Therefore t = 2s / (u + v)
             if (Mathf.Approximately(initialSpeed + finalSpeed, 0))
                 return 0;
                 
@@ -232,7 +232,7 @@ namespace PathPlanning
         }
         
         /// <summary>
-        /// 获取点的位置
+        /// Gets the position of a point
         /// </summary>
         private Vector3 GetPointPosition(RoutePoint point)
         {

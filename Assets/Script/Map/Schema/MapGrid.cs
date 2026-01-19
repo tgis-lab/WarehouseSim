@@ -44,7 +44,7 @@ namespace Map
         public Vector3Int GetGridIndex(Vector3 position)
         {
             int x = Mathf.FloorToInt((position.x - mapOrigin.x) / gridSize);
-            int y = Mathf.FloorToInt(position.y / floorHeight); // 将y坐标转换为楼层索引
+            int y = Mathf.FloorToInt(position.y / floorHeight); // Convert Y coordinate to floor index
             int z = Mathf.FloorToInt((position.z - mapOrigin.z) / gridSize);
             return new Vector3Int(x, y, z);
         }
@@ -52,7 +52,7 @@ namespace Map
         public Vector3 GetWorldPosition(Vector3Int gridIndex)
         {
             float x = gridIndex.x * gridSize + mapOrigin.x;
-            float y = gridIndex.y * floorHeight; // 将楼层索引转换为世界高度
+            float y = gridIndex.y * floorHeight; // Convert floor index to world height
             float z = gridIndex.z * gridSize + mapOrigin.z;
             return new Vector3(x, y, z);
         }
@@ -62,7 +62,7 @@ namespace Map
             Dictionary<string, Vector3Int> cellSpaceGridPositions = new Dictionary<string, Vector3Int>();
             foreach (var cellSpace in indoorSpace.CellSpaces)
             {
-                // 获取楼层信息
+                // Get floor level information
                 string floorLevel = cellSpace.GetLocatedFloor();
                 int floorIndex = 0;
                 
@@ -82,7 +82,7 @@ namespace Map
             return cellSpaceGridPositions;
         }
         
-        // 解析楼层级别为数字(例如:"1F" -> 1, "B1" -> -1)
+        // Parses floor level string into an integer (e.g., "1F" -> 1, "B1" -> -1)
         private int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel))
@@ -90,7 +90,7 @@ namespace Map
                 
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
-                // 地下楼层
+                // Basement floors
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
                 {
                     return -level;
@@ -98,14 +98,14 @@ namespace Map
             }
             else
             {
-                // 地上楼层
+                // Regular floors
                 if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
                 {
                     return level;
                 }
             }
             
-            return 0; // 默认
+            return 0; // Default
         }
     }
 }
