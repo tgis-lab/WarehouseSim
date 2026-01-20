@@ -4,5 +4,8 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
+  m_Scenes:
+  - enabled: 1
+    path: Assets/warehouse_with_collision.unity
+    guid: 7bd9c4d1aef9948d5bb3af8dde91bd47
   m_configObjects: {}

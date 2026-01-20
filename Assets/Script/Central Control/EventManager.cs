@@ -106,6 +106,14 @@ namespace CentralControl
         }
     }
 
+    public enum CollisionRecoveryResult
+    {
+        Pending,
+        Success,
+        Failed,
+        GlobalMapUpdateRequested
+    }
+
     public class CollisionEventArgs : EventArgs
     {
         public string CollisionId { get; private set; }
@@ -114,6 +122,9 @@ namespace CentralControl
         public float Time { get; private set; }
         public bool IsRobotCollision { get; private set; }
         public GameObject CollisionObject { get; private set; }
+        public Vector3 Position { get; private set; }
+        public CollisionRecoveryResult RecoveryResult { get; set; }
+        public float RecoveryTime { get; set; }
 
         public CollisionEventArgs(
             string collisionId, 
@@ -121,6 +132,7 @@ namespace CentralControl
             string robotId2, 
             float time, 
             bool isRobotCollision,
+            Vector3 position,
             GameObject collisionObject = null)
         {
             CollisionId = collisionId;
@@ -128,7 +140,171 @@ namespace CentralControl
             RobotId2 = robotId2;
             Time = time;
             IsRobotCollision = isRobotCollision;
+            Position = position;
             CollisionObject = collisionObject;
+            RecoveryResult = CollisionRecoveryResult.Pending;
+            RecoveryTime = 0f;
+        }
+    }
+
+    public class GlobalMapUpdateRequestEventArgs : EventArgs
+    {
+        public int[] RobotIds { get; private set; }
+        public float RequestTime { get; private set; }
+
+        public GlobalMapUpdateRequestEventArgs(int[] robotIds, float requestTime)
+        {
+            RobotIds = robotIds;
+            RequestTime = requestTime;
+        }
+    }
+
+    public class RobotStateChangedEventArgs : EventArgs
+    {
+        public string RobotId { get; private set; }
+        public string StateName { get; private set; }
+        public bool NewValue { get; private set; }
+        public float Time { get; private set; }
+
+        public RobotStateChangedEventArgs(string robotId, string stateName, bool newValue, float time)
+        {
+            RobotId = robotId;
+            StateName = stateName;
+            NewValue = newValue;
+            Time = time;
+        }
+    }
+
+    public class CollisionRecoveryCompletedEventArgs : EventArgs
+    {
+        public string RobotId1 { get; private set; }
+        public string RobotId2 { get; private set; }
+        public CollisionRecoveryResult Result { get; private set; }
+        public float RecoveryTime { get; private set; }
+        public float CollisionTime { get; private set; }
+
+        public CollisionRecoveryCompletedEventArgs(string robotId1, string robotId2, CollisionRecoveryResult result, float recoveryTime, float collisionTime)
+        {
+            RobotId1 = robotId1;
+            RobotId2 = robotId2;
+            Result = result;
+            RecoveryTime = recoveryTime;
+            CollisionTime = collisionTime;
+        }
+    }
+
+    public class DeadlockDetectedEventArgs : EventArgs
+    {
+        public string[] InvolvedRobotIds { get; private set; }
+        public float DetectionTime { get; private set; }
+
+        public DeadlockDetectedEventArgs(string[] involvedRobotIds, float detectionTime)
+        {
+            InvolvedRobotIds = involvedRobotIds;
+            DetectionTime = detectionTime;
+        }
+    }
+
+    public class RobotWaitEventArgs : EventArgs
+    {
+        public string RobotId { get; private set; }
+        public string WaitReason { get; private set; }
+        public float Time { get; private set; }
+
+        public RobotWaitEventArgs(string robotId, string waitReason, float time)
+        {
+            RobotId = robotId;
+            WaitReason = waitReason;
+            Time = time;
+        }
+    }
+
+    public class OrderAssignedEventArgs : EventArgs
+    {
+        public string OrderId { get; private set; }
+        public string RobotId { get; private set; }
+        public float AssignmentTime { get; private set; }
+
+        public OrderAssignedEventArgs(string orderId, string robotId, float assignmentTime)
+        {
+            OrderId = orderId;
+            RobotId = robotId;
+            AssignmentTime = assignmentTime;
+        }
+    }
+
+    public class AreaCongestedEventArgs : EventArgs
+    {
+        public string AreaId { get; private set; }
+        public string[] CongestedRobotIds { get; private set; }
+        public CongestionLevel Level { get; private set; }
+        public float DetectionTime { get; private set; }
+
+        public AreaCongestedEventArgs(string areaId, string[] congestedRobotIds, CongestionLevel level, float detectionTime)
+        {
+            AreaId = areaId;
+            CongestedRobotIds = congestedRobotIds;
+            Level = level;
+            DetectionTime = detectionTime;
+        }
+    }
+
+    public class CongestionResolvedEventArgs : EventArgs
+    {
+        public string AreaId { get; private set; }
+        public float ResolvedTime { get; private set; }
+
+        public CongestionResolvedEventArgs(string areaId, float resolvedTime)
+        {
+            AreaId = areaId;
+            ResolvedTime = resolvedTime;
+        }
+    }
+
+    public class ReplanRequestEventArgs : EventArgs
+    {
+        public string RobotId { get; private set; }
+        public string Reason { get; private set; }
+        public float RequestTime { get; private set; }
+        public float SuggestedDelay { get; private set; }
+
+        public ReplanRequestEventArgs(string robotId, string reason, float requestTime, float suggestedDelay = 0f)
+        {
+            RobotId = robotId;
+            Reason = reason;
+            RequestTime = requestTime;
+            SuggestedDelay = suggestedDelay;
+        }
+    }
+
+    public class SimulationMetricsSnapshotEventArgs : EventArgs
+    {
+        public float SimulationTime { get; private set; }
+        public float Throughput { get; private set; }
+        public float CompletionRate { get; private set; }
+        public float AverageTurnaroundTime { get; private set; }
+        public float AverageUtilization { get; private set; }
+        public int TotalDeadlocks { get; private set; }
+        public int ActiveRobots { get; private set; }
+        public int IdleRobots { get; private set; }
+        public int PendingOrders { get; private set; }
+        public int CompletedOrders { get; private set; }
+
+        public SimulationMetricsSnapshotEventArgs(
+            float simulationTime, float throughput, float completionRate,
+            float avgTurnaround, float avgUtilization, int deadlocks,
+            int activeRobots, int idleRobots, int pendingOrders, int completedOrders)
+        {
+            SimulationTime = simulationTime;
+            Throughput = throughput;
+            CompletionRate = completionRate;
+            AverageTurnaroundTime = avgTurnaround;
+            AverageUtilization = avgUtilization;
+            TotalDeadlocks = deadlocks;
+            ActiveRobots = activeRobots;
+            IdleRobots = idleRobots;
+            PendingOrders = pendingOrders;
+            CompletedOrders = completedOrders;
         }
     }
 
@@ -158,10 +334,37 @@ namespace CentralControl
 
         // Collision-related events
         public event EventHandler<CollisionEventArgs> OnRobotCollisionDetected;
+        public event EventHandler<GlobalMapUpdateRequestEventArgs> OnRequestGlobalMapUpdate;
+
+        // Order-related events
+        public event Action<string, string> OnOrderCompleted;
+        public event Action<string, string, string> OnOrderFailed;
+        public event EventHandler<OrderAssignedEventArgs> OnOrderAssigned;
+
+        // Robot state events
+        public event EventHandler<RobotStateChangedEventArgs> OnRobotStateChanged;
+        public event EventHandler<CollisionRecoveryCompletedEventArgs> OnCollisionRecoveryCompleted;
+        public event EventHandler<DeadlockDetectedEventArgs> OnDeadlockDetected;
+        public event EventHandler<RobotWaitEventArgs> OnRobotWaitStarted;
+        public event EventHandler<RobotWaitEventArgs> OnRobotWaitEnded;
+
+        // Area congestion events (from central DeadlockDetector)
+        public event EventHandler<AreaCongestedEventArgs> OnAreaCongested;
+        public event EventHandler<CongestionResolvedEventArgs> OnCongestionResolved;
+
+        // Replan request events (central to robot communication)
+        public event EventHandler<ReplanRequestEventArgs> OnReplanRequested;
+
+        // Simulation metrics snapshot event
+        public event EventHandler<SimulationMetricsSnapshotEventArgs> OnSimulationMetricsSnapshot;
 
         // Collision records
         private Dictionary<string, CollisionEventArgs> robotCollisions = new Dictionary<string, CollisionEventArgs>();
         private Dictionary<string, CollisionEventArgs> environmentCollisions = new Dictionary<string, CollisionEventArgs>();
+
+        // Throttling
+        private Dictionary<string, float> lastStateChangeTime = new Dictionary<string, float>();
+        private const float STATE_CHANGE_THROTTLE_INTERVAL = 0.1f;
 
         private void Awake()
         {
@@ -253,21 +456,18 @@ namespace CentralControl
         }
 
         // Collision triggers
-        public void ReportRobotCollision(string robotId1, string robotId2, GameObject collisionObject, float time)
+        public void ReportRobotCollision(string robotId1, string robotId2, GameObject collisionObject, float time, Vector3 position = default)
         {
-            // Unique ID for the collision
-            // Sort the robot IDs to ensure consistent ordering
             string[] robotIds = new string[] { robotId1, robotId2 };
             Array.Sort(robotIds);
             string collisionId = $"{robotIds[0]}_collided_with_{robotIds[1]}_{time:F5}";
 
-            // If already recorded, do not process again
             if (robotCollisions.ContainsKey(collisionId))
             {
                 return;
             }
 
-            Debug.LogWarning($"EventManager: Reported collision between Robot {robotId1} and Robot {robotId2}, ID: {collisionId}");
+            Debug.LogWarning($"EventManager: Collision Robot {robotId1} <-> Robot {robotId2} at {position}");
 
             CollisionEventArgs args = new CollisionEventArgs(
                 collisionId,
@@ -275,6 +475,7 @@ namespace CentralControl
                 robotId2,
                 time,
                 true,
+                position,
                 collisionObject
             );
 
@@ -283,7 +484,7 @@ namespace CentralControl
             OnRobotCollisionDetected?.Invoke(this, args);
         }
 
-        public void ReportEnvironmentCollision(string robotId, string environmentObjectId, GameObject collisionObject, float time)
+        public void ReportEnvironmentCollision(string robotId, string environmentObjectId, GameObject collisionObject, float time, Vector3 position = default)
         {
             string collisionId = $"{robotId}_collided_with_env_{environmentObjectId}_{time:F5}";
 
@@ -292,7 +493,7 @@ namespace CentralControl
                 return;
             }
 
-            Debug.LogWarning($"EventManager: Reported collision between Robot {robotId} and Environment {environmentObjectId}, ID: {collisionId}");
+            Debug.LogWarning($"EventManager: Collision Robot {robotId} <-> Env {environmentObjectId} at {position}");
 
             CollisionEventArgs args = new CollisionEventArgs(
                 collisionId,
@@ -300,6 +501,7 @@ namespace CentralControl
                 environmentObjectId,
                 time,
                 false,
+                position,
                 collisionObject
             );
 
@@ -378,6 +580,113 @@ namespace CentralControl
             environmentCollisions.Clear();
 
             Debug.Log("EventManager: All collision records have been cleared");
+        }
+
+        public string UpdateCollisionRecoveryResult(string robotId1, string robotId2, float collisionTime, CollisionRecoveryResult result, float recoveryTime)
+        {
+            string[] robotIds = new string[] { robotId1, robotId2 };
+            Array.Sort(robotIds);
+            
+            foreach (var kvp in robotCollisions)
+            {
+                if (kvp.Key.StartsWith($"{robotIds[0]}_collided_with_{robotIds[1]}") &&
+                    Mathf.Abs(kvp.Value.Time - collisionTime) < 0.1f)
+                {
+                    kvp.Value.RecoveryResult = result;
+                    kvp.Value.RecoveryTime = recoveryTime;
+                    return kvp.Key;
+                }
+            }
+            
+            return null;
+        }
+
+        public void TriggerRequestGlobalMapUpdate(params int[] robotIds)
+        {
+            Debug.Log($"EventManager: Global map update requested by robots: {string.Join(", ", robotIds)}");
+            OnRequestGlobalMapUpdate?.Invoke(this, new GlobalMapUpdateRequestEventArgs(robotIds, Time.time));
+        }
+
+        public void TriggerOrderCompleted(string orderId, string robotId)
+        {
+            Debug.Log($"EventManager: Order {orderId} completed by Robot {robotId}");
+            OnOrderCompleted?.Invoke(orderId, robotId);
+        }
+
+        public void TriggerOrderFailed(string orderId, string robotId, string reason)
+        {
+            Debug.LogWarning($"EventManager: Order {orderId} failed by Robot {robotId}: {reason}");
+            OnOrderFailed?.Invoke(orderId, robotId, reason);
+        }
+
+        public void TriggerOrderAssigned(string orderId, string robotId)
+        {
+            OnOrderAssigned?.Invoke(this, new OrderAssignedEventArgs(orderId, robotId, Time.time));
+        }
+
+        public void TriggerRobotStateChanged(string robotId, string stateName, bool newValue)
+        {
+            string key = $"{robotId}_{stateName}";
+            float currentTime = Time.time;
+            
+            if (lastStateChangeTime.TryGetValue(key, out float lastTime))
+            {
+                if (currentTime - lastTime < STATE_CHANGE_THROTTLE_INTERVAL)
+                {
+                    return;
+                }
+            }
+            
+            lastStateChangeTime[key] = currentTime;
+            OnRobotStateChanged?.Invoke(this, new RobotStateChangedEventArgs(robotId, stateName, newValue, currentTime));
+        }
+
+        public void TriggerCollisionRecoveryCompleted(string robotId1, string robotId2, CollisionRecoveryResult result, float recoveryTime, float collisionTime)
+        {
+            UpdateCollisionRecoveryResult(robotId1, robotId2, collisionTime, result, recoveryTime);
+            OnCollisionRecoveryCompleted?.Invoke(this, new CollisionRecoveryCompletedEventArgs(robotId1, robotId2, result, recoveryTime, collisionTime));
+        }
+
+        public void TriggerDeadlockDetected(string[] involvedRobotIds)
+        {
+            OnDeadlockDetected?.Invoke(this, new DeadlockDetectedEventArgs(involvedRobotIds, Time.time));
+        }
+
+        public void TriggerRobotWaitStarted(string robotId, string reason)
+        {
+            OnRobotWaitStarted?.Invoke(this, new RobotWaitEventArgs(robotId, reason, Time.time));
+        }
+
+        public void TriggerRobotWaitEnded(string robotId, string reason)
+        {
+            OnRobotWaitEnded?.Invoke(this, new RobotWaitEventArgs(robotId, reason, Time.time));
+        }
+
+        public void TriggerAreaCongested(string areaId, string[] congestedRobotIds, CongestionLevel level)
+        {
+            OnAreaCongested?.Invoke(this, new AreaCongestedEventArgs(areaId, congestedRobotIds, level, Time.time));
+        }
+
+        public void TriggerCongestionResolved(string areaId)
+        {
+            OnCongestionResolved?.Invoke(this, new CongestionResolvedEventArgs(areaId, Time.time));
+        }
+
+        public void TriggerReplanRequested(string robotId, string reason, float suggestedDelay = 0f)
+        {
+            OnReplanRequested?.Invoke(this, new ReplanRequestEventArgs(robotId, reason, Time.time, suggestedDelay));
+        }
+
+        public void TriggerSimulationMetricsSnapshot(
+            float simulationTime, float throughput, float completionRate,
+            float avgTurnaround, float avgUtilization, int deadlocks,
+            int activeRobots, int idleRobots, int pendingOrders, int completedOrders)
+        {
+            OnSimulationMetricsSnapshot?.Invoke(this, new SimulationMetricsSnapshotEventArgs(
+                simulationTime, throughput, completionRate,
+                avgTurnaround, avgUtilization, deadlocks,
+                activeRobots, idleRobots, pendingOrders, completedOrders
+            ));
         }
 
         // Path planning metrics

@@ -73,7 +73,6 @@ namespace CentralControl.OrderAssignment
                 distances[i] = distance;
             }
             
-            // 返回距离最小的中心点索引
             return distances.OrderBy(kv => kv.Value).First().Key;
         }
 
@@ -82,14 +81,12 @@ namespace CentralControl.OrderAssignment
             if (cluster.Count == 0)
                 return (Vector3.zero, "1F");
             
-            // 确定主要楼层（出现频率最高的楼层）
             var floorGroups = cluster.GroupBy(o => o.FloorLevel)
                                     .OrderByDescending(g => g.Count())
                                     .ToList();
             
             string dominantFloor = floorGroups.First().Key;
             
-            // 计算聚类中心
             Vector3 sum = Vector3.zero;
             foreach (var order in cluster)
             {
@@ -104,15 +101,12 @@ namespace CentralControl.OrderAssignment
             return robots.OrderBy(r => CalculateDistance(point, floorLevel, r.transform.position, r.CurrentFloor)).First();
         }
         
-        // 考虑楼层差异的距离计算
         private float CalculateDistance(Vector3 point1, string floor1, Vector3 point2, string floor2)
         {
-            // 水平距离计算 (XZ平面)
             float horizontalDistance = Vector2.Distance(
                 new Vector2(point1.x, point1.z),
                 new Vector2(point2.x, point2.z));
             
-            // 楼层差异带来的额外距离惩罚
             float floorPenalty = 0;
             if (floor1 != floor2)
             {
@@ -125,13 +119,11 @@ namespace CentralControl.OrderAssignment
             return horizontalDistance + floorPenalty;
         }
         
-        // 解析楼层编号
         private int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel)) 
-                return 1; // 默认为1楼
+                return 1;
             
-            // 处理地上楼层："F1"或"1F"
             if (floorLevel.StartsWith("F") || floorLevel.EndsWith("F"))
             {
                 string numPart = floorLevel.Replace("F", "");
@@ -141,7 +133,6 @@ namespace CentralControl.OrderAssignment
                 }
             }
             
-            // 处理地下楼层："B1"
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
                 string numPart = floorLevel.Substring(1).Replace("F", "").Replace("f", "");
@@ -151,13 +142,12 @@ namespace CentralControl.OrderAssignment
                 }
             }
             
-            // 尝试简单数字解析
             if (int.TryParse(floorLevel, out int simpleLevel))
             {
                 return simpleLevel;
             }
             
-            return 1; // 如果解析失败，默认为1楼
+            return 1;
         }
     }
 }

@@ -22,6 +22,7 @@ namespace CentralControl
         public PickerManager pickerManager;
         public MapLoader mapLoader;
         public IntersectionAreaManager intersectionAreaManager;
+        public DeadlockDetector deadlockDetector;
         
         [Header("Map Settings")]
         public float width, length;
@@ -63,7 +64,6 @@ namespace CentralControl
         private MapGrid mapGrid;
         private ConflictResolver conflictResolver;
         private CellSpaceConflictDetector cellSpaceConflictDetector;
-        private float nextUpdateTime = 0f;
         private float nextNavMeshRebuildTime = 0f;
         private Coroutine orderGenerationCoroutine;
         private bool isInitialized = false;
@@ -129,6 +129,9 @@ namespace CentralControl
             // Initialize collision tracker
             InitializeCollisionTracking();
 
+            // Initialize deadlock detector
+            InitializeDeadlockDetector();
+
             // Mark initialization as complete
             isInitialized = true;
 
@@ -182,6 +185,23 @@ namespace CentralControl
             {
                 StopCoroutine(orderGenerationCoroutine);
                 orderGenerationCoroutine = null;
+            }
+        }
+
+        private void OnApplicationQuit()
+        {
+            // Save final reports before application exits to prevent data loss
+            Debug.Log("[CentralControl] Application quitting - saving final reports...");
+            
+            try
+            {
+                SaveCollisionReportToFile();
+                SavePathPlanningReportToFile();
+                Debug.Log("[CentralControl] Final reports saved successfully");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[CentralControl] Error saving final reports on quit: {e.Message}");
             }
         }
         #endregion
@@ -319,6 +339,21 @@ namespace CentralControl
             else
             {
                 Debug.LogError("[CentralControl] Failed to initialize collision tracking: EventManager not found!");
+            }
+        }
+
+        private void InitializeDeadlockDetector()
+        {
+            Debug.Log("[CentralControl] Initializing deadlock detector...");
+            
+            if (deadlockDetector != null && globalOccupancyLayer != null && indoorSpace != null)
+            {
+                deadlockDetector.Initialize(globalOccupancyLayer, indoorSpace);
+                Debug.Log("[CentralControl] Deadlock detector initialized!");
+            }
+            else
+            {
+                Debug.LogWarning("[CentralControl] DeadlockDetector component is missing or dependencies are null");
             }
         }
         #endregion
@@ -655,21 +690,6 @@ namespace CentralControl
 
             ReserveCellSpacePath(e.RobotId, e.PlanId, e.Path, e.Times);
             NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
-            
-            // bool hasConflict = DetectPathConflicts(e.RobotId, e.Path, e.Times, e.PlanId);
-            
-            // if (hasConflict)
-            // {
-            //     Debug.LogWarning($"The path of robot {e.RobotId} has conflicts!");
-            //     // 可以在这里触发事件通知机器人重新规划
-            //     // 或执行其他冲突处理策略
-            // }
-            // else
-            // {
-            //     Debug.Log($"The path of robot {e.RobotId} has been accepted.");
-            //     ReserveCellSpacePath(e.RobotId, e.PlanId, e.Path, e.Times);
-            //     NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
-            // }
         }
         
         private void NotifyRobotPathModified(string robotId, string planId, List<ConnectionPoint> path, List<float> newTimes, string modificationType, float modificationValue)
@@ -863,16 +883,41 @@ namespace CentralControl
         #endregion
 
         #region Utility Methods
+        public string GenerateCollisionReportCSV()
+        {
+            System.Text.StringBuilder csv = new System.Text.StringBuilder();
+            csv.AppendLine("Time,Robot1,Robot2,IsRobotCollision,Position_X,Position_Y,Position_Z,RecoveryResult,RecoveryTime");
+            
+            if (EventManager.Instance != null)
+            {
+                var allCollisions = EventManager.Instance.GetAllRobotCollisions()
+                    .Concat(EventManager.Instance.GetAllEnvironmentCollisions())
+                    .OrderBy(c => c.Time);
+                
+                foreach (var collision in allCollisions)
+                {
+                    csv.AppendLine($"{collision.Time:F3},{collision.RobotId1},{collision.RobotId2},{collision.IsRobotCollision},{collision.Position.x:F2},{collision.Position.y:F2},{collision.Position.z:F2},{collision.RecoveryResult},{collision.RecoveryTime:F2}");
+                }
+            }
+            
+            return csv.ToString();
+        }
+
         public void SaveCollisionReportToFile()
         {
-            string report = GenerateCollisionReport();
             string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string filepath = $"{Application.persistentDataPath}/collision_report_{timestamp}.txt";
-
+            
             try
             {
-                System.IO.File.WriteAllText(filepath, report);
-                Debug.Log($"Collision report saved to: {filepath}");
+                string txtReport = GenerateCollisionReport();
+                string txtPath = $"{Application.persistentDataPath}/collision_report_{timestamp}.txt";
+                System.IO.File.WriteAllText(txtPath, txtReport);
+                
+                string csvReport = GenerateCollisionReportCSV();
+                string csvPath = $"{Application.persistentDataPath}/collision_report_{timestamp}.csv";
+                System.IO.File.WriteAllText(csvPath, csvReport);
+                
+                Debug.Log($"Collision reports saved: {txtPath}, {csvPath}");
             }
             catch (System.Exception e)
             {
@@ -913,11 +958,11 @@ namespace CentralControl
             report.AppendLine($"Total Plans Recorded: {pathPlanningMetrics.Count}");
             report.AppendLine();
             
-            report.AppendLine("Robot ID,Plan ID,Planning Time (s),Actual Path Length,Travel Time (s),Ideal Path Length,Timestamp");
+            report.AppendLine("RobotId,PlanId,PlanningTime,ActualPathLength,TravelTime,IdealPathLength,PathEfficiency,ReplanCount,WaitTime,IsReplan,Timestamp");
             
             foreach (var metrics in pathPlanningMetrics.Values.OrderBy(m => m.RobotId).ThenBy(m => m.Timestamp))
             {
-                report.AppendLine($"{metrics.RobotId},{metrics.PlanId},{metrics.PlanningTime:F4},{metrics.ActualPathLength:F2},{metrics.TravelTime:F2},{metrics.IdealPathLength:F2},{metrics.Timestamp}");
+                report.AppendLine($"{metrics.RobotId},{metrics.PlanId},{metrics.PlanningTime:F4},{metrics.ActualPathLength:F2},{metrics.TravelTime:F2},{metrics.IdealPathLength:F2},{metrics.PathEfficiency:F3},{metrics.ReplanCount},{metrics.WaitTime:F2},{metrics.IsReplan},{metrics.Timestamp}");
             }
             
             return report.ToString();
