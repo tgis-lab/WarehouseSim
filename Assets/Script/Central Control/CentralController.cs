@@ -15,6 +15,10 @@ namespace CentralControl
 {
     public class CentralController : MonoBehaviour
     {
+        #region Singleton
+        public static CentralController Instance { get; private set; }
+        #endregion
+        
         #region Inspector Fields
         [Header("Components")]
         public OrderManager orderManager;
@@ -74,10 +78,26 @@ namespace CentralControl
         private int totalEnvironmentCollisions = 0;
         private Dictionary<string, int> robotCollisionCounts = new Dictionary<string, int>();
         private Dictionary<string, PathPlanningMetrics> pathPlanningMetrics = new Dictionary<string, PathPlanningMetrics>();
+        
+        // Dirty flag for incremental layer merge
+        private readonly HashSet<int> dirtyRobotIds = new HashSet<int>();
+        private readonly object dirtyRobotLock = new object();
 
         #endregion
 
         #region Unity Lifecycle
+        private void Awake()
+        {
+            // Singleton initialization
+            if (Instance != null && Instance != this)
+            {
+                Debug.LogWarning("[CentralControl] Duplicate CentralController instance detected. Destroying this one.");
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+        }
+        
         private void Start()
         {
             // Initialize the system
@@ -482,8 +502,18 @@ namespace CentralControl
 
         private void MergeRobotOccupancyLayer()
         {
-            foreach (var robot in robotManager.GetAllRobots())
+            // Only merge dirty robots instead of all robots every frame
+            HashSet<int> toProcess;
+            lock (dirtyRobotLock)
             {
+                if (dirtyRobotIds.Count == 0) return;
+                toProcess = new HashSet<int>(dirtyRobotIds);
+                dirtyRobotIds.Clear();
+            }
+            
+            foreach (var robotId in toProcess)
+            {
+                var robot = robotManager.GetRobotById(robotId);
                 if (robot == null) continue;
                 
                 var personalLayer = robot.GetPersonalOccupancyLayer();
@@ -491,6 +521,18 @@ namespace CentralControl
                 {
                     globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60);
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Mark a robot's personal layer as dirty, requiring merge on next update.
+        /// Called by RobotController when personal layer is modified.
+        /// </summary>
+        public void MarkRobotLayerDirty(int robotId)
+        {
+            lock (dirtyRobotLock)
+            {
+                dirtyRobotIds.Add(robotId);
             }
         }
 
@@ -765,14 +807,14 @@ namespace CentralControl
                 if (unassignedOrders.Count > 0)
                 {
                     OrderAssignmentSelector assigner = new OrderAssignmentSelector(indoorSpace);
-                    Order nearestOrder = assigner.FindNearestOrder(robot, unassignedOrders);
+                    Order bestOrder = assigner.FindBestOrder(robot, unassignedOrders);
                     
-                    if (nearestOrder != null)
+                    if (bestOrder != null)
                     {
-                        robot.ReceiveOrder(nearestOrder);
-                        nearestOrder.AssignedRobotId = robot.Id;
+                        robot.ReceiveOrder(bestOrder);
+                        bestOrder.AssignedRobotId = robot.Id;
                         
-                        Debug.Log($"[CentralControl] Assigned order {nearestOrder.Id} to free robot {robot.Id}");
+                        Debug.Log($"[CentralControl] Assigned order {bestOrder.Id} to free robot {robot.Id}");
                     }
                 }
             }

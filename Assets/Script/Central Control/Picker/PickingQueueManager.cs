@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace CentralControl.PickerControl
+namespace CentralControl.PickingQueueControl
 {
     public class PickingQueueManager
     {
@@ -12,8 +12,7 @@ namespace CentralControl.PickerControl
         // Queue for each picking point: Key = PickingPointId, Value = Queue of RobotIds
         private Dictionary<string, Queue<string>> pickingQueues = new Dictionary<string, Queue<string>>();
         
-        // Current picker for each picking point: Key = PickingPointId, Value = RobotId
-        private Dictionary<string, string> currentPickers = new Dictionary<string, string>();
+        private Dictionary<string, string> activeRobots = new Dictionary<string, string>();
 
         // Event to notify robot it can start picking
         public event Action<string> OnRobotAllowedToPick;
@@ -36,25 +35,19 @@ namespace CentralControl.PickerControl
                 pickingQueues[pickingPointId] = new Queue<string>();
             }
 
-            // Check if picking point is free
-            if (!currentPickers.ContainsKey(pickingPointId))
+            if (!activeRobots.ContainsKey(pickingPointId))
             {
-                // Picking point is free, this robot becomes the picker
-                currentPickers[pickingPointId] = robotId;
+                activeRobots[pickingPointId] = robotId;
                 Debug.Log($"PickingQueueManager: Robot {robotId} started picking at {pickingPointId} (Immediate)");
                 return true;
             }
-            else
+            
+            if (!pickingQueues[pickingPointId].Contains(robotId) && activeRobots[pickingPointId] != robotId)
             {
-                // Picking point is busy, add to queue
-                // Avoid adding duplicates (Queue enumeration is O(N) but N is small)
-                if (!pickingQueues[pickingPointId].Contains(robotId) && currentPickers[pickingPointId] != robotId)
-                {
-                     pickingQueues[pickingPointId].Enqueue(robotId);
-                     Debug.Log($"PickingQueueManager: Robot {robotId} queued at {pickingPointId}. Position: {pickingQueues[pickingPointId].Count}");
-                }
-                return false;
+                 pickingQueues[pickingPointId].Enqueue(robotId);
+                 Debug.Log($"PickingQueueManager: Robot {robotId} queued at {pickingPointId}. Position: {pickingQueues[pickingPointId].Count}");
             }
+            return false;
         }
 
         /// <summary>
@@ -64,41 +57,36 @@ namespace CentralControl.PickerControl
         {
             if (string.IsNullOrEmpty(pickingPointId)) return;
 
-            if (currentPickers.TryGetValue(pickingPointId, out string currentPicker))
+            if (!activeRobots.TryGetValue(pickingPointId, out string activeRobot))
+                return;
+                
+            if (activeRobot != robotId)
             {
-                if (currentPicker == robotId)
-                {
-                    currentPickers.Remove(pickingPointId);
-                    Debug.Log($"PickingQueueManager: Robot {robotId} finished picking at {pickingPointId}");
-                    
-                    // Process next in queue
-                    if (pickingQueues.ContainsKey(pickingPointId) && pickingQueues[pickingPointId].Count > 0)
-                    {
-                        string nextRobotId = pickingQueues[pickingPointId].Dequeue();
-                        currentPickers[pickingPointId] = nextRobotId;
-                        Debug.Log($"PickingQueueManager: Robot {nextRobotId} promoted to picking at {pickingPointId}");
-                        OnRobotAllowedToPick?.Invoke(nextRobotId);
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning($"PickingQueueManager: Robot {robotId} tried to complete picking at {pickingPointId} but current picker is {currentPicker}");
-                }
+                Debug.LogWarning($"PickingQueueManager: Robot {robotId} tried to complete picking at {pickingPointId} but active robot is {activeRobot}");
+                return;
+            }
+            
+            activeRobots.Remove(pickingPointId);
+            Debug.Log($"PickingQueueManager: Robot {robotId} finished picking at {pickingPointId}");
+            
+            if (pickingQueues.ContainsKey(pickingPointId) && pickingQueues[pickingPointId].Count > 0)
+            {
+                string nextRobotId = pickingQueues[pickingPointId].Dequeue();
+                activeRobots[pickingPointId] = nextRobotId;
+                Debug.Log($"PickingQueueManager: Robot {nextRobotId} promoted to picking at {pickingPointId}");
+                OnRobotAllowedToPick?.Invoke(nextRobotId);
             }
         }
         
-        /// <summary>
-        /// Checks if a robot is currently the designated picker for a point.
-        /// </summary>
-        public bool IsRobotPicking(string pickingPointId, string robotId)
+        public bool IsRobotActive(string pickingPointId, string robotId)
         {
-             return currentPickers.TryGetValue(pickingPointId, out string picker) && picker == robotId;
+             return activeRobots.TryGetValue(pickingPointId, out string active) && active == robotId;
         }
 
         public void Reset()
         {
             pickingQueues.Clear();
-            currentPickers.Clear();
+            activeRobots.Clear();
         }
     }
 }

@@ -79,10 +79,14 @@ namespace CentralControl.OrderAssignment
 
         public void InitialOrderDistribution(List<Order> orders, List<RobotController> robots)
         {
-            ProcessWaitingQueue(robots.Where(r => r.IsAvailable).ToList());
-            
-            List<Order> remainingOrders = new List<Order>(orders);
             List<RobotController> availableRobots = robots.Where(r => r.IsAvailable).ToList();
+            Debug.Log($"[OrderAssignment] Starting Initial Distribution. Orders: {orders.Count}, Available Robots: {availableRobots.Count}");
+            
+            ProcessWaitingQueue(availableRobots);
+            
+            // Re-check available robots after processing waiting queue
+            availableRobots = robots.Where(r => r.IsAvailable).ToList();
+            List<Order> remainingOrders = new List<Order>(orders);
             
             foreach (var robot in availableRobots.ToList())
             {
@@ -94,10 +98,16 @@ namespace CentralControl.OrderAssignment
                         AssignOrderToRobot(bestOrder, robot);
                         remainingOrders.Remove(bestOrder);
                         
+                        Debug.Log($"[OrderAssignment] Initial assigned order {bestOrder.Id} to Robot {robot.Id}");
+                        
                         if (!robot.IsAvailable)
                         {
                             availableRobots.Remove(robot);
                         }
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"[OrderAssignment] Robot {robot.Id} could not find a suitable order in initial distribution");
                     }
                 }
             }

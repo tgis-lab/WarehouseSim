@@ -464,11 +464,6 @@ namespace CentralControl.RobotControl
             }
         }
 
-        public List<RobotController> GetFreeRobots()
-        {
-            return robots.Where(r => r.IsFree).ToList();
-        }
-        
         public List<RobotController> GetFreeRobotsOnFloor(string floorLevel)
         {
             return robots.Where(r => r.IsFree && r.CurrentFloor == floorLevel).ToList();

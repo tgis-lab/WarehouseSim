@@ -326,10 +326,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1af887474fbda48eb9b93d49ff63fced, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  congestionThreshold: 2
   deadlockTimeThreshold: 5
   detectionInterval: 1
-  analysisWindow: 10
+  notificationCooldown: 15
+  groupingDistance: 5
 --- !u!4 &586074907
 Transform:
   m_ObjectHideFlags: 0

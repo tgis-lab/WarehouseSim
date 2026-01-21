@@ -10,21 +10,26 @@ using NetTopologySuite.Geometries;
 using PathPlanning;
 using Map;
 using CentralControl.OrderAssignment;
-using CentralControl.PickerControl;
-using CentralControl.PickerControl;
-using CentralControl.PickerControl;
-using CentralControl.PickerControl; // Redundant line removed in logic but Edit tool needs exact match
+using CentralControl.PickingQueueControl;
 
 
 namespace CentralControl.RobotControl
 {
-    public enum RobotState
+    public enum RobotBehavior
     {
-        Moving, 
+        Idle,
+        Moving,
         Picking,
         Queuing,
-        UsingElevator,
-        UsingStairs
+        EmergencyStopped
+    }
+    
+    public enum VerticalTransportType
+    {
+        None,
+        Elevator,
+        Stairs,
+        Escalator
     }
     
     public class RobotController : MonoBehaviour
@@ -50,22 +55,25 @@ namespace CentralControl.RobotControl
         public bool lastReportedAvailability { get; set; } = false;
         public bool lastReportedFreeStatus { get; set; } = false;
         public int lastReportedOrderCount { get; set; } = -1;
-        public string CurrentFloor { get; private set; } = "1F"; // Current floor level
-        public bool IsMoving => currentStates.Contains(RobotState.Moving);
-        public bool IsPicking => currentStates.Contains(RobotState.Picking);
-        public bool IsQueuing => currentStates.Contains(RobotState.Queuing);
-        public bool IsUsingElevator => currentStates.Contains(RobotState.UsingElevator);
-        public bool IsUsingStairs => currentStates.Contains(RobotState.UsingStairs);
-        public bool IsVerticallyMoving => IsUsingElevator || IsUsingStairs;
-        public bool IsFree => currentStates.Count == 0;
-        public bool IsOnTask => !IsFree;
+        public string CurrentFloor { get; private set; } = "1F";
+        
+        public RobotBehavior Behavior => currentBehavior;
+        public VerticalTransportType VerticalTransport => currentVerticalTransport;
+        public bool IsMoving => currentBehavior == RobotBehavior.Moving;
+        public bool IsPicking => currentBehavior == RobotBehavior.Picking;
+        public bool IsQueuing => currentBehavior == RobotBehavior.Queuing;
+        public bool IsEmergencyStopped => currentBehavior == RobotBehavior.EmergencyStopped;
+        public bool IsUsingElevator => currentVerticalTransport == VerticalTransportType.Elevator;
+        public bool IsUsingStairs => currentVerticalTransport == VerticalTransportType.Stairs;
+        public bool IsVerticallyMoving => currentVerticalTransport != VerticalTransportType.None;
+        public bool IsFree => currentBehavior == RobotBehavior.Idle;
+        public bool IsOnTask => currentBehavior != RobotBehavior.Idle;
         public bool IsAvailable => ordersQueue.Count < MaxOrder;
         public bool IsProcessingOrders => isProcessingOrdersRunning;
         public Order CurrentOrder => currentOrder;
         public int GetRobotOrdersQueueCount => ordersQueue.Count;
         public List<string> listOrdersQueue => new List<string>(ordersQueue.Select(order => order.Id));
         public bool IsBackingUp => isBackingUp;
-        public bool IsEmergencyStopped => isEmergencyStopped;
         public Vector3 CurrentVelocity => rb != null ? rb.velocity : Vector3.zero;
         public bool IsActuallyMoving => rb != null && rb.velocity.magnitude > 0.1f;
         public Vector3 TargetPosition => targetPosition;
@@ -102,7 +110,8 @@ namespace CentralControl.RobotControl
         private ConcurrentQueue<Order> ordersQueue = new ConcurrentQueue<Order>();
         private Order currentOrder;
         private Coroutine currentMovementCoroutine;
-        private HashSet<RobotState> currentStates = new HashSet<RobotState>();
+        private RobotBehavior currentBehavior = RobotBehavior.Idle;
+        private VerticalTransportType currentVerticalTransport = VerticalTransportType.None;
         private float detectionRadius;
         private bool isWaitingForPicking = false;
         private bool isProcessingOrdersRunning = false;
@@ -121,7 +130,6 @@ namespace CentralControl.RobotControl
         private Vector3 finalDestination;
         private Vector3 targetPosition;
         private bool navigationEnabled = true;
-        private bool isEmergencyStopped = false;
         private float lastEmergencyStopTime = 0f;
         private const float EMERGENCY_RECOVERY_DELAY = 0.5f;
         private LayerMask robotCollisionLayer;
@@ -235,21 +243,18 @@ namespace CentralControl.RobotControl
             lastPosition = transform.position;
             lastPositionChangeTime = Time.time;
             
-            // Handle different movement states
-            if (navigationEnabled && !isEmergencyStopped && !isWaitingForPicking && IsMoving)
+            if (navigationEnabled && !IsEmergencyStopped && !isWaitingForPicking && IsMoving)
             {
                 UpdateMovement();
             }
             
-            // Update visualization
             UpdateTargetIndicator();
             
-            if (isEmergencyStopped || needsPathRecovery)
+            if (IsEmergencyStopped || needsPathRecovery)
             {
                 VisualizeEmergencyState();
             }
             
-            // Update intersection status
             if (intersectionManager != null)
             {
                 CheckIntersectionStatus();
@@ -415,7 +420,7 @@ namespace CentralControl.RobotControl
         private IEnumerator ExecuteOrderCoroutine(Order order)
         {
             Debug.Log($"Robot {Id} planning path to {order.Destination}");
-            SetState(RobotState.Moving, true);
+            SetBehavior(RobotBehavior.Moving);
             
             Vector3 targetPosition = GetTargetPosition(order.PickingPoint);
             string targetFloorLevel = order.PickingPoint.FloorLevel;
@@ -427,7 +432,7 @@ namespace CentralControl.RobotControl
             if (result.path == null || result.path.Count == 0)
             {
                 Debug.LogError($"Robot {Id} failed to plan path to {order.Destination}");
-                SetState(RobotState.Moving, false);
+                SetBehavior(RobotBehavior.Idle);
                 ReportOrderFailed(order.Id, "PathPlanningFailed");
                 yield break;
             }
@@ -442,9 +447,10 @@ namespace CentralControl.RobotControl
             
             while (!hasReportedArrival && Time.time - startTime < timeout)
             {
-                if (!IsMoving && !IsVerticallyMoving && !IsQueuing)
+                // Must explicitly check for states where robot is temporarily stopped but order is still valid
+                if (!IsMoving && !IsVerticallyMoving && !IsQueuing && !IsEmergencyStopped)
                 {
-                    Debug.LogWarning($"Robot {Id} stopped moving before reaching destination");
+                    Debug.LogWarning($"Robot {Id} stopped moving before reaching destination. State: {currentBehavior}, Vertical: {currentVerticalTransport}");
                     break;
                 }
                 
@@ -454,21 +460,18 @@ namespace CentralControl.RobotControl
             if (!hasReportedArrival)
             {
                 Debug.LogWarning($"Robot {Id} timed out while trying to reach destination");
-                SetState(RobotState.Moving, false);
-                SetState(RobotState.UsingElevator, false);
-                SetState(RobotState.UsingStairs, false);
+                SetBehavior(RobotBehavior.Idle);
                 ReportOrderFailed(order.Id, "NavigationTimeout");
                 yield break;
             }
             
             Debug.Log($"Robot {Id} waiting for picking at {transform.position}");
-            SetState(RobotState.Moving, false);
-            SetState(RobotState.Picking, true);
+            SetBehavior(RobotBehavior.Picking);
             
             pickingCompleted = false;
             yield return StartCoroutine(WaitForPicking(order, transform.position));
             
-            SetState(RobotState.Picking, false);
+            SetBehavior(RobotBehavior.Idle);
             
             ReportOrderCompleted(order.Id);
             Debug.Log($"Robot {Id} completed picking for order {order.Id}");
@@ -544,6 +547,14 @@ namespace CentralControl.RobotControl
             finalDestination = targetPosition;
             hasReportedArrival = false;
 
+            // Clear old planned occupancy before planning new path
+            // This prevents conflicts with our own old reservations
+            if (!string.IsNullOrEmpty(currentPlanId))
+            {
+                personalOccupancyLayer.ClearPlannedOccupancy(Id.ToString(), currentPlanId, Time.time);
+                Debug.Log($"Robot {Id}: Cleared old planned occupancy for plan {currentPlanId}");
+            }
+
             RoutePoint startPoint = graph.GetRoutePointFromCoordinate(transform.position, true);
             RoutePoint endPoint = graph.GetRoutePointFromCoordinate(targetPosition, false);
             
@@ -608,15 +619,11 @@ namespace CentralControl.RobotControl
                 }
                 else
                 {
-                    // Only log once if not already queuing
                     if (!IsQueuing)
                     {
                         Debug.Log($"Robot {Id}: Reached picking point {currentOrder.PickingPoint.Id} - Queuing");
-                        SetState(RobotState.Moving, false);
-                        SetState(RobotState.Queuing, true);
+                        SetBehavior(RobotBehavior.Queuing);
                     }
-                    // Do NOT set hasReportedArrival = true yet.
-                    // It will be set in HandleRobotAllowedToPick
                 }
             }
         }
@@ -626,8 +633,7 @@ namespace CentralControl.RobotControl
             if (robotId == Id.ToString() && IsQueuing && currentOrder != null)
             {
                 Debug.Log($"Robot {Id}: Allowed to start picking from queue");
-                SetState(RobotState.Queuing, false);
-                SetState(RobotState.Moving, true); // Set moving to pass the check in ExecuteOrderCoroutine if needed, though hasReportedArrival will break it.
+                SetBehavior(RobotBehavior.Moving);
                 
                 isWaitingForPicking = true;
                 hasReportedArrival = true;
@@ -702,7 +708,7 @@ namespace CentralControl.RobotControl
                             Debug.Log($"Robot {Id}: Path completed but not at final destination yet.");
                         }
                         
-                        SetState(RobotState.Moving, false);
+                        SetBehavior(RobotBehavior.Idle);
                         
                         rb.velocity = Vector3.zero;
                     }
@@ -763,23 +769,21 @@ namespace CentralControl.RobotControl
             }
         }
 
-        private void SetState(RobotState state, bool value)
+        private void SetBehavior(RobotBehavior behavior, VerticalTransportType verticalTransport = VerticalTransportType.None)
         {
-            bool previousState = currentStates.Contains(state);
+            RobotBehavior previousBehavior = currentBehavior;
+            VerticalTransportType previousVertical = currentVerticalTransport;
             
-            if (value)
-            {
-                currentStates.Add(state);
-            }
-            else
-            {
-                currentStates.Remove(state);
-            }
+            currentBehavior = behavior;
+            currentVerticalTransport = (behavior == RobotBehavior.Moving) ? verticalTransport : VerticalTransportType.None;
             
-            if (previousState != value)
+            if (previousBehavior != behavior || previousVertical != currentVerticalTransport)
             {
-                Debug.Log($"Robot {Id}: State {state} changed to {value}");
-                EventManager.Instance?.TriggerRobotStateChanged(Id.ToString(), state.ToString(), value);
+                string stateInfo = currentVerticalTransport != VerticalTransportType.None 
+                    ? $"{behavior} ({currentVerticalTransport})" 
+                    : behavior.ToString();
+                Debug.Log($"Robot {Id}: Behavior changed to {stateInfo}");
+                EventManager.Instance?.TriggerRobotStateChanged(Id.ToString(), behavior.ToString(), true);
             }
         }
 
@@ -800,10 +804,7 @@ namespace CentralControl.RobotControl
         public void ResetRobot()
         {
             StopAllCoroutines();
-            SetState(RobotState.Moving, false);
-            SetState(RobotState.Picking, false);
-            SetState(RobotState.UsingElevator, false);
-            SetState(RobotState.UsingStairs, false);
+            SetBehavior(RobotBehavior.Idle);
             isProcessingOrdersRunning = false;
             Interlocked.Exchange(ref isProcessingOrder, 0);
             
@@ -822,25 +823,15 @@ namespace CentralControl.RobotControl
         {
             Debug.Log($"Robot {Id}: Resetting path state");
             
-            // Reset state variables
             needsPathRecovery = true;
             lastPathRecoveryTime = Time.time;
             
-            // Cancel current movement
-            if (IsMoving)
+            if (IsMoving || IsVerticallyMoving)
             {
                 StopMoving();
-                SetState(RobotState.Moving, false);
+                SetBehavior(RobotBehavior.Idle);
             }
             
-            // Also cancel vertical movement if in progress
-            if (IsVerticallyMoving)
-            {
-                SetState(RobotState.UsingElevator, false);
-                SetState(RobotState.UsingStairs, false);
-            }
-            
-            // Brief delay before recovery
             StartCoroutine(RecoverAfterDelay(1.0f));
         }
 
@@ -894,7 +885,6 @@ namespace CentralControl.RobotControl
             Vector3 finalTarget = GetTargetPosition(currentOrder.PickingPoint);
             string targetFloorLevel = currentOrder.PickingPoint.FloorLevel;
             
-            isEmergencyStopped = false;
             needsPathRecovery = false;
             
             int attempts = 0;
@@ -918,7 +908,7 @@ namespace CentralControl.RobotControl
                     
                     Debug.Log($"Robot {Id}: Replanning path succeeded on attempt {attempts + 1}");
                     
-                    SetState(RobotState.Moving, true);
+                    SetBehavior(RobotBehavior.Moving);
                     pathReplanned = true;
                     
                     float startDelay = 0.5f;
@@ -986,6 +976,12 @@ namespace CentralControl.RobotControl
                         false // Not an end cell since we're moving to a new cell
                     );
                     cellSpaceEntryTimes.Remove(lastCellSpace.Id);
+                    
+                    // Mark this robot's layer as dirty for incremental merge
+                    if (CentralController.Instance != null)
+                    {
+                        CentralController.Instance.MarkRobotLayerDirty(Id);
+                    }
                 }
                 
                 // Record entry time for new cell space
@@ -1017,6 +1013,12 @@ namespace CentralControl.RobotControl
                     isStartCell,
                     isEndCell
                 );
+                
+                // Mark this robot's layer as dirty for incremental merge
+                if (CentralController.Instance != null)
+                {
+                    CentralController.Instance.MarkRobotLayerDirty(Id);
+                }
             }
         }
 
@@ -1212,7 +1214,6 @@ namespace CentralControl.RobotControl
             EventManager.Instance?.TriggerRobotWaitEnded(Id.ToString(), "CollisionRecovery");
             isBackingUp = false;
             navigationEnabled = true;
-            isEmergencyStopped = false;
             
             Debug.Log($"Robot {Id}: Resuming after backup and wait");
             
@@ -1220,12 +1221,16 @@ namespace CentralControl.RobotControl
             {
                 if (currentPath != null && currentPath.Count > 0 && currentPathIndex < currentPath.Count)
                 {
-                    SetState(RobotState.Moving, true);
+                    SetBehavior(RobotBehavior.Moving);
                 }
                 else
                 {
                     StartCoroutine(ReplanPath());
                 }
+            }
+            else
+            {
+                SetBehavior(RobotBehavior.Idle);
             }
         }
 
@@ -1253,7 +1258,6 @@ namespace CentralControl.RobotControl
             currentMovement.Clear();
             currentPathIndex = 0;
             
-            isEmergencyStopped = false;
             needsPathRecovery = false;
             
             Debug.Log($"Robot {Id}: Executing delayed replan after {randomDelay:F2}s, reason: {reason}");
@@ -1305,10 +1309,9 @@ namespace CentralControl.RobotControl
 
                     if (shouldQueueBehind)
                     {
-                        SetState(RobotState.Queuing, true);
-                        if (!isEmergencyStopped)
+                        if (!IsQueuing)
                         {
-                            isEmergencyStopped = true;
+                            SetBehavior(RobotBehavior.Queuing);
                             lastEmergencyStopTime = Time.time;
                             if (rb != null)
                             {
@@ -1331,12 +1334,11 @@ namespace CentralControl.RobotControl
                 }
             }
             
-            if (isEmergencyStopped && !emergencySituation && !isBackingUp)
+            if ((IsEmergencyStopped || IsQueuing) && !emergencySituation && !isBackingUp)
             {
                 float safeResumeDistance = emergencyStopDistance * 1.5f;
                 if (hitColliders.Length == 0 || closestObstacleDistance > safeResumeDistance)
                 {
-                    SetState(RobotState.Queuing, false);
                     ResumeFromEmergencyStop();
                 }
             }
@@ -1344,9 +1346,9 @@ namespace CentralControl.RobotControl
 
         private void TriggerEmergencyBackup(Vector3 obstaclePosition)
         {
-            if (isEmergencyStopped || isBackingUp) return;
+            if (IsEmergencyStopped || isBackingUp) return;
             
-            isEmergencyStopped = true;
+            SetBehavior(RobotBehavior.EmergencyStopped);
             lastEmergencyStopTime = Time.time;
             
             if (rb != null)
@@ -1366,7 +1368,7 @@ namespace CentralControl.RobotControl
         {
             yield return new WaitForSeconds(delay);
             
-            if (!isEmergencyStopped || isBackingUp)
+            if (!IsEmergencyStopped || isBackingUp)
                 yield break;
             
             Vector3 backupDirection = (transform.position - obstaclePosition).normalized;
@@ -1389,9 +1391,8 @@ namespace CentralControl.RobotControl
 
         private void ResumeFromEmergencyStop()
         {
-            if (isEmergencyStopped)
+            if (IsEmergencyStopped || IsQueuing)
             {
-                isEmergencyStopped = false;
                 Debug.Log($"Robot {Id}: Resuming from emergency stop at time {Time.time}");
                 
                 StartCoroutine(ResumeMovementWithDelay());
@@ -1409,7 +1410,7 @@ namespace CentralControl.RobotControl
                 if (currentPath.Count > 0 && currentPathIndex < currentPath.Count)
                 {
                     Debug.Log($"Robot {Id}: Resuming existing path from point {currentPathIndex} of {currentPath.Count}");
-                    SetState(RobotState.Moving, true);
+                    SetBehavior(RobotBehavior.Moving);
                 }
                 else
                 {
@@ -1477,9 +1478,9 @@ namespace CentralControl.RobotControl
                 recentCollisions.Add(collisionObject);
             }
             
-            if (!isEmergencyStopped && !isBackingUp)
+            if (!IsEmergencyStopped && !isBackingUp)
             {
-                isEmergencyStopped = true;
+                SetBehavior(RobotBehavior.EmergencyStopped);
                 lastEmergencyStopTime = Time.time;
                 if (rb != null)
                 {
@@ -1572,7 +1573,7 @@ namespace CentralControl.RobotControl
             }
             else
             {
-                isEmergencyStopped = false;
+                SetBehavior(RobotBehavior.Idle);
             }
         }
 
@@ -1655,7 +1656,7 @@ namespace CentralControl.RobotControl
             }
             else
             {
-                isEmergencyStopped = false;
+                SetBehavior(RobotBehavior.Idle);
             }
         }
         #endregion
@@ -1723,7 +1724,7 @@ namespace CentralControl.RobotControl
             waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
             
             // Notify state change
-            SetState(RobotState.Moving, true);
+            SetBehavior(RobotBehavior.Moving);
         }
 
         private void UpdatePathSegmentsWithSpeed(List<ConnectionPoint> path, List<float> times, List<float> speeds)
@@ -1765,7 +1766,7 @@ namespace CentralControl.RobotControl
             
             Debug.Log($"Robot {Id}: Starting path execution, path length: {currentPath.Count}");
             
-            SetState(RobotState.Moving, true);
+            SetBehavior(RobotBehavior.Moving);
             
             // Reset path tracking index
             currentPathIndex = 0;
