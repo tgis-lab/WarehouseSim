@@ -896,6 +896,7 @@ namespace CentralControl.RobotControl
                 Debug.Log($"Robot {Id}: Attempting to replan path to {finalTarget} (Attempt {attempts + 1})");
                 
                 var result = PlanPath(finalTarget, targetFloorLevel);
+                
                 if (result.path != null && result.path.Count > 0)
                 {
                     currentPlanId = result.planId;
