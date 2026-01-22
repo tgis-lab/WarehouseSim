@@ -14,7 +14,6 @@ namespace CentralControl.RobotControl
     {
         #region Configuration
         private readonly int replanThreshold = 3;
-        private readonly float backupDistance = 1.5f;
         private readonly float minRandomWait = 0.3f;
         private readonly float maxRandomWait = 0.8f;
         private readonly float collisionHistoryTimeout = 30f;
@@ -24,6 +23,7 @@ namespace CentralControl.RobotControl
         private readonly RobotController owner;
         private Dictionary<string, CollisionRecord> collisionHistory = new Dictionary<string, CollisionRecord>();
         private bool isRecovering = false;
+
         #endregion
         
         private class CollisionRecord
@@ -87,6 +87,12 @@ namespace CentralControl.RobotControl
         {
             if (e.RobotId == owner.Id.ToString())
             {
+                if (e.Reason == "DeadlockYield")
+                {
+                    owner.StartCoroutine(ExecuteDeadlockYield(e.SuggestedDelay));
+                    return;
+                }
+
                 owner.StartCoroutine(ExecuteDelayedReplan(e.SuggestedDelay, e.Reason));
             }
         }
@@ -164,35 +170,30 @@ namespace CentralControl.RobotControl
         {
             if (isRecovering) return;
             
-            Vector3 backupTarget = CalculateBackupTarget(obstaclePosition);
-            float randomWait = UnityEngine.Random.Range(minRandomWait, maxRandomWait);
+            Vector3 backupTarget = owner.CalculateSafeBackupTarget(obstaclePosition);
             
+            if (Vector3.Distance(backupTarget, owner.transform.position) < 0.1f)
+            {
+                Debug.Log($"Robot {owner.Id}: No safe backup position, waiting in place");
+                owner.StartCoroutine(WaitInPlaceAndReplan());
+                return;
+            }
+            
+            float randomWait = UnityEngine.Random.Range(minRandomWait, maxRandomWait);
             owner.StartBackupAndWait(backupTarget, randomWait);
         }
         
-        private Vector3 CalculateBackupTarget(Vector3? obstaclePosition = null)
+        private IEnumerator WaitInPlaceAndReplan()
         {
-            Vector3? previousNode = owner.GetPreviousPathNode();
+            isRecovering = true;
+            float waitTime = UnityEngine.Random.Range(0.5f, 1.5f);
+            yield return new WaitForSeconds(waitTime);
             
-            if (previousNode.HasValue)
+            isRecovering = false;
+            if (owner != null && owner.CurrentOrder != null)
             {
-                return previousNode.Value;
+                owner.RequestReplan("NoSafeBackupPosition");
             }
-            
-            if (obstaclePosition.HasValue)
-            {
-                Vector3 backupDirection = (owner.transform.position - obstaclePosition.Value).normalized;
-                backupDirection.y = 0;
-                
-                if (backupDirection.magnitude < 0.1f)
-                {
-                    backupDirection = -owner.transform.forward;
-                }
-                
-                return owner.transform.position + backupDirection * backupDistance;
-            }
-            
-            return owner.transform.position - owner.transform.forward * backupDistance;
         }
         #endregion
         
@@ -229,7 +230,21 @@ namespace CentralControl.RobotControl
                 owner.RequestReplan(reason);
             }
         }
+
+        private IEnumerator ExecuteDeadlockYield(float delay)
+        {
+            if (delay > 0)
+            {
+                yield return new WaitForSeconds(delay);
+            }
+
+            if (owner != null && !owner.IsBackingUp)
+            {
+                ExecuteBackupRecovery();
+            }
+        }
         #endregion
+
         
         #region Recovery Completion Notification
         public void NotifyRecoveryCompleted(CollisionRecoveryResult result, float recoveryTime, float collisionTime, string otherRobotId = null)

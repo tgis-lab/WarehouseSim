@@ -55,6 +55,16 @@ namespace CentralControl
         
         private Dictionary<int, float> robotEmergencyStopStartTime = new Dictionary<int, float>();
         private Dictionary<int, float> lastNotificationTime = new Dictionary<int, float>();
+        private Dictionary<int, int> robotEmergencyStopCount = new Dictionary<int, int>();
+        private Dictionary<int, float> robotLastEmergencyStopTime = new Dictionary<int, float>();
+        private Dictionary<int, bool> robotWasEmergencyStopped = new Dictionary<int, bool>();
+        private Dictionary<int, Vector3> robotStartDeadlockPosition = new Dictionary<int, Vector3>();
+        private Dictionary<int, float> lastOscillationLogTime = new Dictionary<int, float>();
+        private const float OSCILLATION_WINDOW = 10f;
+        private const float OSCILLATION_MIN_DURATION = 6f;
+        private const int OSCILLATION_THRESHOLD = 3;
+        private const float SIGNIFICANT_MOVE_DISTANCE = 0.5f;
+        private const float OSCILLATION_LOG_COOLDOWN = 10f;
         #endregion
 
         #region Initialization
@@ -117,28 +127,77 @@ namespace CentralControl
             {
                 if (robot == null) continue;
                 
-                bool isValidDeadlockCandidate = robot.IsEmergencyStopped && 
-                                                 !robot.IsPicking && 
-                                                 !robot.IsQueuing &&
-                                                 robot.IsOnTask;
-                
-                if (isValidDeadlockCandidate)
+                bool isEmergencyState = robot.IsEmergencyStopped && 
+                                        !robot.IsPicking && 
+                                        !robot.IsQueuing &&
+                                        robot.IsOnTask;
+
+                bool isTracked = robotEmergencyStopStartTime.ContainsKey(robot.Id);
+
+                if (isEmergencyState)
                 {
-                    if (!robotEmergencyStopStartTime.ContainsKey(robot.Id))
+                    if (!isTracked)
                     {
                         robotEmergencyStopStartTime[robot.Id] = currentTime;
+                        robotStartDeadlockPosition[robot.Id] = robot.transform.position;
+                        robotEmergencyStopCount[robot.Id] = 0;
+                        robotWasEmergencyStopped[robot.Id] = true;
                     }
-                    
-                    float stoppedDuration = currentTime - robotEmergencyStopStartTime[robot.Id];
-                    
-                    if (stoppedDuration >= deadlockTimeThreshold)
+
+                    if (!robotLastEmergencyStopTime.ContainsKey(robot.Id) ||
+                        currentTime - robotLastEmergencyStopTime[robot.Id] > 0.5f)
                     {
-                        deadlockedRobots.Add(robot);
+                        robotEmergencyStopCount[robot.Id]++;
+                        robotLastEmergencyStopTime[robot.Id] = currentTime;
                     }
                 }
                 else
                 {
-                    robotEmergencyStopStartTime.Remove(robot.Id);
+                    robotWasEmergencyStopped[robot.Id] = false;
+                }
+
+                if (isEmergencyState || isTracked)
+                {
+                    if (isTracked)
+                    {
+                        float stoppedDuration = currentTime - robotEmergencyStopStartTime[robot.Id];
+                        int stopCount = robotEmergencyStopCount[robot.Id];
+                        Vector3 startPos = robotStartDeadlockPosition[robot.Id];
+                        float displacement = Vector3.Distance(startPos, robot.transform.position);
+
+                        if (displacement > SIGNIFICANT_MOVE_DISTANCE)
+                        {
+                            ResetRobotTracking(robot.Id);
+                            continue;
+                        }
+
+                        if (!isEmergencyState && stoppedDuration > OSCILLATION_WINDOW)
+                        {
+                            ResetRobotTracking(robot.Id);
+                            continue;
+                        }
+
+                        bool isDeadlocked = stoppedDuration >= deadlockTimeThreshold;
+                        bool isOscillating = stopCount >= OSCILLATION_THRESHOLD &&
+                                            stoppedDuration >= OSCILLATION_MIN_DURATION &&
+                                            stoppedDuration < OSCILLATION_WINDOW;
+
+                        bool shouldTreatOscillation = isOscillating && isEmergencyState;
+
+                        if (isDeadlocked || shouldTreatOscillation)
+                        {
+                            deadlockedRobots.Add(robot);
+                            if (isOscillating && !isDeadlocked)
+                            {
+                                if (!lastOscillationLogTime.TryGetValue(robot.Id, out float lastLog) ||
+                                    currentTime - lastLog >= OSCILLATION_LOG_COOLDOWN)
+                                {
+                                    lastOscillationLogTime[robot.Id] = currentTime;
+                                    Debug.LogWarning($"[DeadlockDetector] Robot {robot.Id} detected as oscillating (stopped {stopCount} times in {stoppedDuration:F1}s, disp={displacement:F2}m)");
+                                }
+                            }
+                        }
+                    }
                 }
             }
             
@@ -153,6 +212,16 @@ namespace CentralControl
             }
         }
         
+        private void ResetRobotTracking(int robotId)
+        {
+            robotEmergencyStopStartTime.Remove(robotId);
+            robotEmergencyStopCount.Remove(robotId);
+            robotLastEmergencyStopTime.Remove(robotId);
+            robotStartDeadlockPosition.Remove(robotId);
+            robotWasEmergencyStopped.Remove(robotId);
+            lastOscillationLogTime.Remove(robotId);
+        }
+
         private List<List<RobotController>> GroupNearbyRobots(List<RobotController> robots)
         {
             var groups = new List<List<RobotController>>();

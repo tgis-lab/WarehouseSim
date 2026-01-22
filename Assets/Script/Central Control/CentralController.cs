@@ -27,6 +27,9 @@ namespace CentralControl
         public MapLoader mapLoader;
         public IntersectionAreaManager intersectionAreaManager;
         public DeadlockDetector deadlockDetector;
+
+        [Header("Deadlock Resolution")]
+        public float deadlockDecisionTtl = 5f;
         
         [Header("Map Settings")]
         public float width, length;
@@ -78,14 +81,25 @@ namespace CentralControl
         private int totalEnvironmentCollisions = 0;
         private Dictionary<string, int> robotCollisionCounts = new Dictionary<string, int>();
         private Dictionary<string, PathPlanningMetrics> pathPlanningMetrics = new Dictionary<string, PathPlanningMetrics>();
+        private readonly object deadlockDecisionLock = new object();
+        private readonly Dictionary<string, DeadlockDecision> deadlockDecisions = new Dictionary<string, DeadlockDecision>();
         
         // Dirty flag for incremental layer merge
+
         private readonly HashSet<int> dirtyRobotIds = new HashSet<int>();
         private readonly object dirtyRobotLock = new object();
 
         #endregion
 
+        private class DeadlockDecision
+        {
+            public string YieldRobotId;
+            public float CreatedTime;
+            public string[] InvolvedRobotIds;
+        }
+ 
         #region Unity Lifecycle
+
         private void Awake()
         {
             // Singleton initialization
@@ -198,6 +212,7 @@ namespace CentralControl
             {
                 EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
                 EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
+                EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
             }
             
             // Stop order generation coroutine
@@ -351,9 +366,11 @@ namespace CentralControl
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
-                
+                EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
+
                 EventManager.Instance.OnRobotCollisionDetected += HandleRobotCollision;
-                
+                EventManager.Instance.OnDeadlockDetected += HandleDeadlockDetected;
+
                 Debug.Log("[CentralControl] Collision tracking system initialized!");
             }
             else
@@ -562,6 +579,115 @@ namespace CentralControl
                 EventManager.Instance.OnRobotPathPlanned += HandleRobotPathPlanned;
             }
         }
+
+        private void HandleDeadlockDetected(object sender, DeadlockDetectedEventArgs e)
+        {
+            if (robotManager == null || e == null || e.InvolvedRobotIds == null || e.InvolvedRobotIds.Length == 0)
+            {
+                return;
+            }
+
+            float now = Time.time;
+            string groupKey = GetDeadlockGroupKey(e.InvolvedRobotIds);
+
+            string yieldRobotId;
+            lock (deadlockDecisionLock)
+            {
+                if (deadlockDecisions.TryGetValue(groupKey, out var existingDecision) &&
+                    now - existingDecision.CreatedTime <= deadlockDecisionTtl)
+                {
+                    yieldRobotId = existingDecision.YieldRobotId;
+                }
+                else
+                {
+                    yieldRobotId = SelectYieldRobot(e.InvolvedRobotIds);
+                    deadlockDecisions[groupKey] = new DeadlockDecision
+                    {
+                        YieldRobotId = yieldRobotId,
+                        CreatedTime = now,
+                        InvolvedRobotIds = e.InvolvedRobotIds
+                    };
+                }
+            }
+
+            foreach (var robotId in e.InvolvedRobotIds)
+            {
+                float delay = GetDeadlockStaggerDelay(e.InvolvedRobotIds, robotId);
+                if (robotId == yieldRobotId)
+                {
+                    EventManager.Instance?.TriggerReplanRequested(robotId, "DeadlockYield", delay);
+                }
+                else
+                {
+                    EventManager.Instance?.TriggerReplanRequested(robotId, "DeadlockResolution", delay);
+                }
+            }
+        }
+
+        private string GetDeadlockGroupKey(string[] involvedRobotIds)
+        {
+            var ordered = involvedRobotIds.OrderBy(id => id).ToArray();
+            return string.Join("_", ordered);
+        }
+
+        private float GetDeadlockStaggerDelay(string[] involvedRobotIds, string robotId)
+        {
+            int index = Array.IndexOf(involvedRobotIds, robotId);
+            if (index < 0)
+            {
+                return 0f;
+            }
+
+            return index * 0.5f;
+        }
+
+        private string SelectYieldRobot(string[] involvedRobotIds)
+        {
+            string bestId = null;
+            float bestCost = float.MaxValue;
+
+            foreach (var robotId in involvedRobotIds)
+            {
+                var robot = robotManager.GetRobotById(robotId);
+                if (robot == null)
+                {
+                    continue;
+                }
+
+                float cost = EstimateYieldCost(robot);
+                if (cost < bestCost)
+                {
+                    bestCost = cost;
+                    bestId = robotId;
+                }
+            }
+
+            return bestId ?? involvedRobotIds.FirstOrDefault();
+        }
+
+        private float EstimateYieldCost(RobotController robot)
+        {
+            float cost = 0f;
+            cost += robot.GetRobotOrdersQueueCount * 2f;
+
+            if (robot.CurrentOrder != null)
+            {
+                cost += 1f;
+            }
+
+            if (robot.IsBackingUp)
+            {
+                cost += 3f;
+            }
+
+            if (!robot.IsMoving)
+            {
+                cost += 2f;
+            }
+
+            return cost;
+        }
+
         
         // Detect path conflicts for a specific robot
         private bool DetectPathConflicts(string robotId, List<ConnectionPoint> path, List<float> times, string planId)

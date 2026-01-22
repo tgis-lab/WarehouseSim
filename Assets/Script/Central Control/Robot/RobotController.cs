@@ -882,6 +882,14 @@ namespace CentralControl.RobotControl
             
             yield return new WaitForSeconds(0.5f);
             
+            if (currentOrder == null || currentOrder.PickingPoint == null)
+            {
+                Debug.LogWarning($"Robot {Id}: Order became null during replan wait");
+                isReplanning = false;
+                navigationEnabled = wasNavigationEnabled;
+                yield break;
+            }
+            
             Vector3 finalTarget = GetTargetPosition(currentOrder.PickingPoint);
             string targetFloorLevel = currentOrder.PickingPoint.FloorLevel;
             
@@ -1158,6 +1166,233 @@ namespace CentralControl.RobotControl
         }
 
         /// <summary>
+        /// Gets recent path history positions for track-aligned backup.
+        /// </summary>
+        /// <param name="maxCount">Maximum number of positions to return</param>
+        /// <returns>List of recent positions, most recent first</returns>
+        public List<Vector3> GetRecentPathHistory(int maxCount = 3)
+        {
+            var result = new List<Vector3>();
+            
+            // Add from pathHistory (newest to oldest)
+            for (int i = pathHistory.Count - 2; i >= 0 && result.Count < maxCount; i--)
+            {
+                result.Add(pathHistory[i]);
+            }
+            
+            // If not enough, try to get from planned path
+            if (result.Count < maxCount && currentPath != null && currentPathIndex > 0)
+            {
+                for (int i = currentPathIndex - 1; i >= 0 && result.Count < maxCount; i--)
+                {
+                    var point = currentPath[i];
+                    var pos = new Vector3(
+                        (float)point.Point.Coordinate.X,
+                        transform.position.y,
+                        (float)point.Point.Coordinate.Y
+                    );
+                    
+                    // Avoid duplicates
+                    if (result.Count == 0 || Vector3.Distance(result[result.Count - 1], pos) > 0.3f)
+                    {
+                        result.Add(pos);
+                    }
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if a backup target position is safe to move to.
+        /// Validates: no obstacles, within navigable area, no lane violations.
+        /// </summary>
+        /// <param name="target">Target position to check</param>
+        /// <returns>True if safe, false otherwise</returns>
+        public bool IsSafeBackupTarget(Vector3 target, bool allowLateralWithinCell = false)
+        {
+            float robotRadius = 1.5f;
+            var robotCollider = GetComponent<Collider>();
+            if (robotCollider != null)
+            {
+                var extents = robotCollider.bounds.extents;
+                robotRadius = Mathf.Max(extents.x, extents.z) * 1.1f;
+            }
+            
+            // 1. Check if path from current position to target is clear
+            Vector3 direction = (target - transform.position).normalized;
+            float distance = Vector3.Distance(transform.position, target);
+            
+            if (distance < 0.1f)
+                return false; // Too close, not useful
+            
+            // Check for obstacles along the path
+            if (Physics.SphereCast(transform.position, robotRadius * 0.8f, direction, out RaycastHit hit, distance, obstacleLayer))
+            {
+                // There's an obstacle in the way
+                if (hit.collider.gameObject != gameObject)
+                {
+                    Debug.Log($"Robot {Id}: Backup target {target} blocked by {hit.collider.name}");
+                    return false;
+                }
+            }
+            
+            // 2. Check if target position has no obstacles
+            Collider[] overlaps = Physics.OverlapSphere(target, robotRadius * 0.6f, obstacleLayer);
+            foreach (var collider in overlaps)
+            {
+                if (collider.gameObject != gameObject)
+                {
+                    Debug.Log($"Robot {Id}: Backup target {target} occupied by {collider.name}");
+                    return false;
+                }
+            }
+            
+            // 3. Check if target is within a valid navigable cell
+            if (indoorSpace != null)
+            {
+                var point = new NetTopologySuite.Geometries.Point(target.x, target.z);
+                CellSpace cell = null;
+                
+                foreach (var cellSpace in indoorSpace.CellSpaces)
+                {
+                    if (cellSpace.Space.Contains(point))
+                    {
+                        cell = cellSpace;
+                        break;
+                    }
+                }
+                
+                if (cell == null)
+                {
+                    Debug.Log($"Robot {Id}: Backup target {target} not in any navigable cell");
+                    return false;
+                }
+                
+                // 4. Check for one-way lane violations (if applicable)
+                // The cell's navigability doesn't inherently encode direction,
+                // but we can check if we're moving against traffic flow
+                // by comparing backup direction with planned path direction
+                if (!allowLateralWithinCell && currentPath != null && currentPath.Count > 1 && currentPathIndex < currentPath.Count)
+                {
+                    // Get the planned direction at current position
+                    var currentTarget = currentPath[currentPathIndex];
+                    Vector3 plannedDirection = new Vector3(
+                        (float)currentTarget.Point.Coordinate.X - transform.position.x,
+                        0,
+                        (float)currentTarget.Point.Coordinate.Y - transform.position.z
+                    ).normalized;
+                    
+                    Vector3 backupDirection = (target - transform.position).normalized;
+                    backupDirection.y = 0;
+                    
+                    // Check if backup direction is too perpendicular to aisle
+                    // (which would indicate leaving the lane)
+                    float dotWithPlanned = Vector3.Dot(plannedDirection, backupDirection);
+                    
+                    // Allow backup (opposite direction) but not sideways movement
+                    // Dot product: -1 = opposite (OK), 0 = perpendicular (bad), 1 = same (OK)
+                    if (Mathf.Abs(dotWithPlanned) < 0.3f)
+                    {
+                        // Sideways movement - might leave lane
+                        Debug.Log($"Robot {Id}: Backup direction {backupDirection} too perpendicular to lane");
+                        return false;
+                    }
+                }
+            }
+            
+            return true;
+        }
+
+        /// <summary>
+        /// Gets a track-aligned backup position along the current aisle/corridor.
+        /// </summary>
+        /// <returns>Backup position aligned with current movement direction, or null if not available</returns>
+        public Vector3? GetTrackAlignedBackupPosition()
+        {
+            const float backupDistance = 1.5f;
+            
+            // If we have a current path, backup along it
+            if (currentPath != null && currentPathIndex > 0 && currentPathIndex < currentPath.Count)
+            {
+                // Get direction from previous path point to current position
+                var prevPoint = currentPath[currentPathIndex - 1];
+                Vector3 prevPos = new Vector3(
+                    (float)prevPoint.Point.Coordinate.X,
+                    transform.position.y,
+                    (float)prevPoint.Point.Coordinate.Y
+                );
+                
+                Vector3 trackDirection = (transform.position - prevPos).normalized;
+                trackDirection.y = 0;
+                
+                if (trackDirection.magnitude > 0.1f)
+                {
+                    // Backup in opposite direction (back along track)
+                    Vector3 backupTarget = transform.position - trackDirection * backupDistance;
+                    return backupTarget;
+                }
+            }
+            
+            // Fallback: use current forward direction
+            Vector3 fallbackTarget = transform.position - transform.forward * backupDistance;
+            return fallbackTarget;
+        }
+
+        /// <summary>
+        /// Calculates a safe backup target using priority: track history > track-aligned > stay in place.
+        /// </summary>
+        /// <param name="obstaclePosition">Optional obstacle position to move away from</param>
+        /// <returns>Safe backup target position</returns>
+        public Vector3 CalculateSafeBackupTarget(Vector3? obstaclePosition = null)
+        {
+            // Priority 1: Try recent path history positions (track-aligned backup)
+            var historyPositions = GetRecentPathHistory(3);
+            foreach (var pos in historyPositions)
+            {
+                if (IsSafeBackupTarget(pos, allowLateralWithinCell: true))
+                {
+                    Debug.Log($"Robot {Id}: Using path history position for backup: {pos}");
+                    return pos;
+                }
+            }
+            
+            // Priority 2: Try track-aligned backup
+            var trackAligned = GetTrackAlignedBackupPosition();
+            if (trackAligned.HasValue && IsSafeBackupTarget(trackAligned.Value))
+            {
+                Debug.Log($"Robot {Id}: Using track-aligned position for backup: {trackAligned.Value}");
+                return trackAligned.Value;
+            }
+            
+            // Priority 3: Try backing away from obstacle (with shorter distance)
+            if (obstaclePosition.HasValue)
+            {
+                Vector3 awayFromObstacle = (transform.position - obstaclePosition.Value).normalized;
+                awayFromObstacle.y = 0;
+                
+                if (awayFromObstacle.magnitude > 0.1f)
+                {
+                    // Try progressively shorter distances
+                    float[] distances = { 1.0f, 0.7f, 0.5f, 0.3f };
+                    foreach (float dist in distances)
+                    {
+                        Vector3 candidate = transform.position + awayFromObstacle * dist;
+                        if (IsSafeBackupTarget(candidate))
+                        {
+                            Debug.Log($"Robot {Id}: Using obstacle-away position for backup: {candidate} (dist={dist})");
+                            return candidate;
+                        }
+                    }
+                }
+            }
+            
+            // Priority 4: No safe backup found - stay in place
+            Debug.LogWarning($"Robot {Id}: No safe backup position found, staying in place");
+            return transform.position;
+        }
+
+        /// <summary>
         /// Initiates a backup maneuver to the specified target position, then waits before resuming.
         /// Called by CollisionRecoveryManager for coordinated collision recovery.
         /// </summary>
@@ -1265,7 +1500,13 @@ namespace CentralControl.RobotControl
             
             if (currentOrder != null)
             {
+                SetBehavior(RobotBehavior.Moving);
+                navigationEnabled = true;
                 StartCoroutine(ReplanPath());
+            }
+            else
+            {
+                SetBehavior(RobotBehavior.Idle);
             }
         }
         #endregion
@@ -1282,6 +1523,7 @@ namespace CentralControl.RobotControl
             LayerMask dynamicObstacleLayer = LayerMask.GetMask("RobotLayer", "PickerLayer");
             Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius, dynamicObstacleLayer);
             bool emergencySituation = false;
+            bool shouldSlowDown = false;
             float closestObstacleDistance = float.MaxValue;
             
             foreach (var hitCollider in hitColliders)
@@ -1291,6 +1533,20 @@ namespace CentralControl.RobotControl
                         
                 float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
                 closestObstacleDistance = Mathf.Min(closestObstacleDistance, distance);
+                
+                // Check if obstacle is in front of us (not behind)
+                Vector3 toObstacle = (hitCollider.transform.position - transform.position).normalized;
+                toObstacle.y = 0;
+                float dotProduct = Vector3.Dot(transform.forward, toObstacle);
+                
+                // Only react to obstacles in front or to the side (dot > -0.3)
+                // Ignore obstacles directly behind us (dot < -0.3)
+                if (dotProduct < -0.3f)
+                {
+                    continue; // Obstacle is behind us, ignore
+                }
+
+                bool inFrontCone = dotProduct >= 0.7071f;
                         
                 RobotController otherRobot = hitCollider.GetComponent<RobotController>();
                 float currentEmergencyStopDistance = (otherRobot != null) ? 
@@ -1298,8 +1554,6 @@ namespace CentralControl.RobotControl
                 
                 if (distance < currentEmergencyStopDistance)
                 {
-                    emergencySituation = true;
-                    
                     bool shouldQueueBehind = otherRobot != null && otherRobot.IsPicking;
                     
                     if (otherRobot != null && otherRobot.IsQueuing)
@@ -1308,8 +1562,30 @@ namespace CentralControl.RobotControl
                         continue;
                     }
 
+                    if (otherRobot != null)
+                    {
+                        Vector3 otherForward = otherRobot.transform.forward;
+                        otherForward.y = 0;
+                        Vector3 myForward = transform.forward;
+                        myForward.y = 0;
+                        float headingDot = Vector3.Dot(myForward.normalized, otherForward.normalized);
+                        bool isSameDirection = headingDot >= 0.7071f;
+                        bool isOppositeDirection = headingDot <= -0.7071f;
+
+                        if (inFrontCone && (isSameDirection || isOppositeDirection))
+                        {
+                            shouldSlowDown = true;
+                            if (!recentCollisions.Contains(hitCollider.gameObject))
+                            {
+                                recentCollisions.Add(hitCollider.gameObject);
+                            }
+                            continue;
+                        }
+                    }
+
                     if (shouldQueueBehind)
                     {
+                        emergencySituation = true;
                         if (!IsQueuing)
                         {
                             SetBehavior(RobotBehavior.Queuing);
@@ -1321,18 +1597,30 @@ namespace CentralControl.RobotControl
                             }
                         }
                     }
-                    else
+                    else if (otherRobot == null || (!otherRobot.IsPicking && !otherRobot.IsQueuing))
                     {
+                        // Non-picking robot or environment obstacle in front - emergency situation
+                        emergencySituation = true;
                         TriggerEmergencyBackup(hitCollider.transform.position);
                     }
+                    // If otherRobot just finished picking (is Idle or Moving), don't set emergencySituation
+                    // This allows the queuing robot to resume
                     
                     if (!recentCollisions.Contains(hitCollider.gameObject))
                     {
                         recentCollisions.Add(hitCollider.gameObject);
                     }
                     
-                    break;
+                    if (emergencySituation)
+                    {
+                        break;
+                    }
                 }
+            }
+
+            if (shouldSlowDown && rb != null)
+            {
+                rb.velocity *= 0.7f;
             }
             
             if ((IsEmergencyStopped || IsQueuing) && !emergencySituation && !isBackingUp)
@@ -1372,20 +1660,29 @@ namespace CentralControl.RobotControl
             if (!IsEmergencyStopped || isBackingUp)
                 yield break;
             
-            Vector3 backupDirection = (transform.position - obstaclePosition).normalized;
-            backupDirection.y = 0;
+            Vector3 backupTarget = CalculateSafeBackupTarget(obstaclePosition);
             
-            if (backupDirection.magnitude < 0.1f)
+            if (Vector3.Distance(backupTarget, transform.position) < 0.1f)
             {
-                backupDirection = -transform.forward;
+                Debug.Log($"Robot {Id}: No safe backup position during emergency, waiting and replanning");
+                yield return new WaitForSeconds(UnityEngine.Random.Range(0.5f, 1.0f));
+                
+                if (currentOrder != null)
+                {
+                    SetBehavior(RobotBehavior.Moving);
+                    navigationEnabled = true;
+                    StartCoroutine(ReplanPath());
+                }
+                else
+                {
+                    SetBehavior(RobotBehavior.Idle);
+                }
+                yield break;
             }
-            
-            float backupDistance = 1.5f;
-            Vector3 backupTarget = transform.position + backupDirection * backupDistance;
             
             float randomWait = UnityEngine.Random.Range(0.3f, 0.8f);
             
-            Debug.Log($"Robot {Id}: Executing emergency backup to {backupTarget}");
+            Debug.Log($"Robot {Id}: Executing safe emergency backup to {backupTarget}");
             
             StartBackupAndWait(backupTarget, randomWait);
         }
@@ -1495,66 +1792,27 @@ namespace CentralControl.RobotControl
         {
             navigationEnabled = false;
             
-            // 记录碰撞发生时的信息
             Vector3 collisionDirection = (otherRobot.transform.position - transform.position).normalized;
             float dotProduct = Vector3.Dot(transform.forward, collisionDirection);
-            bool isHeadOn = dotProduct < -0.3f;
-            bool isTailgating = dotProduct > 0.7f;
-            bool isBeingTailgated = dotProduct < -0.7f;
-            bool isSideCollision = Mathf.Abs(dotProduct) <= 0.3f;
+            string collisionType = dotProduct < -0.3f ? "head-on" : 
+                                   dotProduct > 0.7f ? "tailgating" : 
+                                   dotProduct < -0.7f ? "being tailgated" : "side";
             
-            Debug.Log($"Robot {Id}: Collision with Robot {otherRobot.Id}, type: {(isHeadOn ? "head-on" : isTailgating ? "tailgating" : isBeingTailgated ? "being tailgated" : "side")}");
+            Debug.Log($"Robot {Id}: Collision with Robot {otherRobot.Id}, type: {collisionType}");
             
             yield return new WaitForSeconds(0.5f);
             
             float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
             
-            Vector3 backupDirection = Vector3.zero;
-            
-            if (isHeadOn)
+            if (distance < emergencyStopDistance)
             {
-                backupDirection = -transform.forward;
-            }
-            else if (isTailgating)
-            {
-                backupDirection = -transform.forward;
-            }
-            else if (isBeingTailgated)
-            {
-                yield return new WaitForSeconds(1.0f);
+                Vector3 backupTarget = CalculateSafeBackupTarget(otherRobot.transform.position);
                 
-                distance = Vector3.Distance(transform.position, otherRobot.transform.position);
-                if (distance < emergencyStopDistance)
+                if (Vector3.Distance(backupTarget, transform.position) >= 0.1f)
                 {
-                    backupDirection = transform.forward;
-                }
-            }
-            else if (isSideCollision)
-            {
-                backupDirection = -collisionDirection + (-transform.forward * 0.5f);
-                backupDirection.Normalize();
-            }
-            
-            if (distance < emergencyStopDistance || backupDirection != Vector3.zero)
-            {
-                if (backupDirection != Vector3.zero)
-                {
-                    rb.velocity = backupDirection * defaultSpeed * 0.4f;
-                    yield return new WaitForSeconds(0.7f);
-                    rb.velocity = Vector3.zero;
-                }
-                
-                distance = Vector3.Distance(transform.position, otherRobot.transform.position);
-                if (distance < emergencyStopDistance * 0.8f)
-                {
-                    Debug.Log($"Robot {Id}: Still too close to Robot {otherRobot.Id} after initial maneuver, trying random direction");
-                    
-                    float randomAngle = UnityEngine.Random.Range(0f, 360f);
-                    backupDirection = Quaternion.Euler(0, randomAngle, 0) * Vector3.forward;
-                    
-                    rb.velocity = backupDirection * defaultSpeed * 0.3f;
-                    yield return new WaitForSeconds(0.6f);
-                    rb.velocity = Vector3.zero;
+                    float randomWait = UnityEngine.Random.Range(0.3f, 0.6f);
+                    StartBackupAndWait(backupTarget, randomWait);
+                    yield break;
                 }
             }
             
@@ -1584,67 +1842,13 @@ namespace CentralControl.RobotControl
             
             yield return new WaitForSeconds(0.3f);
             
-            Vector3 obstacleDir = (obstacle.transform.position - transform.position).normalized;
-            obstacleDir.y = 0;
-            if (obstacleDir.magnitude < 0.1f)
-            {
-                obstacleDir = -transform.forward;
-            }
-            else
-            {
-                obstacleDir.Normalize();
-            }
+            Vector3 backupTarget = CalculateSafeBackupTarget(obstacle.transform.position);
             
-            Collider[] hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance * 0.8f, obstacleLayer);
-            bool stillColliding = false;
-            
-            foreach (var hitCollider in hitColliders)
+            if (Vector3.Distance(backupTarget, transform.position) >= 0.1f)
             {
-                if (hitCollider.gameObject == obstacle)
-                {
-                    stillColliding = true;
-                    break;
-                }
-            }
-            
-            if (stillColliding)
-            {
-                Vector3 lateralDir = Vector3.Cross(Vector3.up, obstacleDir).normalized;
-                
-                if (UnityEngine.Random.value > 0.5f)
-                {
-                    lateralDir = -lateralDir;
-                }
-                
-                Vector3 backupDirection = (-obstacleDir * 0.7f + lateralDir * 0.3f).normalized;
-                
-                rb.velocity = backupDirection * defaultSpeed * 0.5f;
-                yield return new WaitForSeconds(0.7f);
-                rb.velocity = Vector3.zero;
-                
-                hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance * 0.8f, obstacleLayer);
-                stillColliding = false;
-                
-                foreach (var hitCollider in hitColliders)
-                {
-                    if (hitCollider.gameObject == obstacle)
-                    {
-                        stillColliding = true;
-                        break;
-                    }
-                }
-                
-                if (stillColliding)
-                {
-                    Debug.Log($"Robot {Id}: Still colliding with obstacle after first maneuver, trying another direction");
-                    
-                    lateralDir = -lateralDir;
-                    backupDirection = (-obstacleDir * 0.6f + lateralDir * 0.4f).normalized;
-                    
-                    rb.velocity = backupDirection * defaultSpeed * 0.4f;
-                    yield return new WaitForSeconds(0.6f);
-                    rb.velocity = Vector3.zero;
-                }
+                float randomWait = UnityEngine.Random.Range(0.3f, 0.6f);
+                StartBackupAndWait(backupTarget, randomWait);
+                yield break;
             }
             
             navigationEnabled = true;
