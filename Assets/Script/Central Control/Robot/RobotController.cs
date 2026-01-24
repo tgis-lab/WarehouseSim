@@ -2091,6 +2091,12 @@ namespace CentralControl.RobotControl
         {
             if (collision.gameObject.layer == LayerMask.NameToLayer("GroundLayer"))
                 return;
+            
+            // Queue state robots should not trigger backup recovery - they handle collisions via CheckSurroundings
+            if (IsQueuing || IsAdvancingInQueue || IsPickingPending)
+            {
+                return;
+            }
                     
             GameObject collisionObject = collision.gameObject;
             string collisionObjectName = collisionObject.name;
