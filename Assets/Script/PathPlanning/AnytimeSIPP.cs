@@ -18,6 +18,8 @@ namespace PathPlanning
     {
         #region private fields
 
+        private static readonly Dictionary<string, int> floorLevelCache = new Dictionary<string, int>();
+
         private readonly struct SIPPStateKey : IEquatable<SIPPStateKey>
         {
             public readonly string ConnectionPointId;
@@ -1036,23 +1038,38 @@ namespace PathPlanning
         }
 
         /// <summary>
-        /// Get the safe interval that contains the specified time
+        /// Get the safe interval that contains the specified time using binary search
         /// </summary>
         private static SafeInterval GetSafeIntervalContainingTime(
             Dictionary<string, List<SafeInterval>> safeIntervals,
             string locationId,
             float time)
         {
-            if (!safeIntervals.TryGetValue(locationId, out var intervals))
+            if (!safeIntervals.TryGetValue(locationId, out var intervals) || intervals.Count == 0)
             {
                 return null;
             }
             
-            foreach (var interval in intervals)
+            int left = 0;
+            int right = intervals.Count - 1;
+            
+            while (left <= right)
             {
+                int mid = left + (right - left) / 2;
+                var interval = intervals[mid];
+                
                 if (interval.Contains(time))
                 {
                     return interval;
+                }
+                
+                if (time < interval.Start)
+                {
+                    right = mid - 1;
+                }
+                else
+                {
+                    left = mid + 1;
                 }
             }
             
@@ -1161,17 +1178,9 @@ namespace PathPlanning
             return Vector3.Distance(fromPos, toPos);
         }
         
-        /// <summary>
-        /// Get the Vector3 representation of a connection point
-        /// </summary>
         private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
         {
-            if (connectionPoint.Point is Point point)
-            {
-                return new Vector3((float)point.X, 0, (float)point.Y);
-            }
-
-            return Vector3.zero;
+            return connectionPoint.Position;
         }
         
         /// <summary>
@@ -1189,30 +1198,32 @@ namespace PathPlanning
             return length;
         }
 
-        /// <summary>
-        /// Parse floor level string to integer
-        /// </summary>
         private static int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel))
                 return 0;
 
+            if (floorLevelCache.TryGetValue(floorLevel, out int cachedLevel))
+                return cachedLevel;
+
+            int result = 0;
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
                 {
-                    return -level;
+                    result = -level;
                 }
             }
             else
             {
                 if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
                 {
-                    return level;
+                    result = level;
                 }
             }
 
-            return 0;
+            floorLevelCache[floorLevel] = result;
+            return result;
         }
         #endregion
     }

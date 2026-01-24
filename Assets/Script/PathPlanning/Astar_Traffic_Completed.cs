@@ -492,29 +492,18 @@ namespace PathPlanning
                 // Check time-space availability at target node and arrival time
                 if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, arrivalTime, robotId))
                 {
-                    // Try a delayed arrival
-                    float[] delays = { 0.5f, 1.0f, 1.5f, 2.0f };
-                    bool foundValidTime = false;
+                    float nextAvailableTime = GetNextAvailableTime(
+                        globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, arrivalTime, robotId, 3.0f);
                     
-                    foreach (float delay in delays)
+                    if (nextAvailableTime < 0)
                     {
-                        float delayedArrival = RoundTime(arrivalTime + delay);
-                        if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, delayedArrival, robotId))
-                        {
-                            // Found a valid time with delay
-                            arrivalTime = delayedArrival;
-                            travelTime += delay;
-                            travelCost += delay; // Add delay to cost
-                            foundValidTime = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!foundValidTime)
-                    {
-                        // Couldn't find a valid time even with delays
                         continue;
                     }
+                    
+                    float delay = nextAvailableTime - arrivalTime;
+                    arrivalTime = RoundTime(nextAvailableTime);
+                    travelTime += delay;
+                    travelCost += delay;
                 }
                 
                 // Calculate path costs
@@ -624,9 +613,56 @@ namespace PathPlanning
             return true;
         }
         
-        /// <summary>
-        /// Reconstruct the complete path from the goal state
-        /// </summary>
+        private static float GetNextAvailableTime(
+            DynamicOccupancyLayer globalOccupancyLayer,
+            DynamicOccupancyLayer personalOccupancyLayer,
+            string nodeId,
+            float startTime,
+            string robotId,
+            float maxLookahead)
+        {
+            float endTime = startTime + maxLookahead;
+            float latestOccupancyEnd = startTime;
+            
+            if (globalOccupancyLayer != null)
+            {
+                var occupancies = globalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
+                foreach (var occ in occupancies)
+                {
+                    if (occ.Occupier.RobotId != robotId && occ.EndTime > latestOccupancyEnd)
+                    {
+                        latestOccupancyEnd = occ.EndTime;
+                    }
+                }
+            }
+            
+            if (personalOccupancyLayer != null)
+            {
+                var personalOccupancies = personalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
+                foreach (var occ in personalOccupancies)
+                {
+                    if (occ.EndTime > latestOccupancyEnd)
+                    {
+                        latestOccupancyEnd = occ.EndTime;
+                    }
+                }
+            }
+            
+            float candidateTime = latestOccupancyEnd + OCCUPANCY_BUFFER;
+            
+            if (candidateTime > endTime)
+            {
+                return -1f;
+            }
+            
+            if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, nodeId, candidateTime, robotId))
+            {
+                return candidateTime;
+            }
+            
+            return -1f;
+        }
+        
         private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ReconstructPath(
             TSAStarState goalState,
             float defaultSpeed)
@@ -789,17 +825,9 @@ namespace PathPlanning
             return length;
         }
         
-        /// <summary>
-        /// Get the Vector3 representation of a connection point
-        /// </summary>
         private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
         {
-            if (connectionPoint.Point is Point point)
-            {
-                return new Vector3((float)point.X, 0, (float)point.Y);
-            }
-
-            return Vector3.zero;
+            return connectionPoint.Position;
         }
         
         /// <summary>
