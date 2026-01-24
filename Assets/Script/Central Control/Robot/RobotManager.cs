@@ -33,6 +33,7 @@ namespace CentralControl.RobotControl
         private DynamicOccupancyLayer globalOccupancyLayer;
         private IntersectionAreaManager intersectionAreaManager;
         private List<RobotController> robots = new List<RobotController>();
+        private Dictionary<int, RobotController> robotsById = new Dictionary<int, RobotController>();
         private Dictionary<string, HashSet<CellSpace>> usedSpawnPointsByFloor = new Dictionary<string, HashSet<CellSpace>>();
 
         public int TotalRobots => robots.Count;
@@ -308,6 +309,7 @@ namespace CentralControl.RobotControl
                 robot.targetIndicator = targetIndicatorInstance;
 
                 robots.Add(robot);
+                robotsById[id] = robot;
                 Debug.Log($"Create Robot {id} at {position}");
             }
             else
@@ -376,10 +378,21 @@ namespace CentralControl.RobotControl
             return horizontalDistance + verticalPenalty;
         }
 
+        public RobotController GetRobotById(int robotId)
+        {
+            if (robotsById.TryGetValue(robotId, out var robot))
+            {
+                return robot;
+            }
+
+            return null;
+        }
+
         public List<RobotController> GetAllRobots()
         {
             return new List<RobotController>(robots);
         }
+
 
         public List<RobotController> GetAvailableRobots()
         {
@@ -402,15 +415,11 @@ namespace CentralControl.RobotControl
                         .ToDictionary(g => g.Key, g => g.Count());
         }
 
-        public RobotController GetRobotById(int id)
-        {
-            return robots.FirstOrDefault(r => r.Id == id);
-        }
-
         public RobotController GetRobotById(string id)
         {
             return robots.FirstOrDefault(r => r.Id.ToString() == id);
         }
+
 
         public void CheckRobotStatus()
         {

@@ -83,6 +83,20 @@ namespace CentralControl.PickingQueueControl
              return activeRobots.TryGetValue(pickingPointId, out string active) && active == robotId;
         }
 
+        public bool IsRobotInQueueOrActive(string pickingPointId, string robotId)
+        {
+            if (string.IsNullOrEmpty(pickingPointId) || string.IsNullOrEmpty(robotId))
+                return false;
+
+            if (activeRobots.TryGetValue(pickingPointId, out string activeRobot) && activeRobot == robotId)
+                return true;
+
+            if (pickingQueues.TryGetValue(pickingPointId, out var queue))
+                return queue.Contains(robotId);
+
+            return false;
+        }
+
         public void Reset()
         {
             pickingQueues.Clear();

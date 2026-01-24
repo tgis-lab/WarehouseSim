@@ -17,6 +17,38 @@ namespace PathPlanning
     {
         #region private fields
         
+        private readonly struct TSAStarStateKey : IEquatable<TSAStarStateKey>
+        {
+            public readonly string ConnectionPointId;
+            public readonly int ArrivalTimeKey;
+            public readonly string FloorLevel;
+
+            public TSAStarStateKey(string connectionPointId, int arrivalTimeKey, string floorLevel)
+            {
+                ConnectionPointId = connectionPointId;
+                ArrivalTimeKey = arrivalTimeKey;
+                FloorLevel = floorLevel;
+            }
+
+            public bool Equals(TSAStarStateKey other) =>
+                ConnectionPointId == other.ConnectionPointId &&
+                ArrivalTimeKey == other.ArrivalTimeKey &&
+                FloorLevel == other.FloorLevel;
+
+            public override bool Equals(object obj) => obj is TSAStarStateKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = ConnectionPointId?.GetHashCode() ?? 0;
+                    hash = (hash * 397) ^ ArrivalTimeKey;
+                    hash = (hash * 397) ^ (FloorLevel?.GetHashCode() ?? 0);
+                    return hash;
+                }
+            }
+        }
+
         /// <summary>
         /// State class for Time-Space A* search process
         /// </summary>
@@ -68,9 +100,10 @@ namespace PathPlanning
                 return -GScore.CompareTo(other.GScore);
             }
             
-            public string GetStateKey()
+            public TSAStarStateKey GetStateKey()
             {
-                return $"{RoutePoint.ConnectionPoint.Id}_{ArrivalTime:F1}_{FloorLevel}";
+                int arrivalTimeKey = Mathf.RoundToInt(ArrivalTime * 10f);
+                return new TSAStarStateKey(RoutePoint.ConnectionPoint.Id, arrivalTimeKey, FloorLevel);
             }
         }
         
@@ -206,8 +239,8 @@ namespace PathPlanning
             stopwatch.Start();
             
             PriorityQueue<TSAStarState> openSet = new PriorityQueue<TSAStarState>();
-            HashSet<string> closedSet = new HashSet<string>();
-            Dictionary<string, TSAStarState> allStates = new Dictionary<string, TSAStarState>();
+            HashSet<TSAStarStateKey> closedSet = new HashSet<TSAStarStateKey>();
+            Dictionary<TSAStarStateKey, TSAStarState> allStates = new Dictionary<TSAStarStateKey, TSAStarState>();
             
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
@@ -231,7 +264,7 @@ namespace PathPlanning
             
             // Add initial state to open set
             openSet.Enqueue(initialState, initialState.FScore);
-            string initialStateKey = initialState.GetStateKey();
+            TSAStarStateKey initialStateKey = initialState.GetStateKey();
             allStates[initialStateKey] = initialState;
             
             TSAStarState goalState = null;
@@ -241,7 +274,7 @@ namespace PathPlanning
             {
                 // Get the state with lowest f-score
                 TSAStarState current = openSet.Dequeue();
-                string currentStateKey = current.GetStateKey();
+                TSAStarStateKey currentStateKey = current.GetStateKey();
                 
                 // If we reached the goal
                 if (current.RoutePoint.ConnectionPoint.Id == endPosition.ConnectionPoint.Id &&
@@ -280,7 +313,7 @@ namespace PathPlanning
                 // Process each successor
                 foreach (var successor in successors)
                 {
-                    string successorKey = successor.GetStateKey();
+                    TSAStarStateKey successorKey = successor.GetStateKey();
                     
                     if (closedSet.Contains(successorKey))
                     {

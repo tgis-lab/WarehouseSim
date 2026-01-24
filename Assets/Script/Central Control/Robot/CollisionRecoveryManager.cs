@@ -99,12 +99,18 @@ namespace CentralControl.RobotControl
         #endregion
         
         #region Collision Recovery
-        public void HandleRobotCollision(RobotController otherRobot, Vector3 collisionPosition)
+        public void HandleRobotCollision(int otherRobotId, Vector3 collisionPosition)
         {
-            if (owner == null || otherRobot == null) return;
+            if (owner == null) return;
             if (owner.IsBackingUp) return;
+
+            if (owner.IsPicking || (CentralController.Instance != null && CentralController.Instance.IsRobotPicking(otherRobotId)))
+            {
+                ReportCollisionToCenter(otherRobotId, collisionPosition);
+                return;
+            }
             
-            string pairKey = GetOrderedPairKey(owner.Id, otherRobot.Id);
+            string pairKey = GetOrderedPairKey(owner.Id, otherRobotId);
             
             CleanupExpiredRecords();
             
@@ -117,7 +123,7 @@ namespace CentralControl.RobotControl
             record.Count++;
             record.LastCollisionTime = Time.time;
             
-            ReportCollisionToCenter(otherRobot, collisionPosition);
+            ReportCollisionToCenter(otherRobotId, collisionPosition);
             
             if (record.Count >= replanThreshold)
             {
@@ -129,6 +135,52 @@ namespace CentralControl.RobotControl
                 ExecuteBackupRecovery();
             }
         }
+
+        public void HandleNonPickingCollision(int otherRobotId, Vector3 collisionPosition)
+        {
+            if (owner == null) return;
+            if (owner.IsBackingUp) return;
+            if (owner.IsPicking) return;
+            
+            string pairKey = GetOrderedPairKey(owner.Id, otherRobotId);
+            
+            CleanupExpiredRecords();
+            
+            if (!collisionHistory.TryGetValue(pairKey, out var record))
+            {
+                record = new CollisionRecord();
+                collisionHistory[pairKey] = record;
+            }
+            
+            record.Count++;
+            record.LastCollisionTime = Time.time;
+            
+            ReportCollisionToCenter(otherRobotId, collisionPosition);
+            
+            if (record.Count >= replanThreshold)
+            {
+                record.Count = 0;
+                owner.RequestReplan("CollidedWithPickingRobot");
+            }
+            else
+            {
+                ExecuteBackupRecovery();
+            }
+        }
+
+        private void ReportCollisionToCenter(int otherRobotId, Vector3 position)
+        {
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.ReportRobotCollision(
+                    owner.Id.ToString(),
+                    otherRobotId.ToString(),
+                    null,
+                    Time.time,
+                    position
+                );
+            }
+        }
         
         public void HandleEnvironmentCollision(Vector3 obstaclePosition)
         {
@@ -136,20 +188,6 @@ namespace CentralControl.RobotControl
             
             ReportEnvironmentCollisionToCenter(obstaclePosition);
             ExecuteBackupRecovery(obstaclePosition);
-        }
-        
-        private void ReportCollisionToCenter(RobotController otherRobot, Vector3 position)
-        {
-            if (EventManager.Instance != null)
-            {
-                EventManager.Instance.ReportRobotCollision(
-                    owner.Id.ToString(),
-                    otherRobot.Id.ToString(),
-                    otherRobot.gameObject,
-                    Time.time,
-                    position
-                );
-            }
         }
         
         private void ReportEnvironmentCollisionToCenter(Vector3 position)

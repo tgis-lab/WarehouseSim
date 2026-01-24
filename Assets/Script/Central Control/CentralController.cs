@@ -9,6 +9,7 @@ using Map;
 using CentralControl.OrderAssignment;
 using CentralControl.RobotControl;
 using CentralControl.PickerControl;
+using CentralControl.PickingQueueControl;
 using PathPlanning;
 
 namespace CentralControl
@@ -90,6 +91,50 @@ namespace CentralControl
         private readonly object dirtyRobotLock = new object();
 
         #endregion
+        
+        public bool TryGetRobotId(GameObject robotObject, out int robotId)
+        {
+            robotId = 0;
+            if (robotObject == null)
+            {
+                return false;
+            }
+
+            if (robotObject.TryGetComponent<RobotController>(out var robot))
+            {
+                robotId = robot.Id;
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool IsRobotInPickingQueue(string pickingPointId, int robotId)
+        {
+            return PickingQueueManager.Instance.IsRobotInQueueOrActive(pickingPointId, robotId.ToString());
+        }
+
+        public bool IsRobotPicking(int robotId)
+        {
+            if (robotManager == null)
+            {
+                return false;
+            }
+
+            var robot = robotManager.GetRobotById(robotId);
+            return robot != null && robot.IsPicking;
+        }
+
+        public string GetRobotPickingPointId(int robotId)
+        {
+            if (robotManager == null)
+            {
+                return null;
+            }
+
+            var robot = robotManager.GetRobotById(robotId);
+            return robot?.CurrentOrder?.PickingPoint?.Id;
+        }
 
         private class DeadlockDecision
         {
