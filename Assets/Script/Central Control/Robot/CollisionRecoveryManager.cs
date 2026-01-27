@@ -101,34 +101,37 @@ namespace CentralControl.RobotControl
         #region Collision Recovery
         public void HandleRobotCollision(int otherRobotId, Vector3 collisionPosition)
         {
-            if (owner == null) return;
-            if (owner.IsBackingUp) return;
+            // Store local reference to avoid race condition where owner could be destroyed
+            // between null check and property access (Unity's null check is deferred)
+            var currentOwner = owner;
+            if (currentOwner == null) return;
+            if (currentOwner.IsBackingUp) return;
 
-            if (owner.IsPicking || (CentralController.Instance != null && CentralController.Instance.IsRobotPicking(otherRobotId)))
+            if (currentOwner.IsPicking || (CentralController.Instance != null && CentralController.Instance.IsRobotPicking(otherRobotId)))
             {
                 ReportCollisionToCenter(otherRobotId, collisionPosition);
                 return;
             }
-            
-            string pairKey = GetOrderedPairKey(owner.Id, otherRobotId);
-            
+
+            string pairKey = GetOrderedPairKey(currentOwner.Id, otherRobotId);
+
             CleanupExpiredRecords();
-            
+
             if (!collisionHistory.TryGetValue(pairKey, out var record))
             {
                 record = new CollisionRecord();
                 collisionHistory[pairKey] = record;
             }
-            
+
             record.Count++;
             record.LastCollisionTime = Time.time;
-            
+
             ReportCollisionToCenter(otherRobotId, collisionPosition);
-            
+
             if (record.Count >= replanThreshold)
             {
                 record.Count = 0;
-                owner.RequestReplan("MultipleCollisions");
+                currentOwner.RequestReplan("MultipleCollisions");
             }
             else
             {
@@ -138,29 +141,31 @@ namespace CentralControl.RobotControl
 
         public void HandleNonPickingCollision(int otherRobotId, Vector3 collisionPosition)
         {
-            if (owner == null) return;
-            if (owner.IsBackingUp) return;
-            if (owner.IsPicking) return;
-            
-            string pairKey = GetOrderedPairKey(owner.Id, otherRobotId);
-            
+            // Store local reference to avoid race condition
+            var currentOwner = owner;
+            if (currentOwner == null) return;
+            if (currentOwner.IsBackingUp) return;
+            if (currentOwner.IsPicking) return;
+
+            string pairKey = GetOrderedPairKey(currentOwner.Id, otherRobotId);
+
             CleanupExpiredRecords();
-            
+
             if (!collisionHistory.TryGetValue(pairKey, out var record))
             {
                 record = new CollisionRecord();
                 collisionHistory[pairKey] = record;
             }
-            
+
             record.Count++;
             record.LastCollisionTime = Time.time;
-            
+
             ReportCollisionToCenter(otherRobotId, collisionPosition);
-            
+
             if (record.Count >= replanThreshold)
             {
                 record.Count = 0;
-                owner.RequestReplan("CollidedWithPickingRobot");
+                currentOwner.RequestReplan("CollidedWithPickingRobot");
             }
             else
             {

@@ -17,6 +17,10 @@ namespace CentralControl.PickingQueueControl
         // Event to notify robot it can start picking
         public event Action<string> OnRobotAllowedToPick;
 
+        // Event to notify all robots in a queue to advance one position
+        // Parameters: pickingPointId, robotId that should advance
+        public event Action<string, string> OnQueueAdvance;
+
         private PickingQueueManager() { }
 
         /// <summary>
@@ -59,22 +63,36 @@ namespace CentralControl.PickingQueueControl
 
             if (!activeRobots.TryGetValue(pickingPointId, out string activeRobot))
                 return;
-                
+
             if (activeRobot != robotId)
             {
                 Debug.LogWarning($"PickingQueueManager: Robot {robotId} tried to complete picking at {pickingPointId} but active robot is {activeRobot}");
                 return;
             }
-            
+
             activeRobots.Remove(pickingPointId);
             Debug.Log($"PickingQueueManager: Robot {robotId} finished picking at {pickingPointId}");
-            
+
             if (pickingQueues.ContainsKey(pickingPointId) && pickingQueues[pickingPointId].Count > 0)
             {
+                // Get all robots that need to advance before dequeuing
+                string[] robotsToAdvance = pickingQueues[pickingPointId].ToArray();
+
+                // Dequeue the next robot to pick
                 string nextRobotId = pickingQueues[pickingPointId].Dequeue();
                 activeRobots[pickingPointId] = nextRobotId;
                 Debug.Log($"PickingQueueManager: Robot {nextRobotId} promoted to picking at {pickingPointId}");
+
+                // First notify the next robot it can pick
                 OnRobotAllowedToPick?.Invoke(nextRobotId);
+
+                // Then notify ALL remaining robots in queue to advance
+                // Skip the first one (nextRobotId) as it's already been notified via OnRobotAllowedToPick
+                for (int i = 1; i < robotsToAdvance.Length; i++)
+                {
+                    Debug.Log($"PickingQueueManager: Notifying Robot {robotsToAdvance[i]} to advance in queue at {pickingPointId}");
+                    OnQueueAdvance?.Invoke(pickingPointId, robotsToAdvance[i]);
+                }
             }
         }
         

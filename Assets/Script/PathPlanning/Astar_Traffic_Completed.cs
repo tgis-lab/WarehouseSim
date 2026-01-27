@@ -124,6 +124,7 @@ namespace PathPlanning
 
         #region constants
         
+        private static readonly object verticalConnectionInfoLock = new object();
         private static Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
@@ -168,7 +169,10 @@ namespace PathPlanning
             TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
             string newPlanId = $"TimeSpaceAStarPlan_{robotId}_{DateTime.Now.Ticks}";
             
-            verticalConnectionInfo.Clear();
+            lock (verticalConnectionInfoLock)
+            {
+                verticalConnectionInfo.Clear();
+            }
             
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
@@ -454,7 +458,7 @@ namespace PathPlanning
                     if (cellSpace != null)
                     {
                         string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{childConnection.Id}";
-                        lock (verticalConnectionInfo)
+                        lock (verticalConnectionInfoLock)
                         {
                             verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
                             {

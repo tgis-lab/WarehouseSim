@@ -364,20 +364,21 @@ namespace PathPlanning
                 if (foundSolution)
                 {
                     openSet = new PriorityQueue<SIPPState>();
-                    
-                    Dictionary<SIPPStateKey, SIPPState> statesCopy = new Dictionary<SIPPStateKey, SIPPState>(allStates);
-                    
+
+                    // Collect updates first, then apply them to avoid modifying dictionary during iteration
+                    List<SIPPState> statesToUpdate = new List<SIPPState>();
+
                     // 1-11: Update the priorities for all s ∈ OPEN according to f(s)
-                    foreach (var kvp in statesCopy)
+                    foreach (var kvp in allStates)
                     {
                         SIPPState state = kvp.Value;
                         if (!state.IsOptimal)
                         {
                             float newHeuristic = CalculateHeuristic(
                                 state.RoutePoint, endPosition, searchMethod, defaultSpeed, state.FloorLevel, endFloor);
-                            
+
                             float newFScore = state.GScore + newHeuristic * currentEpsilon;
-                            
+
                             SIPPState updatedState = new SIPPState(
                                 state.RoutePoint,
                                 state.IntervalIndex,
@@ -391,10 +392,16 @@ namespace PathPlanning
                                 state.FloorLevel,
                                 state.IsVerticalTransition,
                                 state.VerticalConnectorId);
-                                
-                            allStates[updatedState.GetStateKey()] = updatedState;
-                            openSet.Enqueue(updatedState, updatedState.FScore);
+
+                            statesToUpdate.Add(updatedState);
                         }
+                    }
+
+                    // Apply updates after iteration completes
+                    foreach (var updatedState in statesToUpdate)
+                    {
+                        allStates[updatedState.GetStateKey()] = updatedState;
+                        openSet.Enqueue(updatedState, updatedState.FScore);
                     }
                 }
 

@@ -258,6 +258,7 @@ namespace CentralControl
                 EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
                 EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
                 EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
+                EventManager.Instance.OnPathPlanningMetricsRecorded -= OnPathPlanningMetricsRecorded;
             }
             
             // Stop order generation coroutine

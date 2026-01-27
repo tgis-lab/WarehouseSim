@@ -169,6 +169,7 @@ namespace CentralControl.RobotControl
         
         // Collision detection optimization
         private Coroutine collisionCheckCoroutine;
+        private Coroutine obstacleCarvingCoroutine;
         private const float COLLISION_CHECK_INTERVAL = 0.05f; // 20Hz detection frequency
         private bool isBackingUp = false;
         private RobotBehavior behaviorBeforeBackup = RobotBehavior.Idle;
@@ -231,8 +232,9 @@ namespace CentralControl.RobotControl
                 EventManager.Instance.OnGlobalOccupancyLayerUpdated += HandleGlobalOccupancyLayerUpdated;
                 
                 PickingQueueManager.Instance.OnRobotAllowedToPick += HandleRobotAllowedToPick;
+                PickingQueueManager.Instance.OnQueueAdvance += HandleQueueAdvance;
             }
-            
+
             // Initialize target indicator
             if (targetIndicator != null)
             {
@@ -279,10 +281,22 @@ namespace CentralControl.RobotControl
         #endregion
 
         #region Initialization
-        public void InitializeRobot(int id, IndoorSpace indoorSpace, Graph graph, MapGrid mapGrid, 
+        public void InitializeRobot(int id, IndoorSpace indoorSpace, Graph graph, MapGrid mapGrid,
                                     DynamicOccupancyLayer globalOccupancyLayer,
                                     IntersectionAreaManager intersectionManager)
         {
+            // Validate critical dependencies before initialization
+            if (indoorSpace == null)
+            {
+                Debug.LogError($"Robot {id}: InitializeRobot called with null indoorSpace - initialization aborted");
+                return;
+            }
+            if (graph == null)
+            {
+                Debug.LogError($"Robot {id}: InitializeRobot called with null graph - initialization aborted");
+                return;
+            }
+
             this.Id = id;
             this.indoorSpace = indoorSpace;
             this.graph = graph;
@@ -296,7 +310,7 @@ namespace CentralControl.RobotControl
 
             ConfigureNavMeshObstacle();
             CreateInteractionTrigger();
-            StartCoroutine(ManageObstacleCarving());
+            obstacleCarvingCoroutine = StartCoroutine(ManageObstacleCarving());
 
             personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
             
@@ -322,8 +336,20 @@ namespace CentralControl.RobotControl
 
         private void OnDestroy()
         {
+            // Stop coroutines to prevent MissingReferenceException
+            if (obstacleCarvingCoroutine != null)
+            {
+                StopCoroutine(obstacleCarvingCoroutine);
+                obstacleCarvingCoroutine = null;
+            }
+            if (collisionCheckCoroutine != null)
+            {
+                StopCoroutine(collisionCheckCoroutine);
+                collisionCheckCoroutine = null;
+            }
+
             collisionRecoveryManager?.Cleanup();
-            
+
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.OnRobotPathModified -= HandlePathModified;
@@ -331,8 +357,9 @@ namespace CentralControl.RobotControl
                 EventManager.Instance.OnPickingCompleted -= HandlePickingCompletedEvent;
                 EventManager.Instance.OnGlobalOccupancyLayerUpdated -= HandleGlobalOccupancyLayerUpdated;
             }
-            
+
             PickingQueueManager.Instance.OnRobotAllowedToPick -= HandleRobotAllowedToPick;
+            PickingQueueManager.Instance.OnQueueAdvance -= HandleQueueAdvance;
         }
 
         private void ConfigureNavMeshObstacle()
@@ -541,7 +568,20 @@ namespace CentralControl.RobotControl
         #region Path Planning and Movement
         private Vector3 GetTargetPosition(PickingPoint pickingPoint)
         {
+            // Defensive null checks
+            if (indoorSpace == null || pickingPoint == null)
+            {
+                Debug.LogWarning($"Robot {Id}: GetTargetPosition called with null dependencies");
+                return Vector3.zero;
+            }
+
             CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
+            if (cellSpace == null)
+            {
+                Debug.LogWarning($"Robot {Id}: Could not find CellSpace for picking point {pickingPoint.Id}");
+                return Vector3.zero;
+            }
+
             Point point = (Point)cellSpace.Node;
             float y = GetFloorHeight(pickingPoint.FloorLevel);
             return new Vector3((float)point.X, y, (float)point.Y);
@@ -564,12 +604,22 @@ namespace CentralControl.RobotControl
 
             RoutePoint startPoint = graph.GetRoutePointFromCoordinate(transform.position, true);
             RoutePoint endPoint = graph.GetRoutePointFromCoordinate(targetPosition, false);
-            
+
             Debug.Log($"Robot {Id}: Planning path from {transform.position} (Floor {CurrentFloor}) to {targetPosition} (Floor {targetFloorLevel})");
 
             if (startPoint == null || endPoint == null)
             {
-                Debug.LogError($"Robot {Id} cannot find valid route points");
+                // Detailed diagnostic logging to identify which point failed
+                if (startPoint == null)
+                {
+                    Debug.LogError($"Robot {Id} cannot find start RoutePoint at position {transform.position} (Floor {CurrentFloor}). " +
+                        $"Check if robot is spawned inside a valid navigable CellSpace.");
+                }
+                if (endPoint == null)
+                {
+                    Debug.LogError($"Robot {Id} cannot find end RoutePoint at position {targetPosition} (Floor {targetFloorLevel}). " +
+                        $"Check if target PickingPoint has valid CellBoundary connections.");
+                }
                 return (null, null, null, null, null);
             }
             
@@ -591,7 +641,11 @@ namespace CentralControl.RobotControl
         {
             if (currentOrder == null)
                 return false;
-                
+
+            // Defensive null check
+            if (indoorSpace == null)
+                return false;
+
             CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(currentOrder.PickingPoint.Id);
             if (cellSpace == null) 
                 return false;
@@ -649,13 +703,28 @@ namespace CentralControl.RobotControl
             {
                 Debug.Log($"Robot {Id}: Allowed to start picking from queue, entering PickingPending state");
                 SetBehavior(RobotBehavior.PickingPending);
-                
+
                 if (HasReachedFinalDestination())
                 {
                     Debug.Log($"Robot {Id}: Already at picking point, starting picking immediately");
                     hasReportedArrival = true;
                     isWaitingForPicking = true;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Handle notification to advance in queue when a front robot moves forward
+        /// </summary>
+        private void HandleQueueAdvance(string pickingPointId, string robotId)
+        {
+            if (robotId != Id.ToString()) return;
+            if (currentOrder?.PickingPoint?.Id != pickingPointId) return;
+
+            if (IsQueuing)
+            {
+                Debug.Log($"Robot {Id}: Received queue advance notification, entering AdvancingInQueue state");
+                SetBehavior(RobotBehavior.AdvancingInQueue);
             }
         }
 
@@ -794,7 +863,11 @@ namespace CentralControl.RobotControl
         {
             if (targetPoint == null)
                 return;
-            
+
+            // Defensive null check
+            if (indoorSpace == null)
+                return;
+
             string targetCellSapceId = targetPoint.CellBoundary.Target;
             CellSpace targetCellSpace = indoorSpace.GetCellSpaceFromId(targetCellSapceId);
             
@@ -1040,6 +1113,12 @@ namespace CentralControl.RobotControl
 
         public void UpdatePersonalLayer()
         {
+            // Defensive null check - indoorSpace might be null during scene transitions or if initialization failed
+            if (indoorSpace == null)
+            {
+                return;
+            }
+
             CellSpace currentCellSpace = indoorSpace.GetCellSpaceFromCoordinates(transform.position, GetFloorLevelFromPosition(transform.position));
             if (currentCellSpace == null)
                 return;
