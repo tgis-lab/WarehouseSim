@@ -18,6 +18,23 @@ namespace Map
         private float windowDuration;
         private float lastCleanupTime;
         private bool enable3D;
+        
+        // Optimistic locking: version number increments on every modification
+        private long _version = 0;
+        private readonly object _versionLock = new object();
+        
+        /// <summary>
+        /// Current version of this layer. Used for optimistic locking during path commits.
+        /// </summary>
+        public long Version => System.Threading.Interlocked.Read(ref _version);
+        
+        /// <summary>
+        /// Increments the version number. Called after any modification to the layer.
+        /// </summary>
+        private void IncrementVersion()
+        {
+            System.Threading.Interlocked.Increment(ref _version);
+        }
 
         /// <summary>
         /// Creates a new dynamic occupancy layer
@@ -120,6 +137,7 @@ namespace Map
                     }
                 }
             }
+            IncrementVersion();
         }
 
         /// <summary>
@@ -137,6 +155,7 @@ namespace Map
                     timeIndex.RemoveInterval(occupancy);
                 }
             }
+            IncrementVersion();
         }
 
         /// <summary>
@@ -180,6 +199,7 @@ namespace Map
                 var occupier = new OccupancyIdentifier(robotId, planId);
                 var occupancy = new TimeOccupancy(startTime, endTime, occupier, isStartCell, isEndCell);
                 timeIndex.AddInterval(occupancy);
+                IncrementVersion();
             }
         }
 
@@ -222,6 +242,7 @@ namespace Map
             
             // Update last cleanup time
             lastCleanupTime = Time.time;
+            IncrementVersion();
         }
 
         /// <summary>
@@ -233,6 +254,7 @@ namespace Map
             if (timeIndex != null)
             {
                 timeIndex.UpdateCurrentOccupancy(robotId, currentTime);
+                IncrementVersion();
             }
         }
 
@@ -283,6 +305,7 @@ namespace Map
                     timeIndex.AddInterval(newOccupancy);
                 }
             }
+            IncrementVersion();
         }
         
         #region Spatial Queries
@@ -442,6 +465,64 @@ namespace Map
             catch (Exception ex)
             {
                 Debug.LogError($"Error recording path occupancy: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+        
+        /// <summary>
+        /// Attempts to commit a path with optimistic locking.
+        /// Returns true if commit succeeds (version unchanged), false if conflict detected.
+        /// </summary>
+        /// <param name="connectionPointPath">The path to commit</param>
+        /// <param name="times">Arrival times for each point</param>
+        /// <param name="robotId">Robot ID</param>
+        /// <param name="planId">Plan ID</param>
+        /// <param name="expectedVersion">Version number captured before planning started</param>
+        /// <returns>True if commit succeeded, false if version conflict</returns>
+        public bool TryCommitPath(
+            List<ConnectionPoint> connectionPointPath,
+            List<float> times,
+            string robotId,
+            string planId,
+            long expectedVersion)
+        {
+            lock (_versionLock)
+            {
+                // Check if version has changed since planning started
+                if (Version != expectedVersion)
+                {
+                    Debug.LogWarning($"[TryCommitPath] Version conflict for Robot {robotId}. Expected: {expectedVersion}, Current: {Version}");
+                    return false;
+                }
+                
+                // Version matches - safe to commit
+                RecordPathOccupancy(connectionPointPath, times, robotId, planId);
+                return true;
+            }
+        }
+        
+        /// <summary>
+        /// Attempts to commit pre-calculated cell occupancies with optimistic locking.
+        /// Alternative method when cell occupancies are already calculated.
+        /// </summary>
+        public bool TryCommitCellOccupancies(
+            List<(string CellId, float StartTime, float EndTime, bool IsStart, bool IsEnd)> occupancies,
+            string robotId,
+            string planId,
+            long expectedVersion)
+        {
+            lock (_versionLock)
+            {
+                if (Version != expectedVersion)
+                {
+                    Debug.LogWarning($"[TryCommitCellOccupancies] Version conflict for Robot {robotId}. Expected: {expectedVersion}, Current: {Version}");
+                    return false;
+                }
+                
+                foreach (var occ in occupancies)
+                {
+                    SetDynamicOccupancy(occ.CellId, occ.StartTime, occ.EndTime, robotId, planId, occ.IsStart, occ.IsEnd);
+                }
+                return true;
             }
         }
         

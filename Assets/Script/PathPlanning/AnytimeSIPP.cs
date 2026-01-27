@@ -18,6 +18,40 @@ namespace PathPlanning
     {
         #region private fields
 
+        private static readonly Dictionary<string, int> floorLevelCache = new Dictionary<string, int>();
+
+        private readonly struct SIPPStateKey : IEquatable<SIPPStateKey>
+        {
+            public readonly string ConnectionPointId;
+            public readonly int IntervalIndex;
+            public readonly string FloorLevel;
+
+            public SIPPStateKey(string connectionPointId, int intervalIndex, string floorLevel)
+            {
+                ConnectionPointId = connectionPointId;
+                IntervalIndex = intervalIndex;
+                FloorLevel = floorLevel;
+            }
+
+            public bool Equals(SIPPStateKey other) =>
+                ConnectionPointId == other.ConnectionPointId &&
+                IntervalIndex == other.IntervalIndex &&
+                FloorLevel == other.FloorLevel;
+
+            public override bool Equals(object obj) => obj is SIPPStateKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = ConnectionPointId?.GetHashCode() ?? 0;
+                    hash = (hash * 397) ^ IntervalIndex;
+                    hash = (hash * 397) ^ (FloorLevel?.GetHashCode() ?? 0);
+                    return hash;
+                }
+            }
+        }
+
         /// <summary>
         /// SIPP State class, representing a node in the search process
         /// </summary>
@@ -89,9 +123,9 @@ namespace PathPlanning
                 return -GScore.CompareTo(other.GScore);
             }
             
-            public string GetStateKey()
+            public SIPPStateKey GetStateKey()
             {
-                return $"{RoutePoint.ConnectionPoint.Id}_{IntervalIndex}_{FloorLevel}";
+                return new SIPPStateKey(RoutePoint.ConnectionPoint.Id, IntervalIndex, FloorLevel);
             }
         }
 
@@ -136,7 +170,6 @@ namespace PathPlanning
         #endregion
 
         #region private fields
-        private static Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
         private const float DEFAULT_VERTICAL_TIME = 6.0f;
@@ -180,11 +213,11 @@ namespace PathPlanning
             float finalEpsilon = 1.0f;
             float epsilonStep = 0.5f;
 
-            verticalConnectionInfo.Clear();
+            var verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
 
             // Build safe intervals according to the occupancy layer for robot
             Dictionary<string, List<SafeInterval>> safeIntervals = BuildSafeIntervals(
-                indoorSpace, globalOccupancyLayer, robotId, startTime);
+                indoorSpace, globalOccupancyLayer, robotId, startTime, CalculateSafeIntervalHorizon(indoorSpace, startPosition, endPosition, defaultSpeed));
 
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
@@ -212,6 +245,7 @@ namespace PathPlanning
                 finalEpsilon,
                 epsilonStep,
                 globalOccupancyLayer,
+                verticalConnectionInfo,
                 metrics);
 
             // Check if the path is found, if yes, set the occupancy layer
@@ -257,7 +291,8 @@ namespace PathPlanning
             float initialEpsilon,
             float finalEpsilon,
             float epsilonStep,
-            DynamicOccupancyLayer globalOccupancyLayer, 
+            DynamicOccupancyLayer globalOccupancyLayer,
+            Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo,
             PathPlanningMetrics metrics = null)
         {
             Stopwatch stopwatch = new Stopwatch();
@@ -280,10 +315,10 @@ namespace PathPlanning
 
             // 1-3: OPEN = CLOSED = INCONS = ∅
             PriorityQueue<SIPPState> openSet = new PriorityQueue<SIPPState>();
-            HashSet<string> closedSet = new HashSet<string>();
-            HashSet<string> inconsSet = new HashSet<string>();
+            HashSet<SIPPStateKey> closedSet = new HashSet<SIPPStateKey>();
+            HashSet<SIPPStateKey> inconsSet = new HashSet<SIPPStateKey>();
             
-            Dictionary<string, SIPPState> allStates = new Dictionary<string, SIPPState>();
+            Dictionary<SIPPStateKey, SIPPState> allStates = new Dictionary<SIPPStateKey, SIPPState>();
 
             // 1-4: insert s_start into OPEN with ε * h(s_start)
             // Get the initial safe interval for the start position
@@ -314,7 +349,7 @@ namespace PathPlanning
                 startFloor);
 
             openSet.Enqueue(initialState, initialState.FScore);
-            string initialStateKey = initialState.GetStateKey();
+            SIPPStateKey initialStateKey = initialState.GetStateKey();
             allStates[initialStateKey] = initialState;
 
             bool finalEpsilonRun = false;
@@ -329,20 +364,21 @@ namespace PathPlanning
                 if (foundSolution)
                 {
                     openSet = new PriorityQueue<SIPPState>();
-                    
-                    Dictionary<string, SIPPState> statesCopy = new Dictionary<string, SIPPState>(allStates);
-                    
+
+                    // Collect updates first, then apply them to avoid modifying dictionary during iteration
+                    List<SIPPState> statesToUpdate = new List<SIPPState>();
+
                     // 1-11: Update the priorities for all s ∈ OPEN according to f(s)
-                    foreach (var kvp in statesCopy)
+                    foreach (var kvp in allStates)
                     {
                         SIPPState state = kvp.Value;
                         if (!state.IsOptimal)
                         {
                             float newHeuristic = CalculateHeuristic(
                                 state.RoutePoint, endPosition, searchMethod, defaultSpeed, state.FloorLevel, endFloor);
-                            
+
                             float newFScore = state.GScore + newHeuristic * currentEpsilon;
-                            
+
                             SIPPState updatedState = new SIPPState(
                                 state.RoutePoint,
                                 state.IntervalIndex,
@@ -356,10 +392,16 @@ namespace PathPlanning
                                 state.FloorLevel,
                                 state.IsVerticalTransition,
                                 state.VerticalConnectorId);
-                                
-                            allStates[updatedState.GetStateKey()] = updatedState;
-                            openSet.Enqueue(updatedState, updatedState.FScore);
+
+                            statesToUpdate.Add(updatedState);
                         }
+                    }
+
+                    // Apply updates after iteration completes
+                    foreach (var updatedState in statesToUpdate)
+                    {
+                        allStates[updatedState.GetStateKey()] = updatedState;
+                        openSet.Enqueue(updatedState, updatedState.FScore);
                     }
                 }
 
@@ -381,6 +423,7 @@ namespace PathPlanning
                     inconsSet,
                     allStates,
                     globalOccupancyLayer,
+                    verticalConnectionInfo,
                     endFloor);
 
                 if (result != null)
@@ -455,10 +498,11 @@ namespace PathPlanning
             TrafficRuleKnowledge trafficRules,
             float epsilon,
             PriorityQueue<SIPPState> openSet,
-            HashSet<string> closedSet,
-            HashSet<string> inconsSet,
-            Dictionary<string, SIPPState> allStates,
+            HashSet<SIPPStateKey> closedSet,
+            HashSet<SIPPStateKey> inconsSet,
+            Dictionary<SIPPStateKey, SIPPState> allStates,
             DynamicOccupancyLayer globalOccupancyLayer,
+            Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo,
             string goalFloor)
         {
             SIPPState goalState = null;
@@ -472,7 +516,7 @@ namespace PathPlanning
                 // 2-2: remove s with the smallest f(s) from OPEN
                 SIPPState current = openSet.Dequeue();
                 
-                string stateKey = current.GetStateKey();
+                SIPPStateKey stateKey = current.GetStateKey();
                 
                 if (closedSet.Contains(stateKey))
                 {
@@ -508,13 +552,14 @@ namespace PathPlanning
                     searchMethod,
                     trafficRules,
                     epsilon,
+                    verticalConnectionInfo,
                     goalFloor
                 );
                 
                 // Process each successor
                 foreach (var successor in successors)
                 {
-                    string successorKey = successor.GetStateKey();
+                    SIPPStateKey successorKey = successor.GetStateKey();
                     
                     bool shouldUpdate = false;
                     
@@ -562,6 +607,7 @@ namespace PathPlanning
             SearchMethod searchMethod,
             TrafficRuleKnowledge trafficRules,
             float epsilon,
+            Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo,
             string goalFloor)
         {
             List<SIPPState> successors = new List<SIPPState>();
@@ -579,7 +625,8 @@ namespace PathPlanning
                 defaultSpeed, 
                 maxAcceleration,
                 maxDeceleration,
-                trafficRules);
+                trafficRules,
+                verticalConnectionInfo);
             
             // Process each neighbor (direct movement)
             foreach (var (nextRoutePoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
@@ -770,7 +817,8 @@ namespace PathPlanning
             float defaultSpeed,
             float maxAcceleration,
             float maxDeceleration,
-            TrafficRuleKnowledge trafficRules)
+            TrafficRuleKnowledge trafficRules,
+            Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo)
         {
             var neighbors = new List<(RoutePoint, float, float, string, bool, string)>();
             
@@ -914,22 +962,27 @@ namespace PathPlanning
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer occupancyLayer,
             string robotId,
-            float startTime)
+            float startTime,
+            float horizonSeconds)
         {
             Dictionary<string, List<SafeInterval>> safeIntervals = new Dictionary<string, List<SafeInterval>>();
             
             var allConnectionPoints = indoorSpace.GetAllConnectionPoints().ToList();
+            float endTime = startTime + horizonSeconds;
             
             foreach (var connectionPoint in allConnectionPoints)
             {
                 string connectionPointId = connectionPoint.Id;
                 
                 List<TimeOccupancy> occupancies = occupancyLayer != null ? 
-                    occupancyLayer.GetOccupancies(connectionPointId, startTime, startTime + 300) :
+                    occupancyLayer.GetOccupancies(connectionPointId, startTime, endTime) :
                     new List<TimeOccupancy>();
                 
-                occupancies = occupancies.Where(o => o.Occupier.RobotId != robotId).ToList();
-                
+                if (occupancies.Count > 1)
+                {
+                    occupancies.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));
+                }
+
                 List<SafeInterval> intervals = new List<SafeInterval>();
                 
                 if (occupancies.Count == 0)
@@ -938,12 +991,15 @@ namespace PathPlanning
                 }
                 else
                 {
-                    occupancies = occupancies.OrderBy(o => o.StartTime).ToList();
-                    
                     float lastEndTime = startTime;
                     
                     foreach (var occupancy in occupancies)
                     {
+                        if (occupancy.Occupier.RobotId == robotId)
+                        {
+                            continue;
+                        }
+
                         if (occupancy.StartTime > lastEndTime)
                         {
                             intervals.Add(new SafeInterval(lastEndTime, occupancy.StartTime));
@@ -961,24 +1017,66 @@ namespace PathPlanning
             return safeIntervals;
         }
 
+        private static float CalculateSafeIntervalHorizon(
+            IndoorSpace indoorSpace,
+            RoutePoint start,
+            RoutePoint goal,
+            float defaultSpeed)
+        {
+            if (indoorSpace == null || start == null || goal == null)
+            {
+                return 300f;
+            }
+
+            float horizontalDistance = CalculateHeuristicDistance(
+                start,
+                goal,
+                SearchMethod.Euclidean_Distance);
+
+            int startLevel = ParseFloorLevel(start.ConnectionPoint.FloorLevel);
+            int goalLevel = ParseFloorLevel(goal.ConnectionPoint.FloorLevel);
+            int floorDiff = Math.Abs(goalLevel - startLevel);
+            float verticalCost = floorDiff > 0 ? ELEVATOR_BASE_TIME + floorDiff * ELEVATOR_FLOOR_TIME : 0f;
+
+            float travelTime = horizontalDistance / Mathf.Max(defaultSpeed, 0.1f) + verticalCost;
+            float buffer = Mathf.Max(20f, travelTime * 1.5f);
+            float horizon = Mathf.Clamp(buffer, 60f, 300f);
+            return horizon;
+        }
+
         /// <summary>
-        /// Get the safe interval that contains the specified time
+        /// Get the safe interval that contains the specified time using binary search
         /// </summary>
         private static SafeInterval GetSafeIntervalContainingTime(
             Dictionary<string, List<SafeInterval>> safeIntervals,
             string locationId,
             float time)
         {
-            if (!safeIntervals.TryGetValue(locationId, out var intervals))
+            if (!safeIntervals.TryGetValue(locationId, out var intervals) || intervals.Count == 0)
             {
                 return null;
             }
             
-            foreach (var interval in intervals)
+            int left = 0;
+            int right = intervals.Count - 1;
+            
+            while (left <= right)
             {
+                int mid = left + (right - left) / 2;
+                var interval = intervals[mid];
+                
                 if (interval.Contains(time))
                 {
                     return interval;
+                }
+                
+                if (time < interval.Start)
+                {
+                    right = mid - 1;
+                }
+                else
+                {
+                    left = mid + 1;
                 }
             }
             
@@ -1087,17 +1185,9 @@ namespace PathPlanning
             return Vector3.Distance(fromPos, toPos);
         }
         
-        /// <summary>
-        /// Get the Vector3 representation of a connection point
-        /// </summary>
         private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
         {
-            if (connectionPoint.Point is Point point)
-            {
-                return new Vector3((float)point.X, 0, (float)point.Y);
-            }
-
-            return Vector3.zero;
+            return connectionPoint.Position;
         }
         
         /// <summary>
@@ -1115,30 +1205,32 @@ namespace PathPlanning
             return length;
         }
 
-        /// <summary>
-        /// Parse floor level string to integer
-        /// </summary>
         private static int ParseFloorLevel(string floorLevel)
         {
             if (string.IsNullOrEmpty(floorLevel))
                 return 0;
 
+            if (floorLevelCache.TryGetValue(floorLevel, out int cachedLevel))
+                return cachedLevel;
+
+            int result = 0;
             if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
             {
                 if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
                 {
-                    return -level;
+                    result = -level;
                 }
             }
             else
             {
                 if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
                 {
-                    return level;
+                    result = level;
                 }
             }
 
-            return 0;
+            floorLevelCache[floorLevel] = result;
+            return result;
         }
         #endregion
     }

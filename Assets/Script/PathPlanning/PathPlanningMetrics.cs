@@ -1,6 +1,4 @@
 using System;
-using UnityEngine;
-using CentralControl;
 
 namespace PathPlanning
 {
@@ -13,22 +11,22 @@ namespace PathPlanning
         public float TravelTime { get; set; }
         public float IdealPathLength { get; set; }
         public DateTime Timestamp { get; set; }
+        public int ReplanCount { get; set; }
+        public float WaitTime { get; set; }
+        public bool IsReplan { get; set; }
         
-        public PathPlanningMetrics(string robotId, string planId)
+        public float PathEfficiency => IdealPathLength > 0 && ActualPathLength > 0 
+            ? IdealPathLength / ActualPathLength 
+            : 0f;
+        
+        public PathPlanningMetrics(string robotId, string planId, bool isReplan = false)
         {
             RobotId = robotId;
             PlanId = planId;
             Timestamp = DateTime.Now;
-        }
-    }
-    
-    public class PathPlanningMetricsEventArgs : EventArgs
-    {
-        public PathPlanningMetrics Metrics { get; private set; }
-        
-        public PathPlanningMetricsEventArgs(PathPlanningMetrics metrics)
-        {
-            Metrics = metrics;
+            ReplanCount = 0;
+            WaitTime = 0f;
+            IsReplan = isReplan;
         }
     }
 }

@@ -450,6 +450,7 @@ namespace Map {
 
         public ConnectionPoint GetConnectionPointFromCellSpace(string cellSpaceId, bool sequence = true)
         {
+            // First pass: try the requested direction
             foreach (var cellBoundary in _cellBoundaries)
             {
                 if (sequence)
@@ -467,8 +468,32 @@ namespace Map {
                     }
                 }
             }
-            Debug.Log(cellSpaceId);
-            Debug.Log("ConnectionPoint not found");
+
+            // Second pass: fallback to opposite direction if not found
+            // This handles cases where CellSpace only has one-directional connections
+            foreach (var cellBoundary in _cellBoundaries)
+            {
+                if (sequence)
+                {
+                    // Fallback: try as Target
+                    if (cellBoundary.Target == cellSpaceId)
+                    {
+                        Debug.Log($"CellSpace {cellSpaceId}: Using fallback direction (Target instead of Source)");
+                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
+                    }
+                }
+                else
+                {
+                    // Fallback: try as Source
+                    if (cellBoundary.Source == cellSpaceId)
+                    {
+                        Debug.Log($"CellSpace {cellSpaceId}: Using fallback direction (Source instead of Target)");
+                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
+                    }
+                }
+            }
+
+            Debug.LogWarning($"CellSpace {cellSpaceId}: ConnectionPoint not found in any CellBoundary");
             return null;
         }
 

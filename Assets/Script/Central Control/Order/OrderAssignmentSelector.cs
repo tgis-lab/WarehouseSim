@@ -12,7 +12,7 @@ namespace CentralControl.OrderAssignment
     {
         private KMeans kMeans;
         private IndoorSpace indoorSpace;
-        private Queue<Order> waitingQueue = new Queue<Order>(); // 添加等待队列
+        private Queue<Order> waitingQueue = new Queue<Order>();
 
         public OrderAssignmentSelector()
         {
@@ -33,52 +33,44 @@ namespace CentralControl.OrderAssignment
 
         public void AssignOrders(List<Order> orders, List<RobotController> robots)
         {
-            // 首先处理已有的等待队列中的订单
             ProcessWaitingQueue(robots.Where(r => r.IsAvailable).ToList());
             
-            // 然后处理新的订单
             var availableRobots = robots.Where(r => r.IsAvailable).ToList();
             
             if (availableRobots.Count == 0)
             {
-                // 如果没有可用机器人，将所有订单添加到等待队列
                 AddToWaitingQueue(orders);
                 return;
             }
 
             List<Order> remainingOrders = new List<Order>(orders);
 
-            // 尝试一一分配订单给最适合的机器人
             while (remainingOrders.Count > 0 && availableRobots.Any())
             {
                 Dictionary<RobotController, Order> bestMatches = new Dictionary<RobotController, Order>();
                 
                 foreach (var robot in availableRobots)
                 {
-                    Order nearestOrder = FindNearestOrder(robot, remainingOrders);
-                    if (nearestOrder != null)
+                    Order bestOrder = FindBestOrder(robot, remainingOrders);
+                    if (bestOrder != null)
                     {
-                        bestMatches[robot] = nearestOrder;
+                        bestMatches[robot] = bestOrder;
                     }
                 }
                 
                 if (bestMatches.Count == 0)
                     break;
                 
-                // 找出最优的机器人-订单对
                 var bestPair = bestMatches
-                    .OrderBy(pair => CalculatePathDistance(pair.Key, pair.Value))
+                    .OrderByDescending(pair => CalculateAssignmentScore(pair.Key, pair.Value))
                     .First();
                 
-                // 分配订单
                 AssignOrderToRobot(bestPair.Value, bestPair.Key);
                 remainingOrders.Remove(bestPair.Value);
                 
-                // 更新可用机器人列表
                 availableRobots = robots.Where(r => r.IsAvailable).ToList();
             }
             
-            // 如果还有剩余订单，添加到等待队列
             if (remainingOrders.Count > 0)
             {
                 AddToWaitingQueue(remainingOrders);
@@ -87,33 +79,39 @@ namespace CentralControl.OrderAssignment
 
         public void InitialOrderDistribution(List<Order> orders, List<RobotController> robots)
         {
-            // 先处理等待队列中的订单
-            ProcessWaitingQueue(robots.Where(r => r.IsAvailable).ToList());
-            
-            List<Order> remainingOrders = new List<Order>(orders);
             List<RobotController> availableRobots = robots.Where(r => r.IsAvailable).ToList();
+            Debug.Log($"[OrderAssignment] Starting Initial Distribution. Orders: {orders.Count}, Available Robots: {availableRobots.Count}");
             
-            // 为每个可用机器人找一个最近的订单
+            ProcessWaitingQueue(availableRobots);
+            
+            // Re-check available robots after processing waiting queue
+            availableRobots = robots.Where(r => r.IsAvailable).ToList();
+            List<Order> remainingOrders = new List<Order>(orders);
+            
             foreach (var robot in availableRobots.ToList())
             {
                 if (remainingOrders.Count > 0)
                 {
-                    Order nearestOrder = FindNearestOrder(robot, remainingOrders);
-                    if (nearestOrder != null)
+                    Order bestOrder = FindBestOrder(robot, remainingOrders);
+                    if (bestOrder != null)
                     {
-                        AssignOrderToRobot(nearestOrder, robot);
-                        remainingOrders.Remove(nearestOrder);
+                        AssignOrderToRobot(bestOrder, robot);
+                        remainingOrders.Remove(bestOrder);
                         
-                        // 更新可用机器人列表
+                        Debug.Log($"[OrderAssignment] Initial assigned order {bestOrder.Id} to Robot {robot.Id}");
+                        
                         if (!robot.IsAvailable)
                         {
                             availableRobots.Remove(robot);
                         }
                     }
+                    else
+                    {
+                        Debug.LogWarning($"[OrderAssignment] Robot {robot.Id} could not find a suitable order in initial distribution");
+                    }
                 }
             }
 
-            // 如果还有订单和可用机器人，继续分配
             if (remainingOrders.Count > 0 && availableRobots.Any())
             {
                 var ordersToAssign = new List<Order>(remainingOrders);
@@ -121,23 +119,53 @@ namespace CentralControl.OrderAssignment
                 remainingOrders = remainingOrders.Except(ordersToAssign).ToList();
             }
             
-            // 将剩余订单添加到等待队列
             if (remainingOrders.Count > 0)
             {
                 AddToWaitingQueue(remainingOrders);
             }
         }
 
-        public Order FindNearestOrder(RobotController robot, List<Order> orders)
+        public Order FindBestOrder(RobotController robot, List<Order> orders)
         {
             if (orders.Count == 0) return null;
             
-            return orders.OrderBy(o => CalculatePathDistance(robot, o)).FirstOrDefault();
+            return orders.OrderByDescending(o => CalculateAssignmentScore(robot, o)).FirstOrDefault();
         }
         
-        private List<Order> SortOrdersByDistanceForRobot(RobotController robot, List<Order> orders)
+        private List<Order> SortOrdersByScoreForRobot(RobotController robot, List<Order> orders)
         {
-            return orders.OrderBy(o => CalculatePathDistance(robot, o)).ToList();
+            return orders.OrderByDescending(o => CalculateAssignmentScore(robot, o)).ToList();
+        }
+
+        private float CalculateAssignmentScore(RobotController robot, Order order)
+        {
+            // 1. Distance Score
+            Vector3 robotPos = robot.GetLastOrderDestination();
+            float distance = Vector3.Distance(robotPos, order.Destination);
+            
+            // Floor penalty
+            if (robot.CurrentFloor != order.FloorLevel)
+            {
+                distance += 50f; // Add virtual distance for floor change
+            }
+            
+            // Normalize distance: 0m = 1.0, 150m = 0.0
+            float distanceScore = Mathf.Clamp01(1.0f - (distance / 150.0f));
+            
+            // 2. Load Score
+            // Max orders = 20. 0 orders = 1.0, 20 orders = 0.0
+            float loadScore = 1.0f - ((float)robot.GetRobotOrdersQueueCount / robot.MaxOrder);
+            
+            // 3. Priority Score
+            // Level 1 = 0.2, Level 5 = 1.0
+            float priorityScore = Mathf.Clamp01(order.PriorityLevel / 5.0f);
+            
+            // Weights
+            float w1 = 0.4f; // Distance
+            float w2 = 0.4f; // Load
+            float w3 = 0.2f; // Priority
+            
+            return (distanceScore * w1) + (loadScore * w2) + (priorityScore * w3);
         }
 
         private void AssignOrderToRobot(Order order, RobotController robot)
@@ -197,11 +225,6 @@ namespace CentralControl.OrderAssignment
             return 1;
         }
         
-        // 新增的等待队列相关方法
-        
-        /// <summary>
-        /// 将订单添加到等待队列
-        /// </summary>
         private void AddToWaitingQueue(List<Order> orders)
         {
             foreach (var order in orders)
@@ -210,12 +233,7 @@ namespace CentralControl.OrderAssignment
                 Debug.Log($"Order {order.Id} added to waiting queue. Queue size: {waitingQueue.Count}");
             }
         }
-        
-        /// <summary>
-        /// 处理等待队列中的订单，尝试分配给可用机器人
-        /// </summary>
-        /// <param name="availableRobots">可用的机器人列表</param>
-        /// <returns>成功分配的订单数量</returns>
+
         public int ProcessWaitingQueue(List<RobotController> availableRobots)
         {
             if (waitingQueue.Count == 0 || !availableRobots.Any())
@@ -230,7 +248,7 @@ namespace CentralControl.OrderAssignment
                 if (!tempList.Any() || !robot.IsAvailable)
                     continue;
                 
-                Order bestOrder = FindNearestOrder(robot, tempList);
+                Order bestOrder = FindBestOrder(robot, tempList);
                 if (bestOrder != null)
                 {
                     AssignOrderToRobot(bestOrder, robot);
@@ -240,7 +258,6 @@ namespace CentralControl.OrderAssignment
                     
                     Debug.Log($"Order {bestOrder.Id} assigned from waiting queue to Robot {robot.Id}");
                     
-                    // 如果机器人不再可用，则从列表中移除
                     if (!robot.IsAvailable)
                     {
                         availableRobots.Remove(robot);
@@ -248,25 +265,19 @@ namespace CentralControl.OrderAssignment
                 }
             }
             
-            // 更新等待队列，移除已分配的订单
             waitingQueue = new Queue<Order>(waitingQueue.Where(o => !assignedOrders.Contains(o)));
             
             return assignedCount;
         }
         
-        /// <summary>
-        /// 当某个机器人变为可用时，尝试从等待队列为其分配订单
-        /// </summary>
-        /// <param name="robot">变为可用的机器人</param>
-        /// <returns>是否成功分配订单</returns>
         public bool TryAssignOrderFromQueue(RobotController robot)
         {
             if (waitingQueue.Count == 0 || !robot.IsAvailable)
                 return false;
-            
+
             List<Order> tempList = new List<Order>(waitingQueue);
-            Order bestOrder = FindNearestOrder(robot, tempList);
-            
+            Order bestOrder = FindBestOrder(robot, tempList);
+
             if (bestOrder != null)
             {
                 AssignOrderToRobot(bestOrder, robot);
@@ -274,21 +285,15 @@ namespace CentralControl.OrderAssignment
                 Debug.Log($"Order {bestOrder.Id} assigned from waiting queue to Robot {robot.Id}");
                 return true;
             }
-            
+
             return false;
         }
         
-        /// <summary>
-        /// 获取等待队列中的订单数量
-        /// </summary>
         public int GetWaitingQueueCount()
         {
             return waitingQueue.Count;
         }
         
-        /// <summary>
-        /// 清空等待队列
-        /// </summary>
         public void ClearWaitingQueue()
         {
             waitingQueue.Clear();

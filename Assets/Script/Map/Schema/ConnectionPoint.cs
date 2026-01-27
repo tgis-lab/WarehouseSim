@@ -13,6 +13,29 @@ namespace Map {
         public string FloorLevel { get; private set; }
         public bool IsStair { get; private set; }
         public bool IsElevator { get; private set; }
+        
+        [JsonIgnore]
+        private Vector3? cachedPosition;
+        
+        [JsonIgnore]
+        public Vector3 Position
+        {
+            get
+            {
+                if (!cachedPosition.HasValue)
+                {
+                    if (Point is Point p)
+                    {
+                        cachedPosition = new Vector3((float)p.X, 0, (float)p.Y);
+                    }
+                    else
+                    {
+                        cachedPosition = Vector3.zero;
+                    }
+                }
+                return cachedPosition.Value;
+            }
+        }
 
         public ConnectionPoint(string connectionPointId, CellBoundary cellBoundary, Geometry point, string floorLevel, bool isStair, bool isElevator)
         {

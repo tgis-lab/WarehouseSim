@@ -56,13 +56,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetIndicator: {fileID: 0}
-  selectedAlgorithm: 2
+  selectedAlgorithm: 3
   selectedSearchMethod: 0
-  baseDetectionRadius: 0.5
-  emergencyStopDistance: 0.2
+  baseDetectionRadius: 1
+  emergencyStopDistance: 1.5
   defaultSpeed: 1.5
-  maxAcceleration: 1
-  maxDeceleration: 1
+  maxAcceleration: 1.5
+  maxDeceleration: 2
   MaxOrder: 200
   floorHeight: 3
 --- !u!54 &4801726294540973590

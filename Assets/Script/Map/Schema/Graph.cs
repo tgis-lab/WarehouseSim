@@ -198,7 +198,8 @@ namespace Map {
             // Estimate floor
             string floorLevel = GetFloorLevelFromPosition(position);
             Point point = new Point(position.x, position.z);
-            
+            CellSpace foundCellSpace = null;
+
             // Search in the estimated floor first
             if (!string.IsNullOrEmpty(floorLevel))
             {
@@ -210,13 +211,19 @@ namespace Map {
                         Polygon polygon = (Polygon)cellSpace.Space;
                         if (polygon.Contains(point))
                         {
+                            foundCellSpace = cellSpace;
                             ConnectionPoint connectionPoint = this.indoorSpace.GetConnectionPointFromCellSpace(cellSpace.Id, sequence);
-                            return connectionPoint;
+                            if (connectionPoint != null)
+                            {
+                                return connectionPoint;
+                            }
+                            // If ConnectionPoint is null, continue searching other CellSpaces
+                            Debug.Log($"CellSpace {cellSpace.Id} contains point but has no ConnectionPoint (sequence={sequence}), searching alternatives...");
                         }
                     }
                 }
             }
-            
+
             // If not found, try all CellSpaces
             foreach (var cellSpace in this.indoorSpace.CellSpaces)
             {
@@ -225,14 +232,66 @@ namespace Map {
                     Polygon polygon = (Polygon)cellSpace.Space;
                     if (polygon.Contains(point))
                     {
+                        foundCellSpace = cellSpace;
                         ConnectionPoint connectionPoint = this.indoorSpace.GetConnectionPointFromCellSpace(cellSpace.Id, sequence);
-                        return connectionPoint;
+                        if (connectionPoint != null)
+                        {
+                            return connectionPoint;
+                        }
+                        // If ConnectionPoint is null, continue searching
                     }
                 }
             }
-            
-            Debug.Log("Point is not inside any CellSpace");
+
+            // If we found a CellSpace but no ConnectionPoint, try finding the nearest navigable CellSpace with a ConnectionPoint
+            if (foundCellSpace != null)
+            {
+                Debug.LogWarning($"Position {position} is in CellSpace {foundCellSpace.Id} but no ConnectionPoint found. Trying nearest CellSpace with valid ConnectionPoint...");
+                return FindNearestConnectionPoint(position, floorLevel, sequence);
+            }
+
+            Debug.LogWarning($"Position {position} is not inside any navigable CellSpace on floor {floorLevel}");
             return null;
+        }
+
+        /// <summary>
+        /// Find the nearest ConnectionPoint to the given position
+        /// </summary>
+        private ConnectionPoint FindNearestConnectionPoint(Vector3 position, string floorLevel, bool sequence)
+        {
+            float minDistance = float.MaxValue;
+            ConnectionPoint nearestConnectionPoint = null;
+
+            var cellSpacesToSearch = string.IsNullOrEmpty(floorLevel)
+                ? indoorSpace.CellSpaces
+                : indoorSpace.GetCellSpacesOnFloor(floorLevel);
+
+            foreach (var cellSpace in cellSpacesToSearch)
+            {
+                if (!cellSpace.IsNavigable()) continue;
+
+                ConnectionPoint cp = indoorSpace.GetConnectionPointFromCellSpace(cellSpace.Id, sequence);
+                if (cp == null) continue;
+
+                Point cellCenter = (Point)cellSpace.Node;
+                float distance = Vector2.Distance(
+                    new Vector2(position.x, position.z),
+                    new Vector2((float)cellCenter.X, (float)cellCenter.Y)
+                );
+
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    nearestConnectionPoint = cp;
+                }
+            }
+
+            if (nearestConnectionPoint != null)
+            {
+                Debug.Log($"Found nearest ConnectionPoint at distance {minDistance:F2}m");
+            }
+
+            return nearestConnectionPoint;
         }
         
         // Estimate potential floor from height

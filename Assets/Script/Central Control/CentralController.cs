@@ -9,12 +9,17 @@ using Map;
 using CentralControl.OrderAssignment;
 using CentralControl.RobotControl;
 using CentralControl.PickerControl;
+using CentralControl.PickingQueueControl;
 using PathPlanning;
 
 namespace CentralControl
 {
     public class CentralController : MonoBehaviour
     {
+        #region Singleton
+        public static CentralController Instance { get; private set; }
+        #endregion
+        
         #region Inspector Fields
         [Header("Components")]
         public OrderManager orderManager;
@@ -22,6 +27,10 @@ namespace CentralControl
         public PickerManager pickerManager;
         public MapLoader mapLoader;
         public IntersectionAreaManager intersectionAreaManager;
+        public DeadlockDetector deadlockDetector;
+
+        [Header("Deadlock Resolution")]
+        public float deadlockDecisionTtl = 5f;
         
         [Header("Map Settings")]
         public float width, length;
@@ -63,7 +72,6 @@ namespace CentralControl
         private MapGrid mapGrid;
         private ConflictResolver conflictResolver;
         private CellSpaceConflictDetector cellSpaceConflictDetector;
-        private float nextUpdateTime = 0f;
         private float nextNavMeshRebuildTime = 0f;
         private Coroutine orderGenerationCoroutine;
         private bool isInitialized = false;
@@ -74,10 +82,81 @@ namespace CentralControl
         private int totalEnvironmentCollisions = 0;
         private Dictionary<string, int> robotCollisionCounts = new Dictionary<string, int>();
         private Dictionary<string, PathPlanningMetrics> pathPlanningMetrics = new Dictionary<string, PathPlanningMetrics>();
+        private readonly object deadlockDecisionLock = new object();
+        private readonly Dictionary<string, DeadlockDecision> deadlockDecisions = new Dictionary<string, DeadlockDecision>();
+        
+        // Dirty flag for incremental layer merge
+
+        private readonly HashSet<int> dirtyRobotIds = new HashSet<int>();
+        private readonly object dirtyRobotLock = new object();
 
         #endregion
+        
+        public bool TryGetRobotId(GameObject robotObject, out int robotId)
+        {
+            robotId = 0;
+            if (robotObject == null)
+            {
+                return false;
+            }
 
+            if (robotObject.TryGetComponent<RobotController>(out var robot))
+            {
+                robotId = robot.Id;
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool IsRobotInPickingQueue(string pickingPointId, int robotId)
+        {
+            return PickingQueueManager.Instance.IsRobotInQueueOrActive(pickingPointId, robotId.ToString());
+        }
+
+        public bool IsRobotPicking(int robotId)
+        {
+            if (robotManager == null)
+            {
+                return false;
+            }
+
+            var robot = robotManager.GetRobotById(robotId);
+            return robot != null && robot.IsPicking;
+        }
+
+        public string GetRobotPickingPointId(int robotId)
+        {
+            if (robotManager == null)
+            {
+                return null;
+            }
+
+            var robot = robotManager.GetRobotById(robotId);
+            return robot?.CurrentOrder?.PickingPoint?.Id;
+        }
+
+        private class DeadlockDecision
+        {
+            public string YieldRobotId;
+            public float CreatedTime;
+            public string[] InvolvedRobotIds;
+        }
+ 
         #region Unity Lifecycle
+
+        private void Awake()
+        {
+            // Singleton initialization
+            if (Instance != null && Instance != this)
+            {
+                Debug.LogWarning("[CentralControl] Duplicate CentralController instance detected. Destroying this one.");
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+        }
+        
         private void Start()
         {
             // Initialize the system
@@ -129,6 +208,9 @@ namespace CentralControl
             // Initialize collision tracker
             InitializeCollisionTracking();
 
+            // Initialize deadlock detector
+            InitializeDeadlockDetector();
+
             // Mark initialization as complete
             isInitialized = true;
 
@@ -175,6 +257,8 @@ namespace CentralControl
             {
                 EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
                 EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
+                EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
+                EventManager.Instance.OnPathPlanningMetricsRecorded -= OnPathPlanningMetricsRecorded;
             }
             
             // Stop order generation coroutine
@@ -182,6 +266,23 @@ namespace CentralControl
             {
                 StopCoroutine(orderGenerationCoroutine);
                 orderGenerationCoroutine = null;
+            }
+        }
+
+        private void OnApplicationQuit()
+        {
+            // Save final reports before application exits to prevent data loss
+            Debug.Log("[CentralControl] Application quitting - saving final reports...");
+            
+            try
+            {
+                SaveCollisionReportToFile();
+                SavePathPlanningReportToFile();
+                Debug.Log("[CentralControl] Final reports saved successfully");
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[CentralControl] Error saving final reports on quit: {e.Message}");
             }
         }
         #endregion
@@ -311,14 +412,31 @@ namespace CentralControl
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
-                
+                EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
+
                 EventManager.Instance.OnRobotCollisionDetected += HandleRobotCollision;
-                
+                EventManager.Instance.OnDeadlockDetected += HandleDeadlockDetected;
+
                 Debug.Log("[CentralControl] Collision tracking system initialized!");
             }
             else
             {
                 Debug.LogError("[CentralControl] Failed to initialize collision tracking: EventManager not found!");
+            }
+        }
+
+        private void InitializeDeadlockDetector()
+        {
+            Debug.Log("[CentralControl] Initializing deadlock detector...");
+            
+            if (deadlockDetector != null && globalOccupancyLayer != null && indoorSpace != null)
+            {
+                deadlockDetector.Initialize(globalOccupancyLayer, indoorSpace);
+                Debug.Log("[CentralControl] Deadlock detector initialized!");
+            }
+            else
+            {
+                Debug.LogWarning("[CentralControl] DeadlockDetector component is missing or dependencies are null");
             }
         }
         #endregion
@@ -447,8 +565,18 @@ namespace CentralControl
 
         private void MergeRobotOccupancyLayer()
         {
-            foreach (var robot in robotManager.GetAllRobots())
+            // Only merge dirty robots instead of all robots every frame
+            HashSet<int> toProcess;
+            lock (dirtyRobotLock)
             {
+                if (dirtyRobotIds.Count == 0) return;
+                toProcess = new HashSet<int>(dirtyRobotIds);
+                dirtyRobotIds.Clear();
+            }
+            
+            foreach (var robotId in toProcess)
+            {
+                var robot = robotManager.GetRobotById(robotId);
                 if (robot == null) continue;
                 
                 var personalLayer = robot.GetPersonalOccupancyLayer();
@@ -456,6 +584,18 @@ namespace CentralControl
                 {
                     globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60);
                 }
+            }
+        }
+        
+        /// <summary>
+        /// Mark a robot's personal layer as dirty, requiring merge on next update.
+        /// Called by RobotController when personal layer is modified.
+        /// </summary>
+        public void MarkRobotLayerDirty(int robotId)
+        {
+            lock (dirtyRobotLock)
+            {
+                dirtyRobotIds.Add(robotId);
             }
         }
 
@@ -485,6 +625,115 @@ namespace CentralControl
                 EventManager.Instance.OnRobotPathPlanned += HandleRobotPathPlanned;
             }
         }
+
+        private void HandleDeadlockDetected(object sender, DeadlockDetectedEventArgs e)
+        {
+            if (robotManager == null || e == null || e.InvolvedRobotIds == null || e.InvolvedRobotIds.Length == 0)
+            {
+                return;
+            }
+
+            float now = Time.time;
+            string groupKey = GetDeadlockGroupKey(e.InvolvedRobotIds);
+
+            string yieldRobotId;
+            lock (deadlockDecisionLock)
+            {
+                if (deadlockDecisions.TryGetValue(groupKey, out var existingDecision) &&
+                    now - existingDecision.CreatedTime <= deadlockDecisionTtl)
+                {
+                    yieldRobotId = existingDecision.YieldRobotId;
+                }
+                else
+                {
+                    yieldRobotId = SelectYieldRobot(e.InvolvedRobotIds);
+                    deadlockDecisions[groupKey] = new DeadlockDecision
+                    {
+                        YieldRobotId = yieldRobotId,
+                        CreatedTime = now,
+                        InvolvedRobotIds = e.InvolvedRobotIds
+                    };
+                }
+            }
+
+            foreach (var robotId in e.InvolvedRobotIds)
+            {
+                float delay = GetDeadlockStaggerDelay(e.InvolvedRobotIds, robotId);
+                if (robotId == yieldRobotId)
+                {
+                    EventManager.Instance?.TriggerReplanRequested(robotId, "DeadlockYield", delay);
+                }
+                else
+                {
+                    EventManager.Instance?.TriggerReplanRequested(robotId, "DeadlockResolution", delay);
+                }
+            }
+        }
+
+        private string GetDeadlockGroupKey(string[] involvedRobotIds)
+        {
+            var ordered = involvedRobotIds.OrderBy(id => id).ToArray();
+            return string.Join("_", ordered);
+        }
+
+        private float GetDeadlockStaggerDelay(string[] involvedRobotIds, string robotId)
+        {
+            int index = Array.IndexOf(involvedRobotIds, robotId);
+            if (index < 0)
+            {
+                return 0f;
+            }
+
+            return index * 0.5f;
+        }
+
+        private string SelectYieldRobot(string[] involvedRobotIds)
+        {
+            string bestId = null;
+            float bestCost = float.MaxValue;
+
+            foreach (var robotId in involvedRobotIds)
+            {
+                var robot = robotManager.GetRobotById(robotId);
+                if (robot == null)
+                {
+                    continue;
+                }
+
+                float cost = EstimateYieldCost(robot);
+                if (cost < bestCost)
+                {
+                    bestCost = cost;
+                    bestId = robotId;
+                }
+            }
+
+            return bestId ?? involvedRobotIds.FirstOrDefault();
+        }
+
+        private float EstimateYieldCost(RobotController robot)
+        {
+            float cost = 0f;
+            cost += robot.GetRobotOrdersQueueCount * 2f;
+
+            if (robot.CurrentOrder != null)
+            {
+                cost += 1f;
+            }
+
+            if (robot.IsBackingUp)
+            {
+                cost += 3f;
+            }
+
+            if (!robot.IsMoving)
+            {
+                cost += 2f;
+            }
+
+            return cost;
+        }
+
         
         // Detect path conflicts for a specific robot
         private bool DetectPathConflicts(string robotId, List<ConnectionPoint> path, List<float> times, string planId)
@@ -655,21 +904,6 @@ namespace CentralControl
 
             ReserveCellSpacePath(e.RobotId, e.PlanId, e.Path, e.Times);
             NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
-            
-            // bool hasConflict = DetectPathConflicts(e.RobotId, e.Path, e.Times, e.PlanId);
-            
-            // if (hasConflict)
-            // {
-            //     Debug.LogWarning($"The path of robot {e.RobotId} has conflicts!");
-            //     // 可以在这里触发事件通知机器人重新规划
-            //     // 或执行其他冲突处理策略
-            // }
-            // else
-            // {
-            //     Debug.Log($"The path of robot {e.RobotId} has been accepted.");
-            //     ReserveCellSpacePath(e.RobotId, e.PlanId, e.Path, e.Times);
-            //     NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
-            // }
         }
         
         private void NotifyRobotPathModified(string robotId, string planId, List<ConnectionPoint> path, List<float> newTimes, string modificationType, float modificationValue)
@@ -745,14 +979,14 @@ namespace CentralControl
                 if (unassignedOrders.Count > 0)
                 {
                     OrderAssignmentSelector assigner = new OrderAssignmentSelector(indoorSpace);
-                    Order nearestOrder = assigner.FindNearestOrder(robot, unassignedOrders);
+                    Order bestOrder = assigner.FindBestOrder(robot, unassignedOrders);
                     
-                    if (nearestOrder != null)
+                    if (bestOrder != null)
                     {
-                        robot.ReceiveOrder(nearestOrder);
-                        nearestOrder.AssignedRobotId = robot.Id;
+                        robot.ReceiveOrder(bestOrder);
+                        bestOrder.AssignedRobotId = robot.Id;
                         
-                        Debug.Log($"[CentralControl] Assigned order {nearestOrder.Id} to free robot {robot.Id}");
+                        Debug.Log($"[CentralControl] Assigned order {bestOrder.Id} to free robot {robot.Id}");
                     }
                 }
             }
@@ -863,16 +1097,41 @@ namespace CentralControl
         #endregion
 
         #region Utility Methods
+        public string GenerateCollisionReportCSV()
+        {
+            System.Text.StringBuilder csv = new System.Text.StringBuilder();
+            csv.AppendLine("Time,Robot1,Robot2,IsRobotCollision,Position_X,Position_Y,Position_Z,RecoveryResult,RecoveryTime");
+            
+            if (EventManager.Instance != null)
+            {
+                var allCollisions = EventManager.Instance.GetAllRobotCollisions()
+                    .Concat(EventManager.Instance.GetAllEnvironmentCollisions())
+                    .OrderBy(c => c.Time);
+                
+                foreach (var collision in allCollisions)
+                {
+                    csv.AppendLine($"{collision.Time:F3},{collision.RobotId1},{collision.RobotId2},{collision.IsRobotCollision},{collision.Position.x:F2},{collision.Position.y:F2},{collision.Position.z:F2},{collision.RecoveryResult},{collision.RecoveryTime:F2}");
+                }
+            }
+            
+            return csv.ToString();
+        }
+
         public void SaveCollisionReportToFile()
         {
-            string report = GenerateCollisionReport();
             string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            string filepath = $"{Application.persistentDataPath}/collision_report_{timestamp}.txt";
-
+            
             try
             {
-                System.IO.File.WriteAllText(filepath, report);
-                Debug.Log($"Collision report saved to: {filepath}");
+                string txtReport = GenerateCollisionReport();
+                string txtPath = $"{Application.persistentDataPath}/collision_report_{timestamp}.txt";
+                System.IO.File.WriteAllText(txtPath, txtReport);
+                
+                string csvReport = GenerateCollisionReportCSV();
+                string csvPath = $"{Application.persistentDataPath}/collision_report_{timestamp}.csv";
+                System.IO.File.WriteAllText(csvPath, csvReport);
+                
+                Debug.Log($"Collision reports saved: {txtPath}, {csvPath}");
             }
             catch (System.Exception e)
             {
@@ -913,11 +1172,11 @@ namespace CentralControl
             report.AppendLine($"Total Plans Recorded: {pathPlanningMetrics.Count}");
             report.AppendLine();
             
-            report.AppendLine("Robot ID,Plan ID,Planning Time (s),Actual Path Length,Travel Time (s),Ideal Path Length,Timestamp");
+            report.AppendLine("RobotId,PlanId,PlanningTime,ActualPathLength,TravelTime,IdealPathLength,PathEfficiency,ReplanCount,WaitTime,IsReplan,Timestamp");
             
             foreach (var metrics in pathPlanningMetrics.Values.OrderBy(m => m.RobotId).ThenBy(m => m.Timestamp))
             {
-                report.AppendLine($"{metrics.RobotId},{metrics.PlanId},{metrics.PlanningTime:F4},{metrics.ActualPathLength:F2},{metrics.TravelTime:F2},{metrics.IdealPathLength:F2},{metrics.Timestamp}");
+                report.AppendLine($"{metrics.RobotId},{metrics.PlanId},{metrics.PlanningTime:F4},{metrics.ActualPathLength:F2},{metrics.TravelTime:F2},{metrics.IdealPathLength:F2},{metrics.PathEfficiency:F3},{metrics.ReplanCount},{metrics.WaitTime:F2},{metrics.IsReplan},{metrics.Timestamp}");
             }
             
             return report.ToString();

@@ -10,16 +10,28 @@ using NetTopologySuite.Geometries;
 using PathPlanning;
 using Map;
 using CentralControl.OrderAssignment;
-using CentralControl.PickerControl;
+using CentralControl.PickingQueueControl;
+
 
 namespace CentralControl.RobotControl
 {
-    public enum RobotState
+    public enum RobotBehavior
     {
-        Moving, 
+        Idle,
+        Moving,
         Picking,
-        UsingElevator, // New state for elevator movement
-        UsingStairs    // New state for stair movement
+        Queuing,
+        AdvancingInQueue,
+        PickingPending,
+        EmergencyStopped
+    }
+    
+    public enum VerticalTransportType
+    {
+        None,
+        Elevator,
+        Stairs,
+        Escalator
     }
     
     public class RobotController : MonoBehaviour
@@ -33,6 +45,7 @@ namespace CentralControl.RobotControl
         public float defaultSpeed = 2.0f;
         public float maxAcceleration = 2.0f;
         public float maxDeceleration = 5.0f;
+        public float maxJerk = 8.0f;
         public int MaxOrder = 20;
         public float floorHeight = 3.0f;
         #endregion
@@ -45,19 +58,53 @@ namespace CentralControl.RobotControl
         public bool lastReportedAvailability { get; set; } = false;
         public bool lastReportedFreeStatus { get; set; } = false;
         public int lastReportedOrderCount { get; set; } = -1;
-        public string CurrentFloor { get; private set; } = "1F"; // Current floor level
-        public bool IsMoving => currentStates.Contains(RobotState.Moving);
-        public bool IsPicking => currentStates.Contains(RobotState.Picking);
-        public bool IsUsingElevator => currentStates.Contains(RobotState.UsingElevator);
-        public bool IsUsingStairs => currentStates.Contains(RobotState.UsingStairs);
-        public bool IsVerticallyMoving => IsUsingElevator || IsUsingStairs;
-        public bool IsFree => currentStates.Count == 0;
-        public bool IsOnTask => !IsFree;
+        public string CurrentFloor { get; private set; } = "1F";
+        
+        public RobotBehavior Behavior => currentBehavior;
+        public VerticalTransportType VerticalTransport => currentVerticalTransport;
+        public bool IsMoving => currentBehavior == RobotBehavior.Moving || currentBehavior == RobotBehavior.PickingPending || currentBehavior == RobotBehavior.AdvancingInQueue;
+        public bool IsPicking => currentBehavior == RobotBehavior.Picking;
+        public bool IsQueuing => currentBehavior == RobotBehavior.Queuing;
+        public bool IsAdvancingInQueue => currentBehavior == RobotBehavior.AdvancingInQueue;
+        public bool IsPickingPending => currentBehavior == RobotBehavior.PickingPending;
+        public bool IsEmergencyStopped => currentBehavior == RobotBehavior.EmergencyStopped;
+        public bool IsUsingElevator => currentVerticalTransport == VerticalTransportType.Elevator;
+        public bool IsUsingStairs => currentVerticalTransport == VerticalTransportType.Stairs;
+        public bool IsVerticallyMoving => currentVerticalTransport != VerticalTransportType.None;
+        public bool IsFree => currentBehavior == RobotBehavior.Idle;
+        public bool IsOnTask => currentBehavior != RobotBehavior.Idle;
         public bool IsAvailable => ordersQueue.Count < MaxOrder;
         public bool IsProcessingOrders => isProcessingOrdersRunning;
         public Order CurrentOrder => currentOrder;
         public int GetRobotOrdersQueueCount => ordersQueue.Count;
         public List<string> listOrdersQueue => new List<string>(ordersQueue.Select(order => order.Id));
+        public bool IsBackingUp => isBackingUp;
+        public Vector3 CurrentVelocity => rb != null ? rb.velocity : Vector3.zero;
+        public bool IsActuallyMoving => rb != null && rb.velocity.magnitude > 0.1f;
+        public Vector3 TargetPosition => targetPosition;
+        public List<ConnectionPoint> CurrentPath => currentPath;
+        public int CurrentPathIndex => currentPathIndex;
+
+        public Vector3 GetLastOrderDestination()
+        {
+            if (ordersQueue.IsEmpty && currentOrder == null)
+            {
+                return transform.position;
+            }
+            
+            if (ordersQueue.IsEmpty && currentOrder != null)
+            {
+                 return currentOrder.Destination;
+            }
+
+            Order lastOrder = ordersQueue.ToArray().LastOrDefault();
+            if (lastOrder != null)
+            {
+                return lastOrder.Destination;
+            }
+            
+            return currentOrder != null ? currentOrder.Destination : transform.position;
+        }
         #endregion
 
         #region Private Fields
@@ -68,7 +115,8 @@ namespace CentralControl.RobotControl
         private ConcurrentQueue<Order> ordersQueue = new ConcurrentQueue<Order>();
         private Order currentOrder;
         private Coroutine currentMovementCoroutine;
-        private HashSet<RobotState> currentStates = new HashSet<RobotState>();
+        private RobotBehavior currentBehavior = RobotBehavior.Idle;
+        private VerticalTransportType currentVerticalTransport = VerticalTransportType.None;
         private float detectionRadius;
         private bool isWaitingForPicking = false;
         private bool isProcessingOrdersRunning = false;
@@ -87,9 +135,8 @@ namespace CentralControl.RobotControl
         private Vector3 finalDestination;
         private Vector3 targetPosition;
         private bool navigationEnabled = true;
-        private bool isEmergencyStopped = false;
         private float lastEmergencyStopTime = 0f;
-        private const float EMERGENCY_COOLDOWN = 3.0f;
+        private const float EMERGENCY_RECOVERY_DELAY = 0.5f;
         private LayerMask robotCollisionLayer;
         private LayerMask pickerCollisionLayer;
         private CellSpace lastCellSpace = null;
@@ -109,6 +156,8 @@ namespace CentralControl.RobotControl
         // Conflict resolution
         private Coroutine waitForExecutionCoroutine;
         private List<float> pathTimes = new List<float>();
+        private float currentSpeed = 0f;
+        private float currentAcceleration = 0f;
         
         // Collision
         private List<GameObject> recentCollisions = new List<GameObject>();
@@ -117,6 +166,20 @@ namespace CentralControl.RobotControl
         private float pathPointAcceptanceRadius = 0.5f;
         private float finalDestinationAcceptanceRadius = 1.0f;
         private bool hasReportedArrival = false;
+        
+        // Collision detection optimization
+        private Coroutine collisionCheckCoroutine;
+        private Coroutine obstacleCarvingCoroutine;
+        private const float COLLISION_CHECK_INTERVAL = 0.05f; // 20Hz detection frequency
+        private bool isBackingUp = false;
+        private RobotBehavior behaviorBeforeBackup = RobotBehavior.Idle;
+        
+        // Path history for backup recovery
+        private List<Vector3> pathHistory = new List<Vector3>();
+        private const int PATH_HISTORY_SIZE = 10;
+        
+        // Local collision recovery manager
+        private CollisionRecoveryManager collisionRecoveryManager;
         #endregion
 
         #region Event
@@ -167,8 +230,11 @@ namespace CentralControl.RobotControl
                 EventManager.Instance.OnRobotPathAccepted += HandlePathAccepted;
                 EventManager.Instance.OnPickingCompleted += HandlePickingCompletedEvent;
                 EventManager.Instance.OnGlobalOccupancyLayerUpdated += HandleGlobalOccupancyLayerUpdated;
+                
+                PickingQueueManager.Instance.OnRobotAllowedToPick += HandleRobotAllowedToPick;
+                PickingQueueManager.Instance.OnQueueAdvance += HandleQueueAdvance;
             }
-            
+
             // Initialize target indicator
             if (targetIndicator != null)
             {
@@ -180,34 +246,25 @@ namespace CentralControl.RobotControl
         {
             if (!isInitialized) return;
 
-            // Update personal occupancy layer
             UpdatePersonalLayer();
-            
-            // Update robot status
             UpdateRobotStatus();
-            
-            // Collision Detection
-            CheckSurroundings();
+            RecordPathPosition();
 
-            // Update movement info
             lastPosition = transform.position;
             lastPositionChangeTime = Time.time;
             
-            // Handle different movement states
-            if (navigationEnabled && !isEmergencyStopped && !isWaitingForPicking && IsMoving)
+            if (navigationEnabled && !IsEmergencyStopped && !isWaitingForPicking && IsMoving)
             {
                 UpdateMovement();
             }
             
-            // Update visualization
             UpdateTargetIndicator();
             
-            if (isEmergencyStopped || needsPathRecovery)
+            if (IsEmergencyStopped || needsPathRecovery)
             {
                 VisualizeEmergencyState();
             }
             
-            // Update intersection status
             if (intersectionManager != null)
             {
                 CheckIntersectionStatus();
@@ -221,23 +278,25 @@ namespace CentralControl.RobotControl
             Debug.DrawLine(transform.position, transform.position + transform.forward * 1.5f, Color.red);
         }
 
-        private void OnDestroy()
-        {
-            if (EventManager.Instance != null)
-            {
-                EventManager.Instance.OnRobotPathModified -= HandlePathModified;
-                EventManager.Instance.OnRobotPathAccepted -= HandlePathAccepted;
-                EventManager.Instance.OnPickingCompleted -= HandlePickingCompletedEvent;
-                EventManager.Instance.OnGlobalOccupancyLayerUpdated -= HandleGlobalOccupancyLayerUpdated;
-            }
-        }
         #endregion
 
         #region Initialization
-        public void InitializeRobot(int id, IndoorSpace indoorSpace, Graph graph, MapGrid mapGrid, 
+        public void InitializeRobot(int id, IndoorSpace indoorSpace, Graph graph, MapGrid mapGrid,
                                     DynamicOccupancyLayer globalOccupancyLayer,
                                     IntersectionAreaManager intersectionManager)
         {
+            // Validate critical dependencies before initialization
+            if (indoorSpace == null)
+            {
+                Debug.LogError($"Robot {id}: InitializeRobot called with null indoorSpace - initialization aborted");
+                return;
+            }
+            if (graph == null)
+            {
+                Debug.LogError($"Robot {id}: InitializeRobot called with null graph - initialization aborted");
+                return;
+            }
+
             this.Id = id;
             this.indoorSpace = indoorSpace;
             this.graph = graph;
@@ -251,12 +310,14 @@ namespace CentralControl.RobotControl
 
             ConfigureNavMeshObstacle();
             CreateInteractionTrigger();
-            StartCoroutine(ManageObstacleCarving());
+            obstacleCarvingCoroutine = StartCoroutine(ManageObstacleCarving());
 
             personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
             
             pathPlanner = new PathPlanner(graph, indoorSpace, selectedAlgorithm, selectedSearchMethod, 
                                           id.ToString(), maxAcceleration, maxDeceleration);
+
+            collisionRecoveryManager = new CollisionRecoveryManager(this);
 
             if (EventManager.Instance != null)
             {
@@ -269,7 +330,36 @@ namespace CentralControl.RobotControl
                 Debug.LogError($"Robot {Id}: EventManager not found, path modification events will not be received");
             }
             
+            StartCollisionDetection();
             isInitialized = true;
+        }
+
+        private void OnDestroy()
+        {
+            // Stop coroutines to prevent MissingReferenceException
+            if (obstacleCarvingCoroutine != null)
+            {
+                StopCoroutine(obstacleCarvingCoroutine);
+                obstacleCarvingCoroutine = null;
+            }
+            if (collisionCheckCoroutine != null)
+            {
+                StopCoroutine(collisionCheckCoroutine);
+                collisionCheckCoroutine = null;
+            }
+
+            collisionRecoveryManager?.Cleanup();
+
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.OnRobotPathModified -= HandlePathModified;
+                EventManager.Instance.OnRobotPathAccepted -= HandlePathAccepted;
+                EventManager.Instance.OnPickingCompleted -= HandlePickingCompletedEvent;
+                EventManager.Instance.OnGlobalOccupancyLayerUpdated -= HandleGlobalOccupancyLayerUpdated;
+            }
+
+            PickingQueueManager.Instance.OnRobotAllowedToPick -= HandleRobotAllowedToPick;
+            PickingQueueManager.Instance.OnQueueAdvance -= HandleQueueAdvance;
         }
 
         private void ConfigureNavMeshObstacle()
@@ -314,6 +404,8 @@ namespace CentralControl.RobotControl
             
             ordersQueue.Enqueue(order);
             Debug.Log($"Robot {Id} received order {order.Id}, queue size: {ordersQueue.Count}");
+            
+            EventManager.Instance?.TriggerOrderAssigned(order.Id, Id.ToString());
             
             if (!isProcessingOrdersRunning)
             {
@@ -362,9 +454,8 @@ namespace CentralControl.RobotControl
 
         private IEnumerator ExecuteOrderCoroutine(Order order)
         {
-            // Plan path to destination
             Debug.Log($"Robot {Id} planning path to {order.Destination}");
-            SetState(RobotState.Moving, true);
+            SetBehavior(RobotBehavior.Moving);
             
             Vector3 targetPosition = GetTargetPosition(order.PickingPoint);
             string targetFloorLevel = order.PickingPoint.FloorLevel;
@@ -376,7 +467,8 @@ namespace CentralControl.RobotControl
             if (result.path == null || result.path.Count == 0)
             {
                 Debug.LogError($"Robot {Id} failed to plan path to {order.Destination}");
-                SetState(RobotState.Moving, false);
+                SetBehavior(RobotBehavior.Idle);
+                ReportOrderFailed(order.Id, "PathPlanningFailed");
                 yield break;
             }
 
@@ -385,16 +477,14 @@ namespace CentralControl.RobotControl
             personalOccupancyLayer.RecordPathOccupancy(result.path, result.times, this.Id.ToString(), currentPlanId);
             UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
             
-            // Wait until destination reached or timeout
-            float timeout = 300f;  // 5 minutes timeout
+            float timeout = 300f;
             float startTime = Time.time;
             
             while (!hasReportedArrival && Time.time - startTime < timeout)
             {
-                // Check if we're still moving or in vertical transition
-                if (!IsMoving && !IsVerticallyMoving)
+                if (!IsMoving && !IsVerticallyMoving && !IsQueuing && !IsEmergencyStopped)
                 {
-                    Debug.LogWarning($"Robot {Id} stopped moving before reaching destination");
+                    Debug.LogWarning($"Robot {Id} stopped moving before reaching destination. State: {currentBehavior}, Vertical: {currentVerticalTransport}");
                     break;
                 }
                 
@@ -404,24 +494,37 @@ namespace CentralControl.RobotControl
             if (!hasReportedArrival)
             {
                 Debug.LogWarning($"Robot {Id} timed out while trying to reach destination");
-                SetState(RobotState.Moving, false);
-                SetState(RobotState.UsingElevator, false);
-                SetState(RobotState.UsingStairs, false);
+                SetBehavior(RobotBehavior.Idle);
+                ReportOrderFailed(order.Id, "NavigationTimeout");
                 yield break;
             }
             
-            // Start picking process
             Debug.Log($"Robot {Id} waiting for picking at {transform.position}");
-            SetState(RobotState.Moving, false);
-            SetState(RobotState.Picking, true);
+            SetBehavior(RobotBehavior.Picking);
             
             pickingCompleted = false;
             yield return StartCoroutine(WaitForPicking(order, transform.position));
             
-            // Picking completed, order executed
-            SetState(RobotState.Picking, false);
+            SetBehavior(RobotBehavior.Idle);
             
+            ReportOrderCompleted(order.Id);
             Debug.Log($"Robot {Id} completed picking for order {order.Id}");
+        }
+
+        private void ReportOrderCompleted(string orderId)
+        {
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.TriggerOrderCompleted(orderId, Id.ToString());
+            }
+        }
+
+        private void ReportOrderFailed(string orderId, string reason)
+        {
+            if (EventManager.Instance != null)
+            {
+                EventManager.Instance.TriggerOrderFailed(orderId, Id.ToString(), reason);
+            }
         }
 
         private IEnumerator WaitForPicking(Order order, Vector3 location)
@@ -452,6 +555,11 @@ namespace CentralControl.RobotControl
 
         public void NotifyPickingCompleted()
         {
+            if (currentOrder != null && currentOrder.PickingPoint != null)
+            {
+                PickingQueueManager.Instance.PickingCompleted(currentOrder.PickingPoint.Id, Id.ToString());
+            }
+
             pickingCompleted = true;
             Debug.Log($"Robot {Id} notified that picking was completed");
         }
@@ -460,7 +568,20 @@ namespace CentralControl.RobotControl
         #region Path Planning and Movement
         private Vector3 GetTargetPosition(PickingPoint pickingPoint)
         {
+            // Defensive null checks
+            if (indoorSpace == null || pickingPoint == null)
+            {
+                Debug.LogWarning($"Robot {Id}: GetTargetPosition called with null dependencies");
+                return Vector3.zero;
+            }
+
             CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(pickingPoint.Id);
+            if (cellSpace == null)
+            {
+                Debug.LogWarning($"Robot {Id}: Could not find CellSpace for picking point {pickingPoint.Id}");
+                return Vector3.zero;
+            }
+
             Point point = (Point)cellSpace.Node;
             float y = GetFloorHeight(pickingPoint.FloorLevel);
             return new Vector3((float)point.X, y, (float)point.Y);
@@ -473,14 +594,32 @@ namespace CentralControl.RobotControl
             finalDestination = targetPosition;
             hasReportedArrival = false;
 
+            // Clear old planned occupancy before planning new path
+            // This prevents conflicts with our own old reservations
+            if (!string.IsNullOrEmpty(currentPlanId))
+            {
+                personalOccupancyLayer.ClearPlannedOccupancy(Id.ToString(), currentPlanId, Time.time);
+                Debug.Log($"Robot {Id}: Cleared old planned occupancy for plan {currentPlanId}");
+            }
+
             RoutePoint startPoint = graph.GetRoutePointFromCoordinate(transform.position, true);
             RoutePoint endPoint = graph.GetRoutePointFromCoordinate(targetPosition, false);
-            
+
             Debug.Log($"Robot {Id}: Planning path from {transform.position} (Floor {CurrentFloor}) to {targetPosition} (Floor {targetFloorLevel})");
 
             if (startPoint == null || endPoint == null)
             {
-                Debug.LogError($"Robot {Id} cannot find valid route points");
+                // Detailed diagnostic logging to identify which point failed
+                if (startPoint == null)
+                {
+                    Debug.LogError($"Robot {Id} cannot find start RoutePoint at position {transform.position} (Floor {CurrentFloor}). " +
+                        $"Check if robot is spawned inside a valid navigable CellSpace.");
+                }
+                if (endPoint == null)
+                {
+                    Debug.LogError($"Robot {Id} cannot find end RoutePoint at position {targetPosition} (Floor {targetFloorLevel}). " +
+                        $"Check if target PickingPoint has valid CellBoundary connections.");
+                }
                 return (null, null, null, null, null);
             }
             
@@ -502,7 +641,11 @@ namespace CentralControl.RobotControl
         {
             if (currentOrder == null)
                 return false;
-                
+
+            // Defensive null check
+            if (indoorSpace == null)
+                return false;
+
             CellSpace cellSpace = indoorSpace.GetCellSpaceFromId(currentOrder.PickingPoint.Id);
             if (cellSpace == null) 
                 return false;
@@ -521,14 +664,67 @@ namespace CentralControl.RobotControl
 
         private void HandleDestinationReached()
         {
-            if (!hasReportedArrival && currentOrder != null)
+            if (currentOrder == null) return;
+            
+            rb.velocity = Vector3.zero;
+            
+            if (IsPickingPending)
             {
-                Debug.Log($"Robot {Id}: Reached picking point {currentOrder.PickingPoint.Id}");
+                Debug.Log($"Robot {Id}: PickingPending robot reached picking point {currentOrder.PickingPoint.Id} - Starting Picking");
                 isWaitingForPicking = true;
                 hasReportedArrival = true;
+                return;
+            }
+            
+            if (!hasReportedArrival)
+            {
+                bool canPick = PickingQueueManager.Instance.RegisterArrival(currentOrder.PickingPoint.Id, Id.ToString());
                 
-                // Stop
-                rb.velocity = Vector3.zero;
+                if (canPick)
+                {
+                    Debug.Log($"Robot {Id}: Reached picking point {currentOrder.PickingPoint.Id} - Starting Picking");
+                    isWaitingForPicking = true;
+                    hasReportedArrival = true;
+                }
+                else
+                {
+                    if (!IsQueuing)
+                    {
+                        Debug.Log($"Robot {Id}: Reached picking point {currentOrder.PickingPoint.Id} - Queuing");
+                        SetBehavior(RobotBehavior.Queuing);
+                    }
+                }
+            }
+        }
+
+        private void HandleRobotAllowedToPick(string robotId)
+        {
+            if (robotId == Id.ToString() && (IsQueuing || IsAdvancingInQueue) && currentOrder != null)
+            {
+                Debug.Log($"Robot {Id}: Allowed to start picking from queue, entering PickingPending state");
+                SetBehavior(RobotBehavior.PickingPending);
+
+                if (HasReachedFinalDestination())
+                {
+                    Debug.Log($"Robot {Id}: Already at picking point, starting picking immediately");
+                    hasReportedArrival = true;
+                    isWaitingForPicking = true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Handle notification to advance in queue when a front robot moves forward
+        /// </summary>
+        private void HandleQueueAdvance(string pickingPointId, string robotId)
+        {
+            if (robotId != Id.ToString()) return;
+            if (currentOrder?.PickingPoint?.Id != pickingPointId) return;
+
+            if (IsQueuing)
+            {
+                Debug.Log($"Robot {Id}: Received queue advance notification, entering AdvancingInQueue state");
+                SetBehavior(RobotBehavior.AdvancingInQueue);
             }
         }
 
@@ -561,7 +757,33 @@ namespace CentralControl.RobotControl
         #region Movement Control
         private void UpdateMovement()
         {
-            if (!IsMoving || currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count)
+            if (!IsMoving)
+                return;
+            
+            if (IsPickingPending && (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count))
+            {
+                if (finalDestination != Vector3.zero && !HasReachedFinalDestination())
+                {
+                    MoveDirectlyToDestination(finalDestination);
+                    return;
+                }
+                else if (HasReachedFinalDestination())
+                {
+                    HandleDestinationReached();
+                    return;
+                }
+            }
+            
+            if (IsAdvancingInQueue && (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count))
+            {
+                if (finalDestination != Vector3.zero && !HasReachedFinalDestination())
+                {
+                    MoveDirectlyToDestination(finalDestination);
+                    return;
+                }
+            }
+            
+            if (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count)
                 return;
             
             ConnectionPoint targetPoint = currentPath[currentPathIndex];
@@ -600,23 +822,33 @@ namespace CentralControl.RobotControl
                             Debug.Log($"Robot {Id}: Path completed but not at final destination yet.");
                         }
                         
-                        SetState(RobotState.Moving, false);
+                        SetBehavior(RobotBehavior.Idle);
                         
                         rb.velocity = Vector3.zero;
                     }
                     
+                    currentSpeed = 0f;
+                    currentAcceleration = 0f;
                     return;
                 }
                 
                 return;
             }
             
-            float moveSpeed = currentPathIndex < currentMovement.Count ? 
+            float targetSpeed = currentPathIndex < currentMovement.Count ? 
                 currentMovement[currentPathIndex].Speed : defaultSpeed;
             
             Vector3 direction = (targetPos - transform.position).normalized;
             
-            Vector3 targetVelocity = direction * moveSpeed;
+            float dt = Time.deltaTime;
+            currentAcceleration = Mathf.MoveTowards(currentAcceleration, 0f, maxJerk * dt);
+            float desiredAcceleration = (targetSpeed - currentSpeed) / Mathf.Max(dt, 0.001f);
+            desiredAcceleration = Mathf.Clamp(desiredAcceleration, -maxDeceleration, maxAcceleration);
+            currentAcceleration = Mathf.MoveTowards(currentAcceleration, desiredAcceleration, maxJerk * dt);
+            currentSpeed = Mathf.Max(0f, currentSpeed + currentAcceleration * dt);
+            currentSpeed = Mathf.Min(currentSpeed, targetSpeed);
+            
+            Vector3 targetVelocity = direction * currentSpeed;
             rb.velocity = targetVelocity;
             
             Vector3 horizontalDirection = new Vector3(direction.x, 0, direction.z).normalized;
@@ -631,7 +863,11 @@ namespace CentralControl.RobotControl
         {
             if (targetPoint == null)
                 return;
-            
+
+            // Defensive null check
+            if (indoorSpace == null)
+                return;
+
             string targetCellSapceId = targetPoint.CellBoundary.Target;
             CellSpace targetCellSpace = indoorSpace.GetCellSpaceFromId(targetCellSapceId);
             
@@ -641,6 +877,38 @@ namespace CentralControl.RobotControl
             Vector3 targetPos = new Vector3((float)point.X, y, (float)point.Y);
             
             finalDestination = targetPos;
+        }
+        
+        private void MoveDirectlyToDestination(Vector3 destination)
+        {
+            Vector3 direction = (destination - transform.position).normalized;
+            float distance = Vector3.Distance(transform.position, destination);
+            
+            if (distance < finalDestinationAcceptanceRadius)
+            {
+                rb.velocity = Vector3.zero;
+                HandleDestinationReached();
+                return;
+            }
+            
+            float targetSpeed = defaultSpeed * 0.5f;
+            float dt = Time.deltaTime;
+            
+            currentAcceleration = Mathf.MoveTowards(currentAcceleration, 0f, maxJerk * dt);
+            float desiredAcceleration = (targetSpeed - currentSpeed) / Mathf.Max(dt, 0.001f);
+            desiredAcceleration = Mathf.Clamp(desiredAcceleration, -maxDeceleration, maxAcceleration);
+            currentAcceleration = Mathf.MoveTowards(currentAcceleration, desiredAcceleration, maxJerk * dt);
+            currentSpeed = Mathf.Max(0f, currentSpeed + currentAcceleration * dt);
+            currentSpeed = Mathf.Min(currentSpeed, targetSpeed);
+            
+            Vector3 targetVelocity = direction * currentSpeed;
+            rb.velocity = targetVelocity;
+            
+            if (direction != Vector3.zero)
+            {
+                Quaternion targetRotation = Quaternion.LookRotation(direction);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 5f);
+            }
         }
         #endregion
 
@@ -661,23 +929,21 @@ namespace CentralControl.RobotControl
             }
         }
 
-        private void SetState(RobotState state, bool value)
+        private void SetBehavior(RobotBehavior behavior, VerticalTransportType verticalTransport = VerticalTransportType.None)
         {
-            bool previousState = currentStates.Contains(state);
+            RobotBehavior previousBehavior = currentBehavior;
+            VerticalTransportType previousVertical = currentVerticalTransport;
             
-            if (value)
-            {
-                currentStates.Add(state);
-            }
-            else
-            {
-                currentStates.Remove(state);
-            }
+            currentBehavior = behavior;
+            currentVerticalTransport = (behavior == RobotBehavior.Moving) ? verticalTransport : VerticalTransportType.None;
             
-            // Log state changes
-            if (previousState != value)
+            if (previousBehavior != behavior || previousVertical != currentVerticalTransport)
             {
-                Debug.Log($"Robot {Id}: State {state} changed to {value}");
+                string stateInfo = currentVerticalTransport != VerticalTransportType.None 
+                    ? $"{behavior} ({currentVerticalTransport})" 
+                    : behavior.ToString();
+                Debug.Log($"Robot {Id}: Behavior changed to {stateInfo}");
+                EventManager.Instance?.TriggerRobotStateChanged(Id.ToString(), behavior.ToString(), true);
             }
         }
 
@@ -698,10 +964,7 @@ namespace CentralControl.RobotControl
         public void ResetRobot()
         {
             StopAllCoroutines();
-            SetState(RobotState.Moving, false);
-            SetState(RobotState.Picking, false);
-            SetState(RobotState.UsingElevator, false);
-            SetState(RobotState.UsingStairs, false);
+            SetBehavior(RobotBehavior.Idle);
             isProcessingOrdersRunning = false;
             Interlocked.Exchange(ref isProcessingOrder, 0);
             
@@ -720,25 +983,15 @@ namespace CentralControl.RobotControl
         {
             Debug.Log($"Robot {Id}: Resetting path state");
             
-            // Reset state variables
             needsPathRecovery = true;
             lastPathRecoveryTime = Time.time;
             
-            // Cancel current movement
-            if (IsMoving)
+            if (IsMoving || IsVerticallyMoving)
             {
                 StopMoving();
-                SetState(RobotState.Moving, false);
+                SetBehavior(RobotBehavior.Idle);
             }
             
-            // Also cancel vertical movement if in progress
-            if (IsVerticallyMoving)
-            {
-                SetState(RobotState.UsingElevator, false);
-                SetState(RobotState.UsingStairs, false);
-            }
-            
-            // Brief delay before recovery
             StartCoroutine(RecoverAfterDelay(1.0f));
         }
 
@@ -789,10 +1042,17 @@ namespace CentralControl.RobotControl
             
             yield return new WaitForSeconds(0.5f);
             
+            if (currentOrder == null || currentOrder.PickingPoint == null)
+            {
+                Debug.LogWarning($"Robot {Id}: Order became null during replan wait");
+                isReplanning = false;
+                navigationEnabled = wasNavigationEnabled;
+                yield break;
+            }
+            
             Vector3 finalTarget = GetTargetPosition(currentOrder.PickingPoint);
             string targetFloorLevel = currentOrder.PickingPoint.FloorLevel;
             
-            isEmergencyStopped = false;
             needsPathRecovery = false;
             
             int attempts = 0;
@@ -804,6 +1064,7 @@ namespace CentralControl.RobotControl
                 Debug.Log($"Robot {Id}: Attempting to replan path to {finalTarget} (Attempt {attempts + 1})");
                 
                 var result = PlanPath(finalTarget, targetFloorLevel);
+                
                 if (result.path != null && result.path.Count > 0)
                 {
                     currentPlanId = result.planId;
@@ -816,7 +1077,7 @@ namespace CentralControl.RobotControl
                     
                     Debug.Log($"Robot {Id}: Replanning path succeeded on attempt {attempts + 1}");
                     
-                    SetState(RobotState.Moving, true);
+                    SetBehavior(RobotBehavior.Moving);
                     pathReplanned = true;
                     
                     float startDelay = 0.5f;
@@ -852,6 +1113,12 @@ namespace CentralControl.RobotControl
 
         public void UpdatePersonalLayer()
         {
+            // Defensive null check - indoorSpace might be null during scene transitions or if initialization failed
+            if (indoorSpace == null)
+            {
+                return;
+            }
+
             CellSpace currentCellSpace = indoorSpace.GetCellSpaceFromCoordinates(transform.position, GetFloorLevelFromPosition(transform.position));
             if (currentCellSpace == null)
                 return;
@@ -884,6 +1151,12 @@ namespace CentralControl.RobotControl
                         false // Not an end cell since we're moving to a new cell
                     );
                     cellSpaceEntryTimes.Remove(lastCellSpace.Id);
+                    
+                    // Mark this robot's layer as dirty for incremental merge
+                    if (CentralController.Instance != null)
+                    {
+                        CentralController.Instance.MarkRobotLayerDirty(Id);
+                    }
                 }
                 
                 // Record entry time for new cell space
@@ -915,6 +1188,12 @@ namespace CentralControl.RobotControl
                     isStartCell,
                     isEndCell
                 );
+                
+                // Mark this robot's layer as dirty for incremental merge
+                if (CentralController.Instance != null)
+                {
+                    CentralController.Instance.MarkRobotLayerDirty(Id);
+                }
             }
         }
 
@@ -993,18 +1272,488 @@ namespace CentralControl.RobotControl
         }
         #endregion
 
+        #region Collision Detection Optimization
+        private void StartCollisionDetection()
+        {
+            if (collisionCheckCoroutine != null)
+            {
+                StopCoroutine(collisionCheckCoroutine);
+            }
+            collisionCheckCoroutine = StartCoroutine(CollisionCheckRoutine());
+        }
+
+        private IEnumerator CollisionCheckRoutine()
+        {
+            WaitForSeconds wait = new WaitForSeconds(COLLISION_CHECK_INTERVAL);
+            while (true)
+            {
+                if ((IsMoving || isBackingUp) && !isWaitingForPicking)
+                {
+                    CheckSurroundings();
+                }
+                yield return wait;
+            }
+        }
+
+        private void RecordPathPosition()
+        {
+            if (!IsMoving && !isBackingUp) return;
+            
+            if (pathHistory.Count == 0 || 
+                Vector3.Distance(pathHistory[pathHistory.Count - 1], transform.position) > 0.5f)
+            {
+                pathHistory.Add(transform.position);
+                
+                while (pathHistory.Count > PATH_HISTORY_SIZE)
+                {
+                    pathHistory.RemoveAt(0);
+                }
+            }
+        }
+
+        public Vector3? GetPreviousPathNode()
+        {
+            if (pathHistory.Count >= 2)
+            {
+                return pathHistory[pathHistory.Count - 2];
+            }
+            
+            if (currentPath != null && currentPathIndex > 0)
+            {
+                var prevPoint = currentPath[currentPathIndex - 1];
+                return new Vector3(
+                    (float)prevPoint.Point.Coordinate.X,
+                    transform.position.y,
+                    (float)prevPoint.Point.Coordinate.Y
+                );
+            }
+            
+            return null;
+        }
+
+        /// <summary>
+        /// Gets recent path history positions for track-aligned backup.
+        /// </summary>
+        /// <param name="maxCount">Maximum number of positions to return</param>
+        /// <returns>List of recent positions, most recent first</returns>
+        public List<Vector3> GetRecentPathHistory(int maxCount = 3)
+        {
+            var result = new List<Vector3>();
+            
+            // Add from pathHistory (newest to oldest)
+            for (int i = pathHistory.Count - 2; i >= 0 && result.Count < maxCount; i--)
+            {
+                result.Add(pathHistory[i]);
+            }
+            
+            // If not enough, try to get from planned path
+            if (result.Count < maxCount && currentPath != null && currentPathIndex > 0)
+            {
+                for (int i = currentPathIndex - 1; i >= 0 && result.Count < maxCount; i--)
+                {
+                    var point = currentPath[i];
+                    var pos = new Vector3(
+                        (float)point.Point.Coordinate.X,
+                        transform.position.y,
+                        (float)point.Point.Coordinate.Y
+                    );
+                    
+                    // Avoid duplicates
+                    if (result.Count == 0 || Vector3.Distance(result[result.Count - 1], pos) > 0.3f)
+                    {
+                        result.Add(pos);
+                    }
+                }
+            }
+            
+            return result;
+        }
+
+        /// <summary>
+        /// Checks if a backup target position is safe to move to.
+        /// Validates: no obstacles, within navigable area, no lane violations.
+        /// </summary>
+        /// <param name="target">Target position to check</param>
+        /// <returns>True if safe, false otherwise</returns>
+        public bool IsSafeBackupTarget(Vector3 target, bool allowLateralWithinCell = false)
+        {
+            float robotRadius = 1.5f;
+            var robotCollider = GetComponent<Collider>();
+            if (robotCollider != null)
+            {
+                var extents = robotCollider.bounds.extents;
+                robotRadius = Mathf.Max(extents.x, extents.z) * 1.1f;
+            }
+            
+            // 1. Check if path from current position to target is clear
+            Vector3 direction = (target - transform.position).normalized;
+            float distance = Vector3.Distance(transform.position, target);
+            
+            if (distance < 0.1f)
+                return false; // Too close, not useful
+            
+            // Check for obstacles along the path
+            if (Physics.SphereCast(transform.position, robotRadius * 0.8f, direction, out RaycastHit hit, distance, obstacleLayer))
+            {
+                // There's an obstacle in the way
+                if (hit.collider.gameObject != gameObject)
+                {
+                    Debug.Log($"Robot {Id}: Backup target {target} blocked by {hit.collider.name}");
+                    return false;
+                }
+            }
+            
+            // 2. Check if target position has no obstacles
+            Collider[] overlaps = Physics.OverlapSphere(target, robotRadius * 0.6f, obstacleLayer);
+            foreach (var collider in overlaps)
+            {
+                if (collider.gameObject != gameObject)
+                {
+                    Debug.Log($"Robot {Id}: Backup target {target} occupied by {collider.name}");
+                    return false;
+                }
+            }
+            
+            // 3. Check if target is within a valid navigable cell
+            if (indoorSpace != null)
+            {
+                var point = new NetTopologySuite.Geometries.Point(target.x, target.z);
+                CellSpace cell = null;
+                
+                foreach (var cellSpace in indoorSpace.CellSpaces)
+                {
+                    if (cellSpace.Space.Contains(point))
+                    {
+                        cell = cellSpace;
+                        break;
+                    }
+                }
+                
+                if (cell == null)
+                {
+                    Debug.Log($"Robot {Id}: Backup target {target} not in any navigable cell");
+                    return false;
+                }
+                
+                // 4. Check for one-way lane violations (if applicable)
+                // The cell's navigability doesn't inherently encode direction,
+                // but we can check if we're moving against traffic flow
+                // by comparing backup direction with planned path direction
+                if (!allowLateralWithinCell && currentPath != null && currentPath.Count > 1 && currentPathIndex < currentPath.Count)
+                {
+                    // Get the planned direction at current position
+                    var currentTarget = currentPath[currentPathIndex];
+                    Vector3 plannedDirection = new Vector3(
+                        (float)currentTarget.Point.Coordinate.X - transform.position.x,
+                        0,
+                        (float)currentTarget.Point.Coordinate.Y - transform.position.z
+                    ).normalized;
+                    
+                    Vector3 backupDirection = (target - transform.position).normalized;
+                    backupDirection.y = 0;
+                    
+                    // Check if backup direction is too perpendicular to aisle
+                    // (which would indicate leaving the lane)
+                    float dotWithPlanned = Vector3.Dot(plannedDirection, backupDirection);
+                    
+                    // Allow backup (opposite direction) but not sideways movement
+                    // Dot product: -1 = opposite (OK), 0 = perpendicular (bad), 1 = same (OK)
+                    if (Mathf.Abs(dotWithPlanned) < 0.3f)
+                    {
+                        // Sideways movement - might leave lane
+                        Debug.Log($"Robot {Id}: Backup direction {backupDirection} too perpendicular to lane");
+                        return false;
+                    }
+                }
+            }
+            
+            return true;
+        }
+
+        /// <summary>
+        /// Gets a track-aligned backup position along the current aisle/corridor.
+        /// </summary>
+        /// <returns>Backup position aligned with current movement direction, or null if not available</returns>
+        public Vector3? GetTrackAlignedBackupPosition()
+        {
+            const float backupDistance = 1.5f;
+            
+            // If we have a current path, backup along it
+            if (currentPath != null && currentPathIndex > 0 && currentPathIndex < currentPath.Count)
+            {
+                // Get direction from previous path point to current position
+                var prevPoint = currentPath[currentPathIndex - 1];
+                Vector3 prevPos = new Vector3(
+                    (float)prevPoint.Point.Coordinate.X,
+                    transform.position.y,
+                    (float)prevPoint.Point.Coordinate.Y
+                );
+                
+                Vector3 trackDirection = (transform.position - prevPos).normalized;
+                trackDirection.y = 0;
+                
+                if (trackDirection.magnitude > 0.1f)
+                {
+                    // Backup in opposite direction (back along track)
+                    Vector3 backupTarget = transform.position - trackDirection * backupDistance;
+                    return backupTarget;
+                }
+            }
+            
+            // Fallback: use current forward direction
+            Vector3 fallbackTarget = transform.position - transform.forward * backupDistance;
+            return fallbackTarget;
+        }
+
+        /// <summary>
+        /// Calculates a safe backup target using priority: track history > track-aligned > stay in place.
+        /// </summary>
+        /// <param name="obstaclePosition">Optional obstacle position to move away from</param>
+        /// <returns>Safe backup target position</returns>
+        public Vector3 CalculateSafeBackupTarget(Vector3? obstaclePosition = null)
+        {
+            // Priority 1: Try recent path history positions (track-aligned backup)
+            var historyPositions = GetRecentPathHistory(3);
+            foreach (var pos in historyPositions)
+            {
+                if (IsSafeBackupTarget(pos, allowLateralWithinCell: true))
+                {
+                    Debug.Log($"Robot {Id}: Using path history position for backup: {pos}");
+                    return pos;
+                }
+            }
+            
+            // Priority 2: Try track-aligned backup
+            var trackAligned = GetTrackAlignedBackupPosition();
+            if (trackAligned.HasValue && IsSafeBackupTarget(trackAligned.Value))
+            {
+                Debug.Log($"Robot {Id}: Using track-aligned position for backup: {trackAligned.Value}");
+                return trackAligned.Value;
+            }
+            
+            // Priority 3: Try backing away from obstacle (with shorter distance)
+            if (obstaclePosition.HasValue)
+            {
+                Vector3 awayFromObstacle = (transform.position - obstaclePosition.Value).normalized;
+                awayFromObstacle.y = 0;
+                
+                if (awayFromObstacle.magnitude > 0.1f)
+                {
+                    // Try progressively shorter distances
+                    float[] distances = { 1.0f, 0.7f, 0.5f, 0.3f };
+                    foreach (float dist in distances)
+                    {
+                        Vector3 candidate = transform.position + awayFromObstacle * dist;
+                        if (IsSafeBackupTarget(candidate))
+                        {
+                            Debug.Log($"Robot {Id}: Using obstacle-away position for backup: {candidate} (dist={dist})");
+                            return candidate;
+                        }
+                    }
+                }
+            }
+            
+            // Priority 4: No safe backup found - stay in place
+            Debug.LogWarning($"Robot {Id}: No safe backup position found, staying in place");
+            return transform.position;
+        }
+
+        /// <summary>
+        /// Initiates a backup maneuver to the specified target position, then waits before resuming.
+        /// Called by CollisionRecoveryManager for coordinated collision recovery.
+        /// </summary>
+        /// <param name="backupTarget">The position to backup to</param>
+        /// <param name="waitTime">Time to wait after reaching backup position before resuming</param>
+        public void StartBackupAndWait(Vector3 backupTarget, float waitTime)
+        {
+            if (isBackingUp) return;
+            
+            StartCoroutine(BackupAndWaitCoroutine(backupTarget, waitTime));
+        }
+
+        private IEnumerator BackupAndWaitCoroutine(Vector3 backupTarget, float waitTime)
+        {
+            behaviorBeforeBackup = currentBehavior;
+            isBackingUp = true;
+            navigationEnabled = false;
+            
+            Debug.Log($"Robot {Id}: Starting backup to {backupTarget}, will wait {waitTime:F2}s");
+            
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+            
+            Vector3 backupDirection = (backupTarget - transform.position).normalized;
+            backupDirection.y = 0;
+            
+            float backupDistance = Vector3.Distance(transform.position, backupTarget);
+            float backupSpeed = defaultSpeed * 0.4f;
+            float backupTime = Mathf.Min(backupDistance / backupSpeed, 1.5f);
+            
+            float elapsedTime = 0f;
+            while (elapsedTime < backupTime)
+            {
+                if (rb != null)
+                {
+                    rb.velocity = backupDirection * backupSpeed;
+                }
+                
+                elapsedTime += Time.deltaTime;
+                yield return null;
+            }
+            
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+            }
+            
+            Debug.Log($"Robot {Id}: Backup complete, waiting {waitTime:F2}s");
+            EventManager.Instance?.TriggerRobotWaitStarted(Id.ToString(), "CollisionRecovery");
+            
+            yield return new WaitForSeconds(waitTime);
+            
+            EventManager.Instance?.TriggerRobotWaitEnded(Id.ToString(), "CollisionRecovery");
+            isBackingUp = false;
+            navigationEnabled = true;
+            
+            Debug.Log($"Robot {Id}: Resuming after backup and wait (was {behaviorBeforeBackup})");
+            
+            if (currentOrder != null)
+            {
+                bool wasInQueueState = behaviorBeforeBackup == RobotBehavior.Queuing || 
+                                       behaviorBeforeBackup == RobotBehavior.AdvancingInQueue;
+                bool isInPickingQueue = currentOrder.PickingPoint != null && 
+                    PickingQueueManager.Instance.IsRobotInQueueOrActive(currentOrder.PickingPoint.Id, Id.ToString());
+                
+                if (ShouldQueueAtPickingPoint())
+                {
+                    SetBehavior(RobotBehavior.Queuing);
+                    if (currentOrder.PickingPoint != null && !isInPickingQueue)
+                    {
+                        PickingQueueManager.Instance.RegisterArrival(currentOrder.PickingPoint.Id, Id.ToString());
+                    }
+                    Debug.Log($"Robot {Id}: Entering queue after backup - front robot still at picking point");
+                }
+                else if (wasInQueueState && isInPickingQueue && !hasReportedArrival)
+                {
+                    SetBehavior(RobotBehavior.AdvancingInQueue);
+                    Debug.Log($"Robot {Id}: Resuming as AdvancingInQueue after backup");
+                }
+                else if (currentPath != null && currentPath.Count > 0 && currentPathIndex < currentPath.Count)
+                {
+                    if (hasReportedArrival && currentOrder.PickingPoint != null)
+                    {
+                        SetBehavior(RobotBehavior.PickingPending);
+                        Debug.Log($"Robot {Id}: Resuming as PickingPending after backup");
+                    }
+                    else
+                    {
+                        SetBehavior(RobotBehavior.Moving);
+                        Debug.Log($"Robot {Id}: Resuming as Moving after backup");
+                    }
+                }
+                else
+                {
+                    Debug.Log($"Robot {Id}: Path invalid after backup, replanning");
+                    StartCoroutine(ReplanPath());
+                }
+            }
+            else
+            {
+                SetBehavior(RobotBehavior.Idle);
+            }
+        }
+
+        private bool ShouldQueueAtPickingPoint()
+        {
+            if (currentOrder?.PickingPoint == null) return false;
+            
+            string myPickingPointId = currentOrder.PickingPoint.Id;
+            LayerMask robotLayer = LayerMask.GetMask("RobotLayer");
+            Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius * 1.5f, robotLayer);
+            
+            foreach (var hitCollider in hitColliders)
+            {
+                if (hitCollider.gameObject == gameObject) continue;
+                
+                if (CentralController.Instance != null && CentralController.Instance.TryGetRobotId(hitCollider.gameObject, out int otherRobotId))
+                {
+                    bool otherIsPicking = CentralController.Instance.IsRobotPicking(otherRobotId);
+                    bool otherInQueue = CentralController.Instance.IsRobotInPickingQueue(myPickingPointId, otherRobotId);
+                    string otherPickingPointId = CentralController.Instance.GetRobotPickingPointId(otherRobotId);
+                    bool samePickingPoint = otherPickingPointId == myPickingPointId;
+                    
+                    Vector3 toOther = (hitCollider.transform.position - transform.position).normalized;
+                    toOther.y = 0;
+                    float dot = Vector3.Dot(transform.forward, toOther);
+                    bool inFront = dot >= 0.5f;
+                    
+                    if (inFront && samePickingPoint && (otherIsPicking || otherInQueue))
+                    {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+
+        /// <summary>
+        /// Requests a path replan with a random delay to avoid synchronization issues.
+        /// Called by CollisionRecoveryManager when multiple collision threshold is reached.
+        /// </summary>
+        /// <param name="reason">The reason for requesting replan (for logging)</param>
+        public void RequestReplan(string reason)
+        {
+            if (isReplanning) return;
+            
+            Debug.Log($"Robot {Id}: Replan requested, reason: {reason}");
+            
+            StartCoroutine(DelayedReplan(reason));
+        }
+
+        private IEnumerator DelayedReplan(string reason)
+        {
+            float randomDelay = UnityEngine.Random.Range(0.2f, 0.8f);
+            yield return new WaitForSeconds(randomDelay);
+            
+            ClearPathReservations();
+            currentPath.Clear();
+            currentMovement.Clear();
+            currentPathIndex = 0;
+            
+            needsPathRecovery = false;
+            
+            Debug.Log($"Robot {Id}: Executing delayed replan after {randomDelay:F2}s, reason: {reason}");
+            
+            if (currentOrder != null)
+            {
+                SetBehavior(RobotBehavior.Moving);
+                navigationEnabled = true;
+                StartCoroutine(ReplanPath());
+            }
+            else
+            {
+                SetBehavior(RobotBehavior.Idle);
+            }
+        }
+        #endregion
+
         #region Collision Detection
         private void CheckSurroundings()
         {
-            // Clean up recent collisions list
             if (Time.time - lastCollisionClearTime > collisionClearInterval)
             {
                 recentCollisions.Clear();
                 lastCollisionClearTime = Time.time;
             }
 
-            Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius, obstacleLayer);
+            LayerMask dynamicObstacleLayer = LayerMask.GetMask("RobotLayer", "PickerLayer");
+            Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius, dynamicObstacleLayer);
             bool emergencySituation = false;
+            bool shouldSlowDown = false;
             float closestObstacleDistance = float.MaxValue;
             
             foreach (var hitCollider in hitColliders)
@@ -1014,71 +1763,353 @@ namespace CentralControl.RobotControl
                         
                 float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
                 closestObstacleDistance = Mathf.Min(closestObstacleDistance, distance);
-                        
-                RobotController otherRobot = hitCollider.GetComponent<RobotController>();
-                float currentEmergencyStopDistance = (otherRobot != null) ? 
-                    emergencyStopDistance : emergencyStopDistance * 1.5f;
-                        
-                bool shouldRespond = UnityEngine.Random.value <= 0.75f;
                 
-                if (distance < currentEmergencyStopDistance && shouldRespond)
+                // Check if obstacle is in front of us (not behind)
+                Vector3 toObstacle = (hitCollider.transform.position - transform.position).normalized;
+                toObstacle.y = 0;
+                float dotProduct = Vector3.Dot(transform.forward, toObstacle);
+                
+                // Only react to obstacles in front or to the side (dot > -0.3)
+                // Ignore obstacles directly behind us (dot < -0.3)
+                if (dotProduct < -0.3f)
                 {
-                    emergencySituation = true;
-                    EmergencyStop();
+                    continue; // Obstacle is behind us, ignore
+                }
+
+                bool inFrontCone = dotProduct >= 0.7071f;
+                        
+                float currentEmergencyStopDistance = emergencyStopDistance;
+                bool isRobotObstacle = false;
+                bool otherRobotPicking = false;
+                bool otherRobotInQueue = false;
+                bool otherRobotSamePickingPoint = false;
+                Vector3 otherForward = hitCollider.transform.forward;
+
+                if (CentralController.Instance != null && CentralController.Instance.TryGetRobotId(hitCollider.gameObject, out int otherRobotId))
+                {
+                    isRobotObstacle = true;
+                    otherRobotPicking = CentralController.Instance.IsRobotPicking(otherRobotId);
+                    otherRobotInQueue = currentOrder?.PickingPoint != null &&
+                        CentralController.Instance.IsRobotInPickingQueue(currentOrder.PickingPoint.Id, otherRobotId);
+                    otherRobotSamePickingPoint = currentOrder?.PickingPoint != null &&
+                        CentralController.Instance.GetRobotPickingPointId(otherRobotId) == currentOrder.PickingPoint.Id;
+                    currentEmergencyStopDistance = emergencyStopDistance;
+                }
+                else
+                {
+                    currentEmergencyStopDistance = emergencyStopDistance * 1.5f;
+                }
+
+                if (distance < currentEmergencyStopDistance)
+                {
+                    bool shouldQueueBehind = isRobotObstacle && otherRobotSamePickingPoint && (otherRobotPicking || otherRobotInQueue);
+
+                    if (isRobotObstacle && otherRobotPicking && inFrontCone)
+                    {
+                        if (shouldQueueBehind && !IsPickingPending && !IsAdvancingInQueue)
+                        {
+                            emergencySituation = true;
+                            if (!IsQueuing)
+                            {
+                                SetBehavior(RobotBehavior.Queuing);
+                                lastEmergencyStopTime = Time.time;
+                                if (rb != null)
+                                {
+                                    rb.velocity = Vector3.zero;
+                                    rb.angularVelocity = Vector3.zero;
+                                }
+                                
+                                if (currentOrder?.PickingPoint != null)
+                                {
+                                    PickingQueueManager.Instance.RegisterArrival(currentOrder.PickingPoint.Id, Id.ToString());
+                                }
+                                
+                                Debug.Log($"Robot {Id}: Queuing behind picking robot at same picking point");
+                            }
+                        }
+                        else if (IsAdvancingInQueue && otherRobotSamePickingPoint)
+                        {
+                            emergencySituation = true;
+                            SetBehavior(RobotBehavior.Queuing);
+                            if (rb != null)
+                            {
+                                rb.velocity = Vector3.zero;
+                                rb.angularVelocity = Vector3.zero;
+                            }
+                            Debug.Log($"Robot {Id}: AdvancingInQueue stopped behind picking robot");
+                        }
+                        else if (IsPickingPending && otherRobotSamePickingPoint)
+                        {
+                            emergencySituation = true;
+                            if (rb != null)
+                            {
+                                rb.velocity = Vector3.zero;
+                                rb.angularVelocity = Vector3.zero;
+                            }
+                            Debug.Log($"Robot {Id}: PickingPending waiting - front robot still picking (unexpected)");
+                        }
+                        else if (!otherRobotSamePickingPoint)
+                        {
+                            emergencySituation = true;
+                            if (!IsEmergencyStopped && !IsQueuing && !IsPickingPending && !IsAdvancingInQueue)
+                            {
+                                SetBehavior(RobotBehavior.EmergencyStopped);
+                                lastEmergencyStopTime = Time.time;
+                                if (rb != null)
+                                {
+                                    rb.velocity = Vector3.zero;
+                                    rb.angularVelocity = Vector3.zero;
+                                }
+                                Debug.Log($"Robot {Id}: Emergency stop - front robot is picking (different picking point)");
+                            }
+                        }
+                        
+                        if (!recentCollisions.Contains(hitCollider.gameObject))
+                        {
+                            recentCollisions.Add(hitCollider.gameObject);
+                        }
+                        break;
+                    }
+
+                    if (isRobotObstacle)
+                    {
+                        otherForward.y = 0;
+                        Vector3 myForward = transform.forward;
+                        myForward.y = 0;
+                        float headingDot = Vector3.Dot(myForward.normalized, otherForward.normalized);
+                        bool isSameDirection = headingDot >= 0.7071f;
+                        bool isOppositeDirection = headingDot <= -0.7071f;
+
+                        if (inFrontCone && (isSameDirection || isOppositeDirection))
+                        {
+                            shouldSlowDown = true;
+                            if (!recentCollisions.Contains(hitCollider.gameObject))
+                            {
+                                recentCollisions.Add(hitCollider.gameObject);
+                            }
+                            continue;
+                        }
+                    }
+
+                    if (shouldQueueBehind && !IsPickingPending && !IsAdvancingInQueue)
+                    {
+                        emergencySituation = true;
+                        if (!IsQueuing)
+                        {
+                            SetBehavior(RobotBehavior.Queuing);
+                            lastEmergencyStopTime = Time.time;
+                            if (rb != null)
+                            {
+                                rb.velocity = Vector3.zero;
+                                rb.angularVelocity = Vector3.zero;
+                            }
+                        }
+                    }
+                    else if (isRobotObstacle && otherRobotInQueue && IsAdvancingInQueue)
+                    {
+                        emergencySituation = true;
+                        SetBehavior(RobotBehavior.Queuing);
+                        if (rb != null)
+                        {
+                            rb.velocity = Vector3.zero;
+                            rb.angularVelocity = Vector3.zero;
+                        }
+                        Debug.Log($"Robot {Id}: AdvancingInQueue stopped behind queuing robot");
+                    }
+                    else if (isRobotObstacle && otherRobotInQueue && !IsPickingPending && !IsAdvancingInQueue)
+                    {
+                        emergencySituation = true;
+                        if (!IsEmergencyStopped)
+                        {
+                            SetBehavior(RobotBehavior.EmergencyStopped);
+                            lastEmergencyStopTime = Time.time;
+                            if (rb != null)
+                            {
+                                rb.velocity = Vector3.zero;
+                                rb.angularVelocity = Vector3.zero;
+                            }
+                        }
+                    }
+                    else if (!isRobotObstacle)
+                    {
+                        emergencySituation = true;
+                        TriggerEmergencyBackup(hitCollider.transform.position);
+                    }
                     
                     if (!recentCollisions.Contains(hitCollider.gameObject))
                     {
                         recentCollisions.Add(hitCollider.gameObject);
                     }
                     
-                    break;
+                    if (emergencySituation)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            if (shouldSlowDown && rb != null)
+            {
+                rb.velocity *= 0.7f;
+            }
+            
+            if (IsEmergencyStopped && !emergencySituation && !isBackingUp)
+            {
+                float safeResumeDistance = emergencyStopDistance * 1.5f;
+                bool canResume = hitColliders.Length == 0 || closestObstacleDistance > safeResumeDistance;
+                
+                if (canResume)
+                {
+                    ResumeFromEmergencyStop();
                 }
             }
             
-            if (isEmergencyStopped)
+            if (IsQueuing && !emergencySituation && !isBackingUp && currentOrder?.PickingPoint != null)
             {
-                if (!emergencySituation && Time.time - lastEmergencyStopTime > EMERGENCY_COOLDOWN)
+                bool frontRobotStillBlocking = false;
+                float frontRobotDistance = float.MaxValue;
+                
+                foreach (var hitCollider in hitColliders)
                 {
-                    float safeResumeDistance = emergencyStopDistance * 1.5f;
-                    if (hitColliders.Length == 0 || closestObstacleDistance > safeResumeDistance)
+                    if (hitCollider.gameObject == gameObject) continue;
+                    
+                    if (CentralController.Instance != null && CentralController.Instance.TryGetRobotId(hitCollider.gameObject, out int otherRobotId))
                     {
-                        ResumeFromEmergencyStop();
+                        string otherPickingPointId = CentralController.Instance.GetRobotPickingPointId(otherRobotId);
+                        bool samePickingPoint = otherPickingPointId == currentOrder.PickingPoint.Id;
+                        bool otherIsPicking = CentralController.Instance.IsRobotPicking(otherRobotId);
+                        bool otherInQueue = CentralController.Instance.IsRobotInPickingQueue(currentOrder.PickingPoint.Id, otherRobotId);
+                        
+                        Vector3 toOther = (hitCollider.transform.position - transform.position).normalized;
+                        toOther.y = 0;
+                        float dot = Vector3.Dot(transform.forward, toOther);
+                        bool inFront = dot >= 0.3f;
+                        
+                        if (inFront && samePickingPoint && (otherIsPicking || otherInQueue))
+                        {
+                            float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
+                            frontRobotStillBlocking = true;
+                            frontRobotDistance = Mathf.Min(frontRobotDistance, distance);
+                        }
                     }
-                    else
+                }
+                
+                if (!frontRobotStillBlocking)
+                {
+                    Debug.Log($"Robot {Id}: Queue front cleared, advancing in queue");
+                    SetBehavior(RobotBehavior.AdvancingInQueue);
+                }
+                else if (frontRobotDistance > emergencyStopDistance * 2.0f)
+                {
+                    Debug.Log($"Robot {Id}: Front robot moved away (distance: {frontRobotDistance:F2}), advancing in queue");
+                    SetBehavior(RobotBehavior.AdvancingInQueue);
+                }
+            }
+            
+            if (IsAdvancingInQueue && currentOrder?.PickingPoint != null)
+            {
+                bool shouldStopAdvancing = false;
+                
+                foreach (var hitCollider in hitColliders)
+                {
+                    if (hitCollider.gameObject == gameObject) continue;
+                    
+                    float distance = Vector3.Distance(transform.position, hitCollider.transform.position);
+                    if (distance >= emergencyStopDistance) continue;
+                    
+                    if (CentralController.Instance != null && CentralController.Instance.TryGetRobotId(hitCollider.gameObject, out int otherRobotId))
                     {
-                        Debug.Log($"Robot {Id}: Attempted to resume from emergency stop but " +
-                                $"obstacles are still too close (distance: {closestObstacleDistance:F2})");
+                        string otherPickingPointId = CentralController.Instance.GetRobotPickingPointId(otherRobotId);
+                        bool samePickingPoint = otherPickingPointId == currentOrder.PickingPoint.Id;
+                        bool otherIsPicking = CentralController.Instance.IsRobotPicking(otherRobotId);
+                        bool otherInQueue = CentralController.Instance.IsRobotInPickingQueue(currentOrder.PickingPoint.Id, otherRobotId);
+                        
+                        Vector3 toOther = (hitCollider.transform.position - transform.position).normalized;
+                        toOther.y = 0;
+                        float dot = Vector3.Dot(transform.forward, toOther);
+                        bool inFront = dot >= 0.5f;
+                        
+                        if (inFront && samePickingPoint && (otherIsPicking || otherInQueue))
+                        {
+                            shouldStopAdvancing = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (shouldStopAdvancing)
+                {
+                    Debug.Log($"Robot {Id}: Reached front robot, stopping in queue");
+                    SetBehavior(RobotBehavior.Queuing);
+                    if (rb != null)
+                    {
+                        rb.velocity = Vector3.zero;
+                        rb.angularVelocity = Vector3.zero;
                     }
                 }
             }
         }
 
-        private void EmergencyStop()
+        private void TriggerEmergencyBackup(Vector3 obstaclePosition)
         {
-            if (!isEmergencyStopped)
+            if (IsEmergencyStopped || isBackingUp) return;
+            
+            SetBehavior(RobotBehavior.EmergencyStopped);
+            lastEmergencyStopTime = Time.time;
+            
+            if (rb != null)
             {
-                isEmergencyStopped = true;
-                lastEmergencyStopTime = Time.time;
-                
-                // Stop
-                if (rb != null)
-                {
-                    rb.velocity = Vector3.zero;
-                    rb.angularVelocity = Vector3.zero;
-                }
-                
-                Debug.Log($"Robot {Id}: Emergency stop activated");
-                
-                // Mark for path recovery
-                needsPathRecovery = true;
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
             }
+            currentSpeed = 0f;
+            currentAcceleration = 0f;
+            
+            float randomDelay = UnityEngine.Random.Range(EMERGENCY_RECOVERY_DELAY, EMERGENCY_RECOVERY_DELAY + 0.3f);
+            
+            Debug.Log($"Robot {Id}: Emergency stop, will backup after {randomDelay:F2}s");
+            
+            StartCoroutine(EmergencyBackupCoroutine(obstaclePosition, randomDelay));
+        }
+        
+        private IEnumerator EmergencyBackupCoroutine(Vector3 obstaclePosition, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            
+            if (!IsEmergencyStopped || isBackingUp)
+                yield break;
+            
+            Vector3 backupTarget = CalculateSafeBackupTarget(obstaclePosition);
+            
+            if (Vector3.Distance(backupTarget, transform.position) < 0.1f)
+            {
+                Debug.Log($"Robot {Id}: No safe backup position during emergency, waiting and replanning");
+                yield return new WaitForSeconds(UnityEngine.Random.Range(0.5f, 1.0f));
+                
+                if (currentOrder != null)
+                {
+                    SetBehavior(RobotBehavior.Moving);
+                    navigationEnabled = true;
+                    StartCoroutine(ReplanPath());
+                }
+                else
+                {
+                    SetBehavior(RobotBehavior.Idle);
+                }
+                yield break;
+            }
+            
+            float randomWait = UnityEngine.Random.Range(0.3f, 0.8f);
+            
+            Debug.Log($"Robot {Id}: Executing safe emergency backup to {backupTarget}");
+            
+            StartBackupAndWait(backupTarget, randomWait);
         }
 
         private void ResumeFromEmergencyStop()
         {
-            if (isEmergencyStopped)
+            if (IsEmergencyStopped)
             {
-                isEmergencyStopped = false;
                 Debug.Log($"Robot {Id}: Resuming from emergency stop at time {Time.time}");
                 
                 StartCoroutine(ResumeMovementWithDelay());
@@ -1087,7 +2118,7 @@ namespace CentralControl.RobotControl
 
         private IEnumerator ResumeMovementWithDelay()
         {
-            yield return new WaitForSeconds(0.5f);
+            yield return new WaitForSeconds(0.1f);
             
             if (currentOrder != null && finalDestination != Vector3.zero)
             {
@@ -1095,8 +2126,18 @@ namespace CentralControl.RobotControl
                 
                 if (currentPath.Count > 0 && currentPathIndex < currentPath.Count)
                 {
-                    Debug.Log($"Robot {Id}: Resuming existing path from point {currentPathIndex} of {currentPath.Count}");
-                    SetState(RobotState.Moving, true);
+                    // If hasReportedArrival is true and we're resuming, we should be in PickingPending state
+                    // (we were allowed to pick from queue and are moving to picking point)
+                    if (hasReportedArrival && currentOrder.PickingPoint != null)
+                    {
+                        Debug.Log($"Robot {Id}: Resuming as PickingPending (was allowed to pick from queue)");
+                        SetBehavior(RobotBehavior.PickingPending);
+                    }
+                    else
+                    {
+                        Debug.Log($"Robot {Id}: Resuming existing path from point {currentPathIndex} of {currentPath.Count}");
+                        SetBehavior(RobotBehavior.Moving);
+                    }
                 }
                 else
                 {
@@ -1129,34 +2170,86 @@ namespace CentralControl.RobotControl
         {
             if (collision.gameObject.layer == LayerMask.NameToLayer("GroundLayer"))
                 return;
+            
+            // Queue state robots should not trigger backup recovery - they handle collisions via CheckSurroundings
+            if (IsQueuing || IsAdvancingInQueue || IsPickingPending)
+            {
+                return;
+            }
                     
             GameObject collisionObject = collision.gameObject;
             string collisionObjectName = collisionObject.name;
             
             Debug.LogWarning($"Robot {Id}: Detected collision with {collisionObjectName} at time {Time.time}");
             
-            RobotController otherRobot = collisionObject.GetComponent<RobotController>();
-            if (otherRobot != null)
+            if (CentralController.Instance != null && CentralController.Instance.TryGetRobotId(collisionObject, out int otherRobotId))
             {
-                EventManager.Instance.ReportRobotCollision(
-                    this.Id.ToString(),
-                    otherRobot.Id.ToString(), 
-                    collisionObject, 
-                    Time.time
-                );
+                bool otherIsPicking = CentralController.Instance.IsRobotPicking(otherRobotId);
                 
-                StartCoroutine(HandlingRobotCollision(otherRobot));
+                if (IsPicking && otherIsPicking)
+                {
+                    EventManager.Instance?.ReportRobotCollision(
+                        Id.ToString(),
+                        otherRobotId.ToString(),
+                        collisionObject,
+                        Time.time,
+                        transform.position
+                    );
+                    return;
+                }
+                
+                if (IsPicking && !otherIsPicking)
+                {
+                    EventManager.Instance?.ReportRobotCollision(
+                        Id.ToString(),
+                        otherRobotId.ToString(),
+                        collisionObject,
+                        Time.time,
+                        transform.position
+                    );
+                    return;
+                }
+                
+                if (!IsPicking && otherIsPicking)
+                {
+                    EventManager.Instance?.ReportRobotCollision(
+                        Id.ToString(),
+                        otherRobotId.ToString(),
+                        collisionObject,
+                        Time.time,
+                        transform.position
+                    );
+                    
+                    if (collisionRecoveryManager != null)
+                    {
+                        collisionRecoveryManager.HandleNonPickingCollision(otherRobotId, transform.position);
+                    }
+                    else
+                    {
+                        StartCoroutine(HandlingRobotCollision(otherRobotId, collisionObject.transform.position));
+                    }
+                    return;
+                }
+
+                if (collisionRecoveryManager != null)
+                {
+                    collisionRecoveryManager.HandleRobotCollision(otherRobotId, transform.position);
+                }
+                else
+                {
+                    StartCoroutine(HandlingRobotCollision(otherRobotId, collisionObject.transform.position));
+                }
             }
             else
             {
-                EventManager.Instance.ReportEnvironmentCollision(
-                    this.Id.ToString(), 
-                    collisionObjectName, 
-                    collisionObject, 
-                    Time.time
-                );
-                
-                StartCoroutine(HandlingEnvironmentCollision(collisionObject));
+                if (collisionRecoveryManager != null)
+                {
+                    collisionRecoveryManager.HandleEnvironmentCollision(collisionObject.transform.position);
+                }
+                else
+                {
+                    StartCoroutine(HandlingEnvironmentCollision(collisionObject));
+                }
             }
             
             if (!recentCollisions.Contains(collisionObject))
@@ -1164,73 +2257,45 @@ namespace CentralControl.RobotControl
                 recentCollisions.Add(collisionObject);
             }
             
-            EmergencyStop();
+            if (!IsEmergencyStopped && !isBackingUp)
+            {
+                SetBehavior(RobotBehavior.EmergencyStopped);
+                lastEmergencyStopTime = Time.time;
+                if (rb != null)
+                {
+                    rb.velocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                currentSpeed = 0f;
+                currentAcceleration = 0f;
+            }
         }
 
-        private IEnumerator HandlingRobotCollision(RobotController otherRobot)
+        private IEnumerator HandlingRobotCollision(int otherRobotId, Vector3 otherRobotPosition)
         {
             navigationEnabled = false;
             
-            // 记录碰撞发生时的信息
-            Vector3 collisionDirection = (otherRobot.transform.position - transform.position).normalized;
+            Vector3 collisionDirection = (otherRobotPosition - transform.position).normalized;
             float dotProduct = Vector3.Dot(transform.forward, collisionDirection);
-            bool isHeadOn = dotProduct < -0.3f;
-            bool isTailgating = dotProduct > 0.7f;
-            bool isBeingTailgated = dotProduct < -0.7f;
-            bool isSideCollision = Mathf.Abs(dotProduct) <= 0.3f;
+            string collisionType = dotProduct < -0.3f ? "head-on" : 
+                                   dotProduct > 0.7f ? "tailgating" : 
+                                   dotProduct < -0.7f ? "being tailgated" : "side";
             
-            Debug.Log($"Robot {Id}: Collision with Robot {otherRobot.Id}, type: {(isHeadOn ? "head-on" : isTailgating ? "tailgating" : isBeingTailgated ? "being tailgated" : "side")}");
+            Debug.Log($"Robot {Id}: Collision with Robot {otherRobotId}, type: {collisionType}");
             
             yield return new WaitForSeconds(0.5f);
             
-            float distance = Vector3.Distance(transform.position, otherRobot.transform.position);
+            float distance = Vector3.Distance(transform.position, otherRobotPosition);
             
-            Vector3 backupDirection = Vector3.zero;
-            
-            if (isHeadOn)
+            if (distance < emergencyStopDistance)
             {
-                backupDirection = -transform.forward;
-            }
-            else if (isTailgating)
-            {
-                backupDirection = -transform.forward;
-            }
-            else if (isBeingTailgated)
-            {
-                yield return new WaitForSeconds(1.0f);
+                Vector3 backupTarget = CalculateSafeBackupTarget(otherRobotPosition);
                 
-                distance = Vector3.Distance(transform.position, otherRobot.transform.position);
-                if (distance < emergencyStopDistance)
+                if (Vector3.Distance(backupTarget, transform.position) >= 0.1f)
                 {
-                    backupDirection = transform.forward;
-                }
-            }
-            else if (isSideCollision)
-            {
-                backupDirection = -collisionDirection + (-transform.forward * 0.5f);
-                backupDirection.Normalize();
-            }
-            
-            if (distance < emergencyStopDistance || backupDirection != Vector3.zero)
-            {
-                if (backupDirection != Vector3.zero)
-                {
-                    rb.velocity = backupDirection * defaultSpeed * 0.4f;
-                    yield return new WaitForSeconds(0.7f);
-                    rb.velocity = Vector3.zero;
-                }
-                
-                distance = Vector3.Distance(transform.position, otherRobot.transform.position);
-                if (distance < emergencyStopDistance * 0.8f)
-                {
-                    Debug.Log($"Robot {Id}: Still too close to Robot {otherRobot.Id} after initial maneuver, trying random direction");
-                    
-                    float randomAngle = UnityEngine.Random.Range(0f, 360f);
-                    backupDirection = Quaternion.Euler(0, randomAngle, 0) * Vector3.forward;
-                    
-                    rb.velocity = backupDirection * defaultSpeed * 0.3f;
-                    yield return new WaitForSeconds(0.6f);
-                    rb.velocity = Vector3.zero;
+                    float randomWait = UnityEngine.Random.Range(0.3f, 0.6f);
+                    StartBackupAndWait(backupTarget, randomWait);
+                    yield break;
                 }
             }
             
@@ -1250,7 +2315,7 @@ namespace CentralControl.RobotControl
             }
             else
             {
-                isEmergencyStopped = false;
+                SetBehavior(RobotBehavior.Idle);
             }
         }
 
@@ -1260,67 +2325,13 @@ namespace CentralControl.RobotControl
             
             yield return new WaitForSeconds(0.3f);
             
-            Vector3 obstacleDir = (obstacle.transform.position - transform.position).normalized;
-            obstacleDir.y = 0;
-            if (obstacleDir.magnitude < 0.1f)
-            {
-                obstacleDir = -transform.forward;
-            }
-            else
-            {
-                obstacleDir.Normalize();
-            }
+            Vector3 backupTarget = CalculateSafeBackupTarget(obstacle.transform.position);
             
-            Collider[] hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance * 0.8f, obstacleLayer);
-            bool stillColliding = false;
-            
-            foreach (var hitCollider in hitColliders)
+            if (Vector3.Distance(backupTarget, transform.position) >= 0.1f)
             {
-                if (hitCollider.gameObject == obstacle)
-                {
-                    stillColliding = true;
-                    break;
-                }
-            }
-            
-            if (stillColliding)
-            {
-                Vector3 lateralDir = Vector3.Cross(Vector3.up, obstacleDir).normalized;
-                
-                if (UnityEngine.Random.value > 0.5f)
-                {
-                    lateralDir = -lateralDir;
-                }
-                
-                Vector3 backupDirection = (-obstacleDir * 0.7f + lateralDir * 0.3f).normalized;
-                
-                rb.velocity = backupDirection * defaultSpeed * 0.5f;
-                yield return new WaitForSeconds(0.7f);
-                rb.velocity = Vector3.zero;
-                
-                hitColliders = Physics.OverlapSphere(transform.position, emergencyStopDistance * 0.8f, obstacleLayer);
-                stillColliding = false;
-                
-                foreach (var hitCollider in hitColliders)
-                {
-                    if (hitCollider.gameObject == obstacle)
-                    {
-                        stillColliding = true;
-                        break;
-                    }
-                }
-                
-                if (stillColliding)
-                {
-                    Debug.Log($"Robot {Id}: Still colliding with obstacle after first maneuver, trying another direction");
-                    
-                    lateralDir = -lateralDir;
-                    backupDirection = (-obstacleDir * 0.6f + lateralDir * 0.4f).normalized;
-                    
-                    rb.velocity = backupDirection * defaultSpeed * 0.4f;
-                    yield return new WaitForSeconds(0.6f);
-                    rb.velocity = Vector3.zero;
-                }
+                float randomWait = UnityEngine.Random.Range(0.3f, 0.6f);
+                StartBackupAndWait(backupTarget, randomWait);
+                yield break;
             }
             
             navigationEnabled = true;
@@ -1333,7 +2344,7 @@ namespace CentralControl.RobotControl
             }
             else
             {
-                isEmergencyStopped = false;
+                SetBehavior(RobotBehavior.Idle);
             }
         }
         #endregion
@@ -1401,7 +2412,7 @@ namespace CentralControl.RobotControl
             waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
             
             // Notify state change
-            SetState(RobotState.Moving, true);
+            SetBehavior(RobotBehavior.Moving);
         }
 
         private void UpdatePathSegmentsWithSpeed(List<ConnectionPoint> path, List<float> times, List<float> speeds)
@@ -1443,7 +2454,7 @@ namespace CentralControl.RobotControl
             
             Debug.Log($"Robot {Id}: Starting path execution, path length: {currentPath.Count}");
             
-            SetState(RobotState.Moving, true);
+            SetBehavior(RobotBehavior.Moving);
             
             // Reset path tracking index
             currentPathIndex = 0;

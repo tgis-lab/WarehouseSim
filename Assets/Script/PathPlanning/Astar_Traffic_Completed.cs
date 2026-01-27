@@ -17,6 +17,38 @@ namespace PathPlanning
     {
         #region private fields
         
+        private readonly struct TSAStarStateKey : IEquatable<TSAStarStateKey>
+        {
+            public readonly string ConnectionPointId;
+            public readonly int ArrivalTimeKey;
+            public readonly string FloorLevel;
+
+            public TSAStarStateKey(string connectionPointId, int arrivalTimeKey, string floorLevel)
+            {
+                ConnectionPointId = connectionPointId;
+                ArrivalTimeKey = arrivalTimeKey;
+                FloorLevel = floorLevel;
+            }
+
+            public bool Equals(TSAStarStateKey other) =>
+                ConnectionPointId == other.ConnectionPointId &&
+                ArrivalTimeKey == other.ArrivalTimeKey &&
+                FloorLevel == other.FloorLevel;
+
+            public override bool Equals(object obj) => obj is TSAStarStateKey other && Equals(other);
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = ConnectionPointId?.GetHashCode() ?? 0;
+                    hash = (hash * 397) ^ ArrivalTimeKey;
+                    hash = (hash * 397) ^ (FloorLevel?.GetHashCode() ?? 0);
+                    return hash;
+                }
+            }
+        }
+
         /// <summary>
         /// State class for Time-Space A* search process
         /// </summary>
@@ -68,9 +100,10 @@ namespace PathPlanning
                 return -GScore.CompareTo(other.GScore);
             }
             
-            public string GetStateKey()
+            public TSAStarStateKey GetStateKey()
             {
-                return $"{RoutePoint.ConnectionPoint.Id}_{ArrivalTime:F1}_{FloorLevel}";
+                int arrivalTimeKey = Mathf.RoundToInt(ArrivalTime * 10f);
+                return new TSAStarStateKey(RoutePoint.ConnectionPoint.Id, arrivalTimeKey, FloorLevel);
             }
         }
         
@@ -91,6 +124,7 @@ namespace PathPlanning
 
         #region constants
         
+        private static readonly object verticalConnectionInfoLock = new object();
         private static Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
@@ -135,7 +169,10 @@ namespace PathPlanning
             TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
             string newPlanId = $"TimeSpaceAStarPlan_{robotId}_{DateTime.Now.Ticks}";
             
-            verticalConnectionInfo.Clear();
+            lock (verticalConnectionInfoLock)
+            {
+                verticalConnectionInfo.Clear();
+            }
             
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
@@ -206,8 +243,8 @@ namespace PathPlanning
             stopwatch.Start();
             
             PriorityQueue<TSAStarState> openSet = new PriorityQueue<TSAStarState>();
-            HashSet<string> closedSet = new HashSet<string>();
-            Dictionary<string, TSAStarState> allStates = new Dictionary<string, TSAStarState>();
+            HashSet<TSAStarStateKey> closedSet = new HashSet<TSAStarStateKey>();
+            Dictionary<TSAStarStateKey, TSAStarState> allStates = new Dictionary<TSAStarStateKey, TSAStarState>();
             
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
@@ -231,7 +268,7 @@ namespace PathPlanning
             
             // Add initial state to open set
             openSet.Enqueue(initialState, initialState.FScore);
-            string initialStateKey = initialState.GetStateKey();
+            TSAStarStateKey initialStateKey = initialState.GetStateKey();
             allStates[initialStateKey] = initialState;
             
             TSAStarState goalState = null;
@@ -241,7 +278,7 @@ namespace PathPlanning
             {
                 // Get the state with lowest f-score
                 TSAStarState current = openSet.Dequeue();
-                string currentStateKey = current.GetStateKey();
+                TSAStarStateKey currentStateKey = current.GetStateKey();
                 
                 // If we reached the goal
                 if (current.RoutePoint.ConnectionPoint.Id == endPosition.ConnectionPoint.Id &&
@@ -280,7 +317,7 @@ namespace PathPlanning
                 // Process each successor
                 foreach (var successor in successors)
                 {
-                    string successorKey = successor.GetStateKey();
+                    TSAStarStateKey successorKey = successor.GetStateKey();
                     
                     if (closedSet.Contains(successorKey))
                     {
@@ -421,7 +458,7 @@ namespace PathPlanning
                     if (cellSpace != null)
                     {
                         string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{childConnection.Id}";
-                        lock (verticalConnectionInfo)
+                        lock (verticalConnectionInfoLock)
                         {
                             verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
                             {
@@ -459,29 +496,18 @@ namespace PathPlanning
                 // Check time-space availability at target node and arrival time
                 if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, arrivalTime, robotId))
                 {
-                    // Try a delayed arrival
-                    float[] delays = { 0.5f, 1.0f, 1.5f, 2.0f };
-                    bool foundValidTime = false;
+                    float nextAvailableTime = GetNextAvailableTime(
+                        globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, arrivalTime, robotId, 3.0f);
                     
-                    foreach (float delay in delays)
+                    if (nextAvailableTime < 0)
                     {
-                        float delayedArrival = RoundTime(arrivalTime + delay);
-                        if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, delayedArrival, robotId))
-                        {
-                            // Found a valid time with delay
-                            arrivalTime = delayedArrival;
-                            travelTime += delay;
-                            travelCost += delay; // Add delay to cost
-                            foundValidTime = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!foundValidTime)
-                    {
-                        // Couldn't find a valid time even with delays
                         continue;
                     }
+                    
+                    float delay = nextAvailableTime - arrivalTime;
+                    arrivalTime = RoundTime(nextAvailableTime);
+                    travelTime += delay;
+                    travelCost += delay;
                 }
                 
                 // Calculate path costs
@@ -591,9 +617,56 @@ namespace PathPlanning
             return true;
         }
         
-        /// <summary>
-        /// Reconstruct the complete path from the goal state
-        /// </summary>
+        private static float GetNextAvailableTime(
+            DynamicOccupancyLayer globalOccupancyLayer,
+            DynamicOccupancyLayer personalOccupancyLayer,
+            string nodeId,
+            float startTime,
+            string robotId,
+            float maxLookahead)
+        {
+            float endTime = startTime + maxLookahead;
+            float latestOccupancyEnd = startTime;
+            
+            if (globalOccupancyLayer != null)
+            {
+                var occupancies = globalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
+                foreach (var occ in occupancies)
+                {
+                    if (occ.Occupier.RobotId != robotId && occ.EndTime > latestOccupancyEnd)
+                    {
+                        latestOccupancyEnd = occ.EndTime;
+                    }
+                }
+            }
+            
+            if (personalOccupancyLayer != null)
+            {
+                var personalOccupancies = personalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
+                foreach (var occ in personalOccupancies)
+                {
+                    if (occ.EndTime > latestOccupancyEnd)
+                    {
+                        latestOccupancyEnd = occ.EndTime;
+                    }
+                }
+            }
+            
+            float candidateTime = latestOccupancyEnd + OCCUPANCY_BUFFER;
+            
+            if (candidateTime > endTime)
+            {
+                return -1f;
+            }
+            
+            if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, nodeId, candidateTime, robotId))
+            {
+                return candidateTime;
+            }
+            
+            return -1f;
+        }
+        
         private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ReconstructPath(
             TSAStarState goalState,
             float defaultSpeed)
@@ -756,17 +829,9 @@ namespace PathPlanning
             return length;
         }
         
-        /// <summary>
-        /// Get the Vector3 representation of a connection point
-        /// </summary>
         private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
         {
-            if (connectionPoint.Point is Point point)
-            {
-                return new Vector3((float)point.X, 0, (float)point.Y);
-            }
-
-            return Vector3.zero;
+            return connectionPoint.Position;
         }
         
         /// <summary>
