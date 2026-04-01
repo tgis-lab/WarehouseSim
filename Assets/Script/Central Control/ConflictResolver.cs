@@ -475,6 +475,19 @@ namespace CentralControl
             // Calculate required average speed ratio adjustment
             float originalDuration = segmentTimes[segmentTimes.Count - 1] - segmentTimes[0];
             float targetDuration = targetArrivalTime - segmentTimes[0];
+
+            // Guard against zero/negative durations that would produce NaN/Infinity
+            if (originalDuration <= 0f)
+            {
+                Debug.LogWarning($"Original duration is {originalDuration:F4}s (segment has no travel time), cannot adjust speed");
+                return (false, segmentTimes, segmentSpeeds);
+            }
+            if (targetDuration <= 0f)
+            {
+                Debug.LogWarning($"Target duration is {targetDuration:F4}s (start time already at or past target), cannot adjust speed");
+                return (false, segmentTimes, segmentSpeeds);
+            }
+
             float speedRatio = originalDuration / targetDuration;
             
             Debug.Log($"Trying {(accelerate ? "acceleration" : "deceleration")} strategy: original duration={originalDuration:F2}s, " +
@@ -505,14 +518,21 @@ namespace CentralControl
                 // Adjust speed
                 float newSpeed = segmentSpeeds[i] * speedRatio;
                 adjustedSpeeds.Add(newSpeed);
-                
+
                 // Calculate new arrival time
                 if (i > 0)
                 {
                     float distance = Vector3.Distance(
                         new Vector3((float)path[startIndex + i].Point.Coordinate.X, 0, (float)path[startIndex + i].Point.Coordinate.Y),
                         new Vector3((float)path[startIndex + i - 1].Point.Coordinate.X, 0, (float)path[startIndex + i - 1].Point.Coordinate.Y));
-                    
+
+                    // Guard against zero/near-zero speed that would produce Infinity
+                    if (newSpeed <= 1e-6f)
+                    {
+                        Debug.LogWarning($"Adjusted speed is effectively zero ({newSpeed:F6}) at segment {i}, aborting speed adjustment");
+                        return (false, segmentTimes, segmentSpeeds);
+                    }
+
                     float segmentTime = distance / newSpeed;
                     float newTime = adjustedTimes[i - 1] + segmentTime;
                     adjustedTimes.Add(newTime);

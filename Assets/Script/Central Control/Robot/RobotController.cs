@@ -40,6 +40,14 @@ namespace CentralControl.RobotControl
         public Transform targetIndicator;
         public SearchAlgorithm selectedAlgorithm = SearchAlgorithm.AnytimeSIPP;
         public SearchMethod selectedSearchMethod = SearchMethod.Manhattan_Distance;
+
+        /// <summary>
+        /// Whether this robot runs in baseline mode (no temporal planning, reactive-only collision).
+        /// Automatically determined from selectedAlgorithm.
+        /// </summary>
+        public bool IsBaselineMode =>
+            selectedAlgorithm == SearchAlgorithm.Astar_Basic ||
+            selectedAlgorithm == SearchAlgorithm.CellSpaceAStar;
         public float baseDetectionRadius = 1.0f;
         public float emergencyStopDistance = 0.5f;
         public float defaultSpeed = 2.0f;
@@ -126,6 +134,8 @@ namespace CentralControl.RobotControl
         private int currentPathIndex = 0;
         private bool pickingCompleted = false;
         private string currentPlanId;
+        private string activeConfirmedPlanId;  // Currently executing confirmed path
+        private string pendingPlanId;          // Path awaiting accept from CentralController
         private LayerMask obstacleLayer;
         private IntersectionAreaManager intersectionManager;
         private string currentIntersectionId;
@@ -187,6 +197,9 @@ namespace CentralControl.RobotControl
         protected virtual void RaisePathPlannedEvent(string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
         {
             OnPathPlanned?.Invoke(this, new RobotPathEventArgs(Id.ToString(), planId, path, times, speeds));
+
+            // Also fire the global EventManager event so CentralController can detect conflicts
+            EventManager.Instance?.TriggerRobotPathPlanned(Id.ToString(), planId, path, times, speeds);
         }
         #endregion
 
@@ -312,20 +325,19 @@ namespace CentralControl.RobotControl
             CreateInteractionTrigger();
             obstacleCarvingCoroutine = StartCoroutine(ManageObstacleCarving());
 
-            personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
-            
-            pathPlanner = new PathPlanner(graph, indoorSpace, selectedAlgorithm, selectedSearchMethod, 
+            if (!IsBaselineMode)
+            {
+                personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
+            }
+
+            pathPlanner = new PathPlanner(graph, indoorSpace, selectedAlgorithm, selectedSearchMethod,
                                           id.ToString(), maxAcceleration, maxDeceleration);
 
             collisionRecoveryManager = new CollisionRecoveryManager(this);
 
-            if (EventManager.Instance != null)
-            {
-                EventManager.Instance.OnRobotPathModified += HandlePathModified;
-                EventManager.Instance.OnRobotPathAccepted += HandlePathAccepted;
-                EventManager.Instance.OnPickingCompleted += HandlePickingCompletedEvent;
-            }
-            else
+            // Note: Event subscriptions (OnRobotPathModified, OnRobotPathAccepted, OnPickingCompleted)
+            // are handled in Start() to avoid double subscriptions.
+            if (EventManager.Instance == null)
             {
                 Debug.LogError($"Robot {Id}: EventManager not found, path modification events will not be received");
             }
@@ -472,9 +484,9 @@ namespace CentralControl.RobotControl
                 yield break;
             }
 
-            currentPlanId = result.planId;
-            RaisePathPlannedEvent(currentPlanId, result.path, result.times, result.speeds);
-            personalOccupancyLayer.RecordPathOccupancy(result.path, result.times, this.Id.ToString(), currentPlanId);
+            pendingPlanId = result.planId;
+            RaisePathPlannedEvent(pendingPlanId, result.path, result.times, result.speeds);
+            // RecordPathOccupancy removed — deferred to HandlePathAccepted via AtomicSwap
             UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
             
             float timeout = 300f;
@@ -594,13 +606,7 @@ namespace CentralControl.RobotControl
             finalDestination = targetPosition;
             hasReportedArrival = false;
 
-            // Clear old planned occupancy before planning new path
-            // This prevents conflicts with our own old reservations
-            if (!string.IsNullOrEmpty(currentPlanId))
-            {
-                personalOccupancyLayer.ClearPlannedOccupancy(Id.ToString(), currentPlanId, Time.time);
-                Debug.Log($"Robot {Id}: Cleared old planned occupancy for plan {currentPlanId}");
-            }
+            // Old reservations stay until AtomicSwap in HandlePathAccepted/HandlePathModified
 
             RoutePoint startPoint = graph.GetRoutePointFromCoordinate(transform.position, true);
             RoutePoint endPoint = graph.GetRoutePointFromCoordinate(targetPosition, false);
@@ -624,8 +630,8 @@ namespace CentralControl.RobotControl
             }
             
             var result = pathPlanner.FindPathWithDynamicObstacles(
-                personalOccupancyLayer,
-                globalOccupancyLayer,
+                IsBaselineMode ? null : personalOccupancyLayer,
+                IsBaselineMode ? null : globalOccupancyLayer,
                 startPoint,
                 endPoint,
                 Id.ToString(),
@@ -815,15 +821,18 @@ namespace CentralControl.RobotControl
                     {
                         if (HasReachedFinalDestination())
                         {
+                            // Destination reached — HandleDestinationReached manages the
+                            // state transition (Queuing, Picking, etc.), so we must NOT
+                            // override it with Idle.
                             HandleDestinationReached();
                         }
                         else
                         {
+                            // Path exhausted without reaching destination — abnormal case.
                             Debug.Log($"Robot {Id}: Path completed but not at final destination yet.");
+                            SetBehavior(RobotBehavior.Idle);
                         }
-                        
-                        SetBehavior(RobotBehavior.Idle);
-                        
+
                         rb.velocity = Vector3.zero;
                     }
                     
@@ -964,6 +973,9 @@ namespace CentralControl.RobotControl
         public void ResetRobot()
         {
             StopAllCoroutines();
+            isBackingUp = false;
+            isReplanning = false;
+            navigationEnabled = true;
             SetBehavior(RobotBehavior.Idle);
             isProcessingOrdersRunning = false;
             Interlocked.Exchange(ref isProcessingOrder, 0);
@@ -1029,12 +1041,37 @@ namespace CentralControl.RobotControl
         {
             isReplanning = true;
             Debug.Log($"Robot {Id}: Replanning path to destination at time {Time.time}");
-            
+
             if (currentOrder == null)
             {
                 Debug.LogWarning($"Robot {Id}: No current order to replan path for");
                 isReplanning = false;
+                if (!IsBaselineMode && personalOccupancyLayer != null)
+                {
+                    personalOccupancyLayer.ClearIntent(Id.ToString());
+                    CentralController.Instance?.GetGlobalOccupancyLayer()?.ClearIntent(Id.ToString());
+                }
+                pendingPlanId = null;
                 yield break;
+            }
+
+            // Register intent for target area
+            if (!IsBaselineMode && personalOccupancyLayer != null && currentOrder != null)
+            {
+                ConnectionPoint targetCP = graph.GetConnectionPointFromCoordinates(finalDestination, false);
+                if (targetCP != null)
+                {
+                    CellSpace targetCell = indoorSpace.GetCellSpaceFromConnectionPoint(targetCP, true);
+                    if (targetCell != null)
+                    {
+                        personalOccupancyLayer.SetIntentOccupancy(
+                            targetCell.Id, Time.time, Time.time + 30f, Id.ToString());
+                        // Also register intent on global layer for immediate visibility
+                        var globalLayer = CentralController.Instance?.GetGlobalOccupancyLayer();
+                        globalLayer?.SetIntentOccupancy(targetCell.Id, Time.time, Time.time + 30f, Id.ToString());
+                        CentralController.Instance?.MarkRobotLayerDirty(Id);
+                    }
+                }
             }
             
             bool wasNavigationEnabled = navigationEnabled;
@@ -1047,6 +1084,12 @@ namespace CentralControl.RobotControl
                 Debug.LogWarning($"Robot {Id}: Order became null during replan wait");
                 isReplanning = false;
                 navigationEnabled = wasNavigationEnabled;
+                if (!IsBaselineMode && personalOccupancyLayer != null)
+                {
+                    personalOccupancyLayer.ClearIntent(Id.ToString());
+                    CentralController.Instance?.GetGlobalOccupancyLayer()?.ClearIntent(Id.ToString());
+                }
+                pendingPlanId = null;
                 yield break;
             }
             
@@ -1067,11 +1110,10 @@ namespace CentralControl.RobotControl
                 
                 if (result.path != null && result.path.Count > 0)
                 {
-                    currentPlanId = result.planId;
-                    RaisePathPlannedEvent(currentPlanId, result.path, result.times, result.speeds);
-                    
-                    personalOccupancyLayer.RecordPathOccupancy(result.path, result.times, this.Id.ToString(), currentPlanId);
-                    
+                    pendingPlanId = result.planId;
+                    RaisePathPlannedEvent(pendingPlanId, result.path, result.times, result.speeds);
+                    // RecordPathOccupancy removed — deferred to HandlePathAccepted via AtomicSwap
+
                     UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
                     currentPathIndex = 0;
                     
@@ -1099,20 +1141,31 @@ namespace CentralControl.RobotControl
             if (!pathReplanned)
             {
                 Debug.LogError($"Robot {Id}: Failed to replan path after {attempts} attempts");
+                if (!IsBaselineMode && personalOccupancyLayer != null)
+                {
+                    personalOccupancyLayer.ClearIntent(Id.ToString());
+                    CentralController.Instance?.GetGlobalOccupancyLayer()?.ClearIntent(Id.ToString());
+                }
+                pendingPlanId = null;
             }
-            
+
             isReplanning = false;
         }
         #endregion
 
         #region Occupancy Layer
+        public PathPlanner GetPathPlanner() => pathPlanner;
+
         public DynamicOccupancyLayer GetPersonalOccupancyLayer()
         {
-            return personalOccupancyLayer;
+            return IsBaselineMode ? null : personalOccupancyLayer;
         }
 
         public void UpdatePersonalLayer()
         {
+            // Skip occupancy tracking in baseline mode (no personalOccupancyLayer)
+            if (IsBaselineMode) return;
+
             // Defensive null check - indoorSpace might be null during scene transitions or if initialization failed
             if (indoorSpace == null)
             {
@@ -1145,8 +1198,8 @@ namespace CentralControl.RobotControl
                         lastCellSpace.Id,
                         oldEntryTime,
                         currentTime,
-                        Id.ToString(), 
-                        currentPlanId,
+                        Id.ToString(),
+                        activeConfirmedPlanId,
                         wasStartCell,
                         false // Not an end cell since we're moving to a new cell
                     );
@@ -1183,8 +1236,8 @@ namespace CentralControl.RobotControl
                     currentCellSpace.Id,
                     entryTime,
                     currentTime,
-                    Id.ToString(), 
-                    currentPlanId,
+                    Id.ToString(),
+                    activeConfirmedPlanId,
                     isStartCell,
                     isEndCell
                 );
@@ -1199,22 +1252,24 @@ namespace CentralControl.RobotControl
 
         private void SavePathToPersonalLayer(List<ConnectionPoint> path, List<float> times, string planId)
         {
+            if (IsBaselineMode) return;
+
             // Create an occupancy identifier
             var occupier = new OccupancyIdentifier(Id.ToString(), planId, OccupancyType.Planned);
-            
+
             // Record path to personal occupancy layer
             personalOccupancyLayer.RecordPathOccupancy(path, times, Id.ToString(), planId);
         }
 
         public void ClearPathReservations()
         {
-            if (!string.IsNullOrEmpty(currentPlanId))
+            if (!IsBaselineMode && !string.IsNullOrEmpty(activeConfirmedPlanId))
             {
                 foreach (var cellSpace in indoorSpace.CellSpaces)
                 {
                     personalOccupancyLayer.ClearPlannedOccupancy(
                         Id.ToString(),
-                        currentPlanId,
+                        activeConfirmedPlanId,
                         Time.time
                     );
                 }
@@ -1223,6 +1278,8 @@ namespace CentralControl.RobotControl
             cellSpaceEntryTimes.Clear();
             lastCellSpace = null;
             firstCellSpace = null;
+            activeConfirmedPlanId = null;
+            pendingPlanId = null;
             currentPlanId = null;
         }
         #endregion
@@ -1718,8 +1775,8 @@ namespace CentralControl.RobotControl
         {
             float randomDelay = UnityEngine.Random.Range(0.2f, 0.8f);
             yield return new WaitForSeconds(randomDelay);
-            
-            ClearPathReservations();
+
+            // Old reservations stay until AtomicSwap in HandlePathAccepted/HandlePathModified
             currentPath.Clear();
             currentMovement.Clear();
             currentPathIndex = 0;
@@ -2300,12 +2357,12 @@ namespace CentralControl.RobotControl
             }
             
             navigationEnabled = true;
-            
-            ClearPathReservations();
+
+            // Old reservations stay until AtomicSwap in HandlePathAccepted/HandlePathModified
             currentPath.Clear();
             currentMovement.Clear();
             currentPathIndex = 0;
-            
+
             float replanDelay = UnityEngine.Random.Range(0.1f, 0.5f);
             yield return new WaitForSeconds(replanDelay);
             
@@ -2355,62 +2412,106 @@ namespace CentralControl.RobotControl
             // Update path and times
             currentPath = path;
             pathTimes = newTimes;
-            currentPlanId = planId;
-            
+
             Debug.Log($"Robot {Id}: Applying time shift modification: {shift}s, new path length: {path.Count}");
-            
-            // Save path to personal layer
-            SavePathToPersonalLayer(path, newTimes, planId);
-            
+
+            // AtomicSwap: replace old confirmed reservations with modified path
+            if (!IsBaselineMode && personalOccupancyLayer != null)
+            {
+                var cellIds = new List<string>();
+                var startTimes = new List<float>();
+                var endTimes = new List<float>();
+
+                for (int i = 0; i < path.Count; i++)
+                {
+                    CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(path[i], true);
+                    if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
+                    {
+                        cellIds.Add(cell.Id);
+                        startTimes.Add(newTimes[i]);
+                        endTimes.Add(i + 1 < newTimes.Count ? newTimes[i + 1] : newTimes[i] + 5f);
+                    }
+                }
+
+                personalOccupancyLayer.AtomicSwapPath(
+                    Id.ToString(), activeConfirmedPlanId,
+                    cellIds, startTimes, endTimes, planId);
+            }
+            activeConfirmedPlanId = planId;
+            currentPlanId = planId;
+            pendingPlanId = null;
+
             // Adjust waiting time
             float newStartTime = newTimes[0];
             float currentTime = Time.time;
             float waitTime = Math.Max(0, newStartTime - currentTime);
-            
+
             // If there's an existing waiting coroutine, stop it
             if (waitForExecutionCoroutine != null)
             {
                 StopCoroutine(waitForExecutionCoroutine);
             }
-            
+
             // Execute new waiting time
             waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
         }
 
         private void ApplySpeedAdjustmentModification(
-            List<ConnectionPoint> path, 
-            List<float> newTimes, 
-            List<float> newSpeeds, 
-            string planId, 
+            List<ConnectionPoint> path,
+            List<float> newTimes,
+            List<float> newSpeeds,
+            string planId,
             float avgSpeedChange)
         {
             // Update path and times
             currentPath = path;
             pathTimes = newTimes;
-            currentPlanId = planId;
-            
+
             Debug.Log($"Robot {Id}: Applying speed adjustment modification: average speed change {avgSpeedChange:F2}x, new path length: {path.Count}");
-            
+
             // Update path segments with new speeds
             UpdatePathSegmentsWithSpeed(path, newTimes, newSpeeds);
-            
-            // Save path to personal layer
-            SavePathToPersonalLayer(path, newTimes, planId);
-            
+
+            // AtomicSwap: replace old confirmed reservations with modified path
+            if (!IsBaselineMode && personalOccupancyLayer != null)
+            {
+                var cellIds = new List<string>();
+                var startTimes = new List<float>();
+                var endTimes = new List<float>();
+
+                for (int i = 0; i < path.Count; i++)
+                {
+                    CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(path[i], true);
+                    if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
+                    {
+                        cellIds.Add(cell.Id);
+                        startTimes.Add(newTimes[i]);
+                        endTimes.Add(i + 1 < newTimes.Count ? newTimes[i + 1] : newTimes[i] + 5f);
+                    }
+                }
+
+                personalOccupancyLayer.AtomicSwapPath(
+                    Id.ToString(), activeConfirmedPlanId,
+                    cellIds, startTimes, endTimes, planId);
+            }
+            activeConfirmedPlanId = planId;
+            currentPlanId = planId;
+            pendingPlanId = null;
+
             // Adjust waiting time
             float newStartTime = newTimes[0];
             float currentTime = Time.time;
             float waitTime = Math.Max(0, newStartTime - currentTime);
-            
+
             // If there's an existing waiting coroutine, stop it
             if (waitForExecutionCoroutine != null)
             {
                 StopCoroutine(waitForExecutionCoroutine);
             }
-            
+
             // Execute new waiting time
             waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
-            
+
             // Notify state change
             SetBehavior(RobotBehavior.Moving);
         }
@@ -2490,16 +2591,50 @@ namespace CentralControl.RobotControl
             // Check if this is for the current robot
             if (e.RobotId != Id.ToString())
                 return;
-            
+
+            // Staleness check: if pendingPlanId has been overwritten by a newer replan,
+            // this accept is stale and should be ignored.
+            if (e.PlanId != pendingPlanId)
+            {
+                Debug.LogWarning($"Robot {Id}: Stale path accept for plan {e.PlanId}, current pending is {pendingPlanId}. Ignoring.");
+                return;
+            }
+
             Debug.Log($"Robot {Id}: Path has been accepted by central controller with {e.Path.Count} points");
-            
+
             // Update path and times
             currentPath = new List<ConnectionPoint>(e.Path);
             pathTimes = new List<float>(e.Times);
-            currentPlanId = e.PlanId;
-            
+
             // Update current movement information
             UpdateCurrentMovementInfo(e.Path, e.Times, e.Speeds);
+
+            // AtomicSwap: replace old confirmed reservations with new accepted path
+            if (!IsBaselineMode && personalOccupancyLayer != null)
+            {
+                var cellIds = new List<string>();
+                var startTimes = new List<float>();
+                var endTimes = new List<float>();
+
+                // Map ConnectionPoint path to cell occupancies
+                for (int i = 0; i < e.Path.Count; i++)
+                {
+                    CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(e.Path[i], true);
+                    if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
+                    {
+                        cellIds.Add(cell.Id);
+                        startTimes.Add(e.Times[i]);
+                        endTimes.Add(i + 1 < e.Times.Count ? e.Times[i + 1] : e.Times[i] + 5f);
+                    }
+                }
+
+                personalOccupancyLayer.AtomicSwapPath(
+                    Id.ToString(), activeConfirmedPlanId,
+                    cellIds, startTimes, endTimes, e.PlanId);
+            }
+            activeConfirmedPlanId = e.PlanId;
+            currentPlanId = e.PlanId;
+            pendingPlanId = null;
 
             // Execute response logic such as starting path execution
             BeginPathExecution();
@@ -2527,12 +2662,6 @@ namespace CentralControl.RobotControl
         private void HandleGlobalOccupancyLayerUpdated(object sender, GlobalOccupancyLayerEventArgs e)
         {
             UpdateGlobalLayer(e.GlobalLayer);
-            
-            if (isReplanning)
-            {
-                Debug.Log($"Robot {Id}: Received updated global occupancy layer, triggering path replanning");
-                StartCoroutine(ReplanPath());
-            }
         }
         #endregion
 

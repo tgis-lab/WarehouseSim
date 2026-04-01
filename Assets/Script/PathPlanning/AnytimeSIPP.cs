@@ -174,6 +174,7 @@ namespace PathPlanning
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
         private const float DEFAULT_VERTICAL_TIME = 6.0f;
         private const float TIME_EPSILON = 0.001f;
+        private const float INTENT_COST_FACTOR = 1.3f;
         
         #endregion
 
@@ -248,8 +249,14 @@ namespace PathPlanning
                 verticalConnectionInfo,
                 metrics);
 
-            // Check if the path is found, if yes, set the occupancy layer
-            if (result.success && globalOccupancyLayer != null)
+            // If no path was found, return nulls to caller
+            if (!result.success)
+            {
+                return (null, null, null, null, null);
+            }
+
+            // Path found - set the occupancy layer for vertical connections
+            if (globalOccupancyLayer != null)
             {
                 foreach (var info in verticalConnectionInfo.Values)
                 {
@@ -460,13 +467,20 @@ namespace PathPlanning
             }
 
             stopwatch.Stop();
+
+            if (!foundSolution)
+            {
+                Debug.LogWarning($"SIPP: No path found for robot {robotId} after {stopwatch.ElapsedMilliseconds}ms");
+                return (false, null, null, null, initialEpsilon);
+            }
+
             Debug.Log($"Robot {robotId}: SIPP success! Time: {stopwatch.ElapsedMilliseconds}ms, epsilon={bestEpsilon:F1}");
 
             float actualPathLength = CalculatePathLength(bestPath);
             metrics.ActualPathLength = actualPathLength;
             metrics.TravelTime = bestTimes.Last() - bestTimes.First();
             metrics.PlanningTime = stopwatch.ElapsedMilliseconds / 1000f;
-            
+
             if (EventManager.Instance != null)
             {
                 EventManager.Instance.ReportPathPlanningMetrics(
@@ -552,6 +566,7 @@ namespace PathPlanning
                     searchMethod,
                     trafficRules,
                     epsilon,
+                    globalOccupancyLayer,
                     verticalConnectionInfo,
                     goalFloor
                 );
@@ -607,6 +622,7 @@ namespace PathPlanning
             SearchMethod searchMethod,
             TrafficRuleKnowledge trafficRules,
             float epsilon,
+            DynamicOccupancyLayer globalOccupancyLayer,
             Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo,
             string goalFloor)
         {
@@ -652,7 +668,19 @@ namespace PathPlanning
                     if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
                     {
                         float departureTime = arriveTime; // No waiting after arrival
-                        float newGScore = current.GScore + travelCost;
+
+                        // Apply intent cost penalty if another robot has Intent on the target cell
+                        float intentPenalty = 1.0f;
+                        if (globalOccupancyLayer != null)
+                        {
+                            CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(nextRoutePoint.ConnectionPoint, true);
+                            if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
+                                neighborCell.Id, arriveTime, OccupancyType.Intent, robotId))
+                            {
+                                intentPenalty = INTENT_COST_FACTOR;
+                            }
+                        }
+                        float newGScore = current.GScore + travelCost * intentPenalty;
                         
                         float heuristic = CalculateHeuristic(
                             nextRoutePoint, 
@@ -766,7 +794,18 @@ namespace PathPlanning
                                 
                                 if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
                                 {
-                                    float newGScore = current.GScore + waitTime + baseTravelCost;
+                                    // Apply intent cost penalty if another robot has Intent on the target cell
+                                    float intentPenaltyVert = 1.0f;
+                                    if (globalOccupancyLayer != null)
+                                    {
+                                        CellSpace neighborCellVert = indoorSpace.GetCellSpaceFromConnectionPoint(nextRoutePoint.ConnectionPoint, true);
+                                        if (neighborCellVert != null && globalOccupancyLayer.HasOccupancyOfType(
+                                            neighborCellVert.Id, arriveTime, OccupancyType.Intent, robotId))
+                                        {
+                                            intentPenaltyVert = INTENT_COST_FACTOR;
+                                        }
+                                    }
+                                    float newGScore = current.GScore + waitTime + baseTravelCost * intentPenaltyVert;
                                     
                                     float heuristic = CalculateHeuristic(
                                         nextRoutePoint, 
@@ -974,10 +1013,16 @@ namespace PathPlanning
             {
                 string connectionPointId = connectionPoint.Id;
                 
-                List<TimeOccupancy> occupancies = occupancyLayer != null ? 
+                List<TimeOccupancy> allOccupancies = occupancyLayer != null ?
                     occupancyLayer.GetOccupancies(connectionPointId, startTime, endTime) :
                     new List<TimeOccupancy>();
-                
+
+                // Filter out Intent occupancies — they are soft constraints (cost penalty only),
+                // not hard blocks that carve safe intervals
+                List<TimeOccupancy> occupancies = allOccupancies
+                    .Where(o => o.Occupier.Type != OccupancyType.Intent)
+                    .ToList();
+
                 if (occupancies.Count > 1)
                 {
                     occupancies.Sort((a, b) => a.StartTime.CompareTo(b.StartTime));

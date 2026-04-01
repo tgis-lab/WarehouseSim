@@ -71,9 +71,11 @@ namespace CentralControl
         private IndoorSpace indoorSpace;
         private Graph graph;
         private MapGrid mapGrid;
+        private CellSpaceGraph cellSpaceGraph;
         private ConflictResolver conflictResolver;
         private CellSpaceConflictDetector cellSpaceConflictDetector;
         private float nextNavMeshRebuildTime = 0f;
+        private float nextDynamicUpdateTime = 0f;
         private Coroutine orderGenerationCoroutine;
         private bool isInitialized = false;
         private MultiFloorOrderGenerator orderGenerator;
@@ -90,6 +92,9 @@ namespace CentralControl
 
         private readonly HashSet<int> dirtyRobotIds = new HashSet<int>();
         private readonly object dirtyRobotLock = new object();
+
+        // Tracks the active plan ID for each robot, used by AtomicSwapGlobalPath
+        private Dictionary<string, string> robotActivePlanIds = new Dictionary<string, string>();
 
         #endregion
         
@@ -196,6 +201,25 @@ namespace CentralControl
             // Initialize robot manager with elevator manager
             InitializeRobotManager();
 
+            // Pass CellSpaceGraph to robots using CellSpaceAStar algorithm
+            if (cellSpaceGraph != null)
+            {
+                var allRobots = robotManager.GetAllRobots();
+                if (allRobots != null)
+                {
+                    foreach (var robot in allRobots)
+                    {
+                        if (robot.selectedAlgorithm == SearchAlgorithm.CellSpaceAStar)
+                        {
+                            robot.GetPathPlanner().SetCellSpaceGraph(cellSpaceGraph);
+                        }
+                    }
+                }
+            }
+
+            // Mount experiment metrics collector
+            var metricsCollector = gameObject.AddComponent<ExperimentMetricsCollector>();
+
             // Initialize picker manager
             InitializePickerManager();
 
@@ -235,13 +259,12 @@ namespace CentralControl
         {
             if (!isInitialized) return;
 
-            // Update dynamic occupancy layer
-            // if (Time.time >= nextUpdateTime)
-            // {
-            //     UpdateDynamicOccupancyLayer();
-            //     nextUpdateTime = Time.time + dynamicUpdateInterval;
-            // }
-            UpdateDynamicOccupancyLayer();
+            // Update dynamic occupancy layer (throttled to avoid per-frame overhead)
+            if (Time.time >= nextDynamicUpdateTime)
+            {
+                UpdateDynamicOccupancyLayer();
+                nextDynamicUpdateTime = Time.time + dynamicUpdateInterval;
+            }
             
             // Rebuild NavMesh if needed
             if (autoRebuildNavMesh && Time.time >= nextNavMeshRebuildTime)
@@ -301,7 +324,10 @@ namespace CentralControl
                 indoorSpace = mapLoader.indoorSpace;
                 graph = mapLoader.GetGraph();
                 mapGrid = mapLoader.GetMapGrid();
-                
+
+                // Build CellSpace-level graph for baseline experiments
+                cellSpaceGraph = new CellSpaceGraph(indoorSpace);
+
                 Debug.Log($"[CentralControl] Map loaded with {indoorSpace.CellSpaces.Count} cell spaces and {indoorSpace.CellBoundaries.Count} cell boundaries");
                 Debug.Log($"[CentralControl] Floor levels: {string.Join(", ", indoorSpace.GetAllFloorLevels())}");
             }
@@ -319,13 +345,10 @@ namespace CentralControl
             {
                 // Pass the necessary components
                 robotManager.InitializeRobots(indoorSpace, graph, mapGrid, globalOccupancyLayer, intersectionAreaManager);
-                
-                // Register robot event handlers
-                foreach (var robot in robotManager.GetAllRobots())
-                {
-                    robot.OnPathPlanned += HandleRobotPathPlanned;
-                }
-                
+
+                // Note: HandleRobotPathPlanned is subscribed via the global EventManager event
+                // in InitializeConflictDetector() to avoid double subscriptions.
+
                 Debug.Log($"[CentralControl] Robot manager initialized with {robotManager.TotalRobots} robots");
             }
             else
@@ -583,7 +606,7 @@ namespace CentralControl
                 var personalLayer = robot.GetPersonalOccupancyLayer();
                 if (personalLayer != null)
                 {
-                    globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60);
+                    globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60, robotId.ToString());
                 }
             }
         }
@@ -747,8 +770,9 @@ namespace CentralControl
                     indoorSpace,
                     path,
                     times,
-                    robotId, 
-                    "CentralControl_Initial");
+                    robotId,
+                    "CentralControl_Initial",
+                    excludeTypes: new[] { OccupancyType.Intent });
                 
                 bool hasConflict = conflicts.Count > 0;
                 
@@ -812,8 +836,9 @@ namespace CentralControl
                             indoorSpace,
                             path,
                             modifiedTimes,
-                            robotId, 
-                            "CentralControl_AfterResolve");
+                            robotId,
+                            "CentralControl_AfterResolve",
+                            excludeTypes: new[] { OccupancyType.Intent });
                         
                         // Check if conflicts are truly resolved
                         if (remainingConflicts.Count == 0)
@@ -835,7 +860,7 @@ namespace CentralControl
                     if (conflictResolved)
                     {
                         // Update path reservation with modified times
-                        ReserveCellSpacePath(robotId, planId, path, modifiedTimes);
+                        AtomicSwapGlobalPath(robotId, planId, path, modifiedTimes);
                         
                         // Notify robot based on modification type
                         if (modificationType == "time_shift")
@@ -868,10 +893,40 @@ namespace CentralControl
             }
         }
         
+        [System.Obsolete("Use AtomicSwapGlobalPath instead for safe plan replacement.")]
         private void ReserveCellSpacePath(string robotId, string planId, List<ConnectionPoint> path, List<float> times)
         {
             globalOccupancyLayer.RecordPathOccupancy(path, times, robotId, planId);
             Debug.Log($"[CentralControl] Reserved path for robot {robotId}, plan {planId}, path length {path.Count}");
+        }
+
+        private void AtomicSwapGlobalPath(string robotId, string newPlanId,
+            List<ConnectionPoint> path, List<float> times)
+        {
+            string oldPlanId = robotActivePlanIds.TryGetValue(robotId, out var id) ? id : null;
+
+            // Convert ConnectionPoint path to cell occupancies
+            var cellIds = new List<string>();
+            var startTimes = new List<float>();
+            var endTimes = new List<float>();
+
+            for (int i = 0; i < path.Count; i++)
+            {
+                CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(path[i], true);
+                if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
+                {
+                    cellIds.Add(cell.Id);
+                    startTimes.Add(times[i]);
+                    endTimes.Add(i + 1 < times.Count ? times[i + 1] : times[i] + 5f);
+                }
+            }
+
+            // Atomic swap on global layer (single lock)
+            globalOccupancyLayer.AtomicSwapPath(robotId, oldPlanId, cellIds, startTimes, endTimes, newPlanId);
+
+            robotActivePlanIds[robotId] = newPlanId;
+
+            Debug.Log($"[CentralControl] AtomicSwap for robot {robotId}: {oldPlanId} -> {newPlanId}");
         }
         
         private void RecordCellSpaceConflict(string robotId, string planId, List<ConnectionPoint> path, List<float> times, Dictionary<string, List<TimeOccupancy>> conflicts)
@@ -896,14 +951,50 @@ namespace CentralControl
         private void HandleRobotPathPlanned(object sender, RobotPathEventArgs e)
         {
             Debug.Log($"[CentralControl] Handling path planned event for robot {e.RobotId}, plan {e.PlanId}, path length {e.Path.Count}");
-            
+
             if (e.Path == null || e.Times == null || e.Times.Count != e.Path.Count || e.Times.Count != e.Speeds.Count)
             {
                 Debug.LogError($"[CentralControl] Invalid path data for robot {e.RobotId}");
                 return;
             }
 
-            ReserveCellSpacePath(e.RobotId, e.PlanId, e.Path, e.Times);
+            // Baseline robots skip conflict detection and occupancy management
+            var robot = robotManager?.GetRobotById(e.RobotId);
+            if (robot != null && robot.IsBaselineMode)
+            {
+                NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
+                return;
+            }
+
+            // First check if any conflicts exist at all (lightweight check).
+            // If no conflicts, skip the full resolution pipeline and accept directly.
+            if (cellSpaceConflictDetector != null && globalOccupancyLayer != null && indoorSpace != null)
+            {
+                Dictionary<string, List<TimeOccupancy>> initialConflicts = cellSpaceConflictDetector.DetectConflicts(
+                    globalOccupancyLayer, indoorSpace, e.Path, e.Times, e.RobotId, "CentralControl_PreCheck",
+                    excludeTypes: new[] { OccupancyType.Intent });
+
+                if (initialConflicts.Count > 0)
+                {
+                    // Conflicts exist — run full detection and resolution pipeline.
+                    // DetectPathConflicts will reserve the modified path and send
+                    // modification notifications if conflicts are resolved.
+                    bool unresolvedConflicts = DetectPathConflicts(e.RobotId, e.Path, e.Times, e.PlanId);
+
+                    if (unresolvedConflicts)
+                    {
+                        // All resolution strategies failed — request replan
+                        Debug.LogWarning($"[CentralControl] Robot {e.RobotId} path has unresolvable conflicts, requesting replan");
+                        EventManager.Instance?.TriggerReplanRequested(e.RobotId, "UnresolvedPathConflict");
+                    }
+                    // else: DetectPathConflicts already reserved the modified path and
+                    // notified the robot of the modification. No further action needed.
+                    return;
+                }
+            }
+
+            // No conflicts detected — reserve original path and accept
+            AtomicSwapGlobalPath(e.RobotId, e.PlanId, e.Path, e.Times);
             NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
         }
         

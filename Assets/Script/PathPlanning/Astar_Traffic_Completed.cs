@@ -124,8 +124,6 @@ namespace PathPlanning
 
         #region constants
         
-        private static readonly object verticalConnectionInfoLock = new object();
-        private static Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
         private const float STAIR_FLOOR_TIME = 2.0f;
@@ -136,6 +134,7 @@ namespace PathPlanning
         private const float TIME_RESOLUTION = 0.1f;  // Round time to nearest 0.1 second
         private const float TIME_EPSILON = 0.001f;
         private const float OCCUPANCY_BUFFER = 0.5f; // Buffer time for occupancy checks
+        private const float INTENT_COST_FACTOR = 1.3f;
 
         #endregion
         
@@ -168,11 +167,8 @@ namespace PathPlanning
             // Initialize
             TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
             string newPlanId = $"TimeSpaceAStarPlan_{robotId}_{DateTime.Now.Ticks}";
-            
-            lock (verticalConnectionInfoLock)
-            {
-                verticalConnectionInfo.Clear();
-            }
+
+            var verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
             
             string startFloor = startPosition.ConnectionPoint.FloorLevel;
             string endFloor = endPosition.ConnectionPoint.FloorLevel;
@@ -194,7 +190,8 @@ namespace PathPlanning
                 maxAcceleration,
                 maxDeceleration,
                 searchMethod,
-                trafficRules, 
+                trafficRules,
+                verticalConnectionInfo,
                 metrics);
             
             // Check if the path is found, if yes, set the occupancy layer for vertical connectors
@@ -236,7 +233,8 @@ namespace PathPlanning
             float maxAcceleration,
             float maxDeceleration,
             SearchMethod searchMethod,
-            TrafficRuleKnowledge trafficRules, 
+            TrafficRuleKnowledge trafficRules,
+            Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo,
             PathPlanningMetrics metrics = null)
         {
             Stopwatch stopwatch = new Stopwatch();
@@ -311,6 +309,7 @@ namespace PathPlanning
                     maxDeceleration,
                     searchMethod,
                     trafficRules,
+                    verticalConnectionInfo,
                     endFloor
                 );
                 
@@ -401,6 +400,7 @@ namespace PathPlanning
             float maxDeceleration,
             SearchMethod searchMethod,
             TrafficRuleKnowledge trafficRules,
+            Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo,
             string goalFloor)
         {
             List<TSAStarState> successors = new List<TSAStarState>();
@@ -458,17 +458,14 @@ namespace PathPlanning
                     if (cellSpace != null)
                     {
                         string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{childConnection.Id}";
-                        lock (verticalConnectionInfoLock)
+                        verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
                         {
-                            verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
-                            {
-                                CellSpaceId = cellSpace.Id,
-                                FromFloor = currentFloor,
-                                ToFloor = childFloor,
-                                StartTime = current.ArrivalTime,
-                                TravelTime = travelTime
-                            };
-                        }
+                            CellSpaceId = cellSpace.Id,
+                            FromFloor = currentFloor,
+                            ToFloor = childFloor,
+                            StartTime = current.ArrivalTime,
+                            TravelTime = travelTime
+                        };
                     }
                 }
                 else
@@ -510,8 +507,20 @@ namespace PathPlanning
                     travelCost += delay;
                 }
                 
+                // Apply intent cost penalty if another robot has Intent on the target cell
+                float intentPenalty = 1.0f;
+                if (globalOccupancyLayer != null)
+                {
+                    CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection, true);
+                    if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
+                        neighborCell.Id, arrivalTime, OccupancyType.Intent, robotId))
+                    {
+                        intentPenalty = INTENT_COST_FACTOR;
+                    }
+                }
+
                 // Calculate path costs
-                float newGScore = current.GScore + travelCost;
+                float newGScore = current.GScore + travelCost * intentPenalty;
                 
                 // Calculate heuristic
                 float heuristic = CalculateHeuristic(
@@ -587,14 +596,16 @@ namespace PathPlanning
             string robotId)
         {
             // Check if the node is occupied by any other robot at the specified time
+            // Intent occupancies are soft constraints (cost penalty only), not hard blocks
             if (globalOccupancyLayer != null)
             {
                 var occupancies = globalOccupancyLayer.GetOccupancies(
-                    nodeId, 
-                    time - OCCUPANCY_BUFFER, 
+                    nodeId,
+                    time - OCCUPANCY_BUFFER,
                     time + OCCUPANCY_BUFFER);
-                
-                if (occupancies.Any(o => o.Occupier.RobotId != robotId))
+
+                if (occupancies.Any(o => o.Occupier.RobotId != robotId
+                    && o.Occupier.Type != OccupancyType.Intent))
                 {
                     return false;
                 }
@@ -633,7 +644,10 @@ namespace PathPlanning
                 var occupancies = globalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
                 foreach (var occ in occupancies)
                 {
-                    if (occ.Occupier.RobotId != robotId && occ.EndTime > latestOccupancyEnd)
+                    // Intent occupancies are soft constraints, skip them for hard-block timing
+                    if (occ.Occupier.RobotId != robotId
+                        && occ.Occupier.Type != OccupancyType.Intent
+                        && occ.EndTime > latestOccupancyEnd)
                     {
                         latestOccupancyEnd = occ.EndTime;
                     }
