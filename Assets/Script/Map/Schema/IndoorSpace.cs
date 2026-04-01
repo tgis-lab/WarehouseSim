@@ -19,6 +19,15 @@ namespace Map {
         private List<QueueArea> _queueAreas = new List<QueueArea>();
         private List<CellSpace> _businessPoints = new List<CellSpace>();
 
+        // --- O(1) lookup indexes (built lazily on first access) ---
+        private bool _indexesBuilt = false;
+        private Dictionary<string, CellSpace> _cellSpaceIndex;
+        private Dictionary<string, CellBoundary> _cellBoundaryIndex;
+        private Dictionary<string, List<CellBoundary>> _cellToBoundariesAsSource;
+        private Dictionary<string, List<CellBoundary>> _cellToBoundariesAsTarget;
+        private Dictionary<string, List<CellSpace>> _floorIndex;
+        private Dictionary<string, ConnectionPoint> _connectionPointIndex;
+
         [JsonProperty("properties")]
         public Dictionary<string, object> Properties { get => _properties; set => _properties = value; }
         [JsonProperty("CellSpaces")]
@@ -34,19 +43,76 @@ namespace Map {
         public List<CellSpace> BusinessPoints { get => _businessPoints; }
         public List<PackingPoint> PackingPoints { get => _packingPoints; }
         public List<QueueArea> QueueAreas { get => _queueAreas; }
+
+        /// <summary>
+        /// Builds all dictionary indexes from the current CellSpaces and CellBoundaries lists.
+        /// Called lazily on first access via EnsureIndexes().
+        /// </summary>
+        private void BuildIndexes()
+        {
+            _cellSpaceIndex = new Dictionary<string, CellSpace>(_cellSpaces.Count);
+            foreach (var cs in _cellSpaces)
+            {
+                _cellSpaceIndex[cs.Id] = cs;
+            }
+
+            _cellBoundaryIndex = new Dictionary<string, CellBoundary>(_cellBoundaries.Count);
+            _cellToBoundariesAsSource = new Dictionary<string, List<CellBoundary>>();
+            _cellToBoundariesAsTarget = new Dictionary<string, List<CellBoundary>>();
+            foreach (var cb in _cellBoundaries)
+            {
+                _cellBoundaryIndex[cb.Id] = cb;
+
+                if (!_cellToBoundariesAsSource.TryGetValue(cb.Source, out var sourceList))
+                {
+                    sourceList = new List<CellBoundary>();
+                    _cellToBoundariesAsSource[cb.Source] = sourceList;
+                }
+                sourceList.Add(cb);
+
+                if (!_cellToBoundariesAsTarget.TryGetValue(cb.Target, out var targetList))
+                {
+                    targetList = new List<CellBoundary>();
+                    _cellToBoundariesAsTarget[cb.Target] = targetList;
+                }
+                targetList.Add(cb);
+            }
+
+            _floorIndex = new Dictionary<string, List<CellSpace>>();
+            foreach (var cs in _cellSpaces)
+            {
+                string floor = cs.GetLocatedFloor();
+                if (!string.IsNullOrEmpty(floor))
+                {
+                    if (!_floorIndex.TryGetValue(floor, out var floorList))
+                    {
+                        floorList = new List<CellSpace>();
+                        _floorIndex[floor] = floorList;
+                    }
+                    floorList.Add(cs);
+                }
+            }
+
+            _connectionPointIndex = new Dictionary<string, ConnectionPoint>(_cellBoundaries.Count);
+
+            _indexesBuilt = true;
+        }
+
+        /// <summary>
+        /// Ensures indexes are built before any lookup. Safe for lazy init.
+        /// </summary>
+        private void EnsureIndexes()
+        {
+            if (!_indexesBuilt)
+            {
+                BuildIndexes();
+            }
+        }
         
         public List<string> GetAllFloorLevels()
         {
-            HashSet<string> floors = new HashSet<string>();
-            foreach (var cellSpace in _cellSpaces)
-            {
-                string floorLevel = cellSpace.GetLocatedFloor();
-                if (!string.IsNullOrEmpty(floorLevel))
-                {
-                    floors.Add(floorLevel);
-                }
-            }
-            return new List<string>(floors).OrderBy(f => ParseFloorLevel(f)).ToList();
+            EnsureIndexes();
+            return _floorIndex.Keys.OrderBy(f => ParseFloorLevel(f)).ToList();
         }
         
         // Parses floor level string into an integer (e.g., "1F" -> 1, "B1" -> -1)
@@ -77,7 +143,12 @@ namespace Map {
         
         public List<CellSpace> GetCellSpacesOnFloor(string floorLevel)
         {
-            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel)).ToList();
+            EnsureIndexes();
+            if (_floorIndex.TryGetValue(floorLevel, out var cells))
+            {
+                return new List<CellSpace>(cells);
+            }
+            return new List<CellSpace>();
         }
 
         public List<PickingPoint> GetPickingPointsOnFloor(string floorLevel)
@@ -87,22 +158,42 @@ namespace Map {
         
         public List<CellSpace> GetNavigableCellSpacesOnFloor(string floorLevel)
         {
-            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsNavigable()).ToList();
+            EnsureIndexes();
+            if (_floorIndex.TryGetValue(floorLevel, out var cells))
+            {
+                return cells.Where(cs => cs.IsNavigable()).ToList();
+            }
+            return new List<CellSpace>();
         }
-        
+
         public List<CellSpace> GetVerticalConnectionsOnFloor(string floorLevel)
         {
-            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsVerticalConnection()).ToList();
+            EnsureIndexes();
+            if (_floorIndex.TryGetValue(floorLevel, out var cells))
+            {
+                return cells.Where(cs => cs.IsVerticalConnection()).ToList();
+            }
+            return new List<CellSpace>();
         }
-        
+
         public List<CellSpace> GetElevatorsOnFloor(string floorLevel)
         {
-            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsElevator()).ToList();
+            EnsureIndexes();
+            if (_floorIndex.TryGetValue(floorLevel, out var cells))
+            {
+                return cells.Where(cs => cs.IsElevator()).ToList();
+            }
+            return new List<CellSpace>();
         }
-        
+
         public List<CellSpace> GetStairsOnFloor(string floorLevel)
         {
-            return _cellSpaces.Where(cs => cs.IsLocatedOnFloor(floorLevel) && cs.IsStair()).ToList();
+            EnsureIndexes();
+            if (_floorIndex.TryGetValue(floorLevel, out var cells))
+            {
+                return cells.Where(cs => cs.IsStair()).ToList();
+            }
+            return new List<CellSpace>();
         }
         
         public List<CellBoundary> GetVerticalBoundariesBetweenFloors(string floorLevel1, string floorLevel2)
@@ -196,15 +287,14 @@ namespace Map {
 
         public string GetElevatorIdFromCellBoundary(CellBoundary cellBoundary)
         {
-            foreach (var cellSpace in _cellSpaces)
+            EnsureIndexes();
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Source, out var sourceCell) && sourceCell.IsElevator())
             {
-                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
-                {
-                    if (cellSpace.IsElevator())
-                    {
-                        return cellSpace.Id;
-                    }
-                }
+                return sourceCell.Id;
+            }
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Target, out var targetCell) && targetCell.IsElevator())
+            {
+                return targetCell.Id;
             }
             Debug.Log("Elevator not found");
             return null;
@@ -248,15 +338,14 @@ namespace Map {
 
         public string GetStairIdFromCellBoundary(CellBoundary cellBoundary)
         {
-            foreach (var cellSpace in _cellSpaces)
+            EnsureIndexes();
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Source, out var sourceCell) && sourceCell.IsStair())
             {
-                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
-                {
-                    if (cellSpace.IsStair())
-                    {
-                        return cellSpace.Id;
-                    }
-                }
+                return sourceCell.Id;
+            }
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Target, out var targetCell) && targetCell.IsStair())
+            {
+                return targetCell.Id;
             }
             Debug.Log("Stair not found");
             return null;
@@ -264,12 +353,10 @@ namespace Map {
 
         public CellSpace GetCellSpaceFromId(string id)
         {
-            foreach (var cellSpace in _cellSpaces)
+            EnsureIndexes();
+            if (_cellSpaceIndex.TryGetValue(id, out var cellSpace))
             {
-                if (cellSpace.Id == id)
-                {
-                    return cellSpace;
-                }
+                return cellSpace;
             }
             Debug.Log("CellSpace not found");
             return null;
@@ -277,26 +364,11 @@ namespace Map {
 
         public CellSpace GetCellSpaceFromConnectionPoint(ConnectionPoint connectionPoint, bool sequence = true)
         {
+            EnsureIndexes();
             // true: source, false: target
-            if (sequence)
+            if (_cellBoundaryIndex.TryGetValue(connectionPoint.Id, out var cellBoundary))
             {
-                foreach (var cellBoundary in _cellBoundaries)
-                {
-                    if (cellBoundary.Id == connectionPoint.Id)
-                    {
-                        return GetCellSpaceFromId(cellBoundary.Source);
-                    }
-                }
-            }
-            else
-            {
-                foreach (var cellBoundary in _cellBoundaries)
-                {
-                    if (cellBoundary.Id == connectionPoint.Id)
-                    {
-                        return GetCellSpaceFromId(cellBoundary.Target);
-                    }
-                }
+                return GetCellSpaceFromId(sequence ? cellBoundary.Source : cellBoundary.Target);
             }
             Debug.Log("CellSpace not found");
             return null;
@@ -368,13 +440,10 @@ namespace Map {
 
         public CellBoundary GetCellBoundaryFromId(string id)
         {
-            foreach (var cellBoundary in _cellBoundaries)
+            EnsureIndexes();
+            if (_cellBoundaryIndex.TryGetValue(id, out var cellBoundary))
             {
-                if (cellBoundary.Id == id)
-                {
-                    Debug.Log(cellBoundary.ToJson());
-                    return cellBoundary;
-                }
+                return cellBoundary;
             }
             Debug.Log("CellBoundary not found");
             return null;
@@ -424,12 +493,10 @@ namespace Map {
 
         public ConnectionPoint GetConnectionPointFromId(string id)
         {
-            foreach (var cellBoundary in _cellBoundaries)
+            EnsureIndexes();
+            if (_cellBoundaryIndex.ContainsKey(id))
             {
-                if (cellBoundary.Id == id)
-                {
-                    return GetConnectionPointFromCellBoundary(cellBoundary.Id);
-                }
+                return GetConnectionPointFromCellBoundary(id);
             }
             Debug.Log(id + "ConnectionPoint not found");
             return null;
@@ -437,12 +504,16 @@ namespace Map {
 
         public ConnectionPoint GetConnectionPointFromCellBoundary(string cellBoundaryId)
         {
-            foreach (var cellBoundary in _cellBoundaries)
+            EnsureIndexes();
+            if (_connectionPointIndex.TryGetValue(cellBoundaryId, out var cached))
             {
-                if (cellBoundary.Id == cellBoundaryId)
-                {
-                    return cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary));
-                }
+                return cached;
+            }
+            if (_cellBoundaryIndex.TryGetValue(cellBoundaryId, out var cellBoundary))
+            {
+                var cp = cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary));
+                _connectionPointIndex[cellBoundaryId] = cp;
+                return cp;
             }
             Debug.Log(cellBoundaryId + "ConnectionPoint not found");
             return null;
@@ -450,46 +521,42 @@ namespace Map {
 
         public ConnectionPoint GetConnectionPointFromCellSpace(string cellSpaceId, bool sequence = true)
         {
+            EnsureIndexes();
+
             // First pass: try the requested direction
-            foreach (var cellBoundary in _cellBoundaries)
+            if (sequence)
             {
-                if (sequence)
+                if (_cellToBoundariesAsSource.TryGetValue(cellSpaceId, out var sourceList) && sourceList.Count > 0)
                 {
-                    if (cellBoundary.Source == cellSpaceId)
-                    {
-                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
-                    }
+                    return GetConnectionPointFromCellBoundary(sourceList[0].Id);
                 }
-                else
+            }
+            else
+            {
+                if (_cellToBoundariesAsTarget.TryGetValue(cellSpaceId, out var targetList) && targetList.Count > 0)
                 {
-                    if (cellBoundary.Target == cellSpaceId)
-                    {
-                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
-                    }
+                    return GetConnectionPointFromCellBoundary(targetList[0].Id);
                 }
             }
 
             // Second pass: fallback to opposite direction if not found
             // This handles cases where CellSpace only has one-directional connections
-            foreach (var cellBoundary in _cellBoundaries)
+            if (sequence)
             {
-                if (sequence)
+                // Fallback: try as Target
+                if (_cellToBoundariesAsTarget.TryGetValue(cellSpaceId, out var targetList) && targetList.Count > 0)
                 {
-                    // Fallback: try as Target
-                    if (cellBoundary.Target == cellSpaceId)
-                    {
-                        Debug.Log($"CellSpace {cellSpaceId}: Using fallback direction (Target instead of Source)");
-                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
-                    }
+                    Debug.Log($"CellSpace {cellSpaceId}: Using fallback direction (Target instead of Source)");
+                    return GetConnectionPointFromCellBoundary(targetList[0].Id);
                 }
-                else
+            }
+            else
+            {
+                // Fallback: try as Source
+                if (_cellToBoundariesAsSource.TryGetValue(cellSpaceId, out var sourceList) && sourceList.Count > 0)
                 {
-                    // Fallback: try as Source
-                    if (cellBoundary.Source == cellSpaceId)
-                    {
-                        Debug.Log($"CellSpace {cellSpaceId}: Using fallback direction (Source instead of Target)");
-                        return GetConnectionPointFromCellBoundary(cellBoundary.Id);
-                    }
+                    Debug.Log($"CellSpace {cellSpaceId}: Using fallback direction (Source instead of Target)");
+                    return GetConnectionPointFromCellBoundary(sourceList[0].Id);
                 }
             }
 
@@ -615,15 +682,14 @@ namespace Map {
         // Check if the CellBoundary is stair
         public bool IsStair(CellBoundary cellBoundary)
         {
-            foreach (var cellSpace in _cellSpaces)
+            EnsureIndexes();
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Source, out var sourceCell) && sourceCell.IsStair())
             {
-                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
-                {
-                    if (cellSpace.IsStair())
-                    {
-                        return true;
-                    }
-                }
+                return true;
+            }
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Target, out var targetCell) && targetCell.IsStair())
+            {
+                return true;
             }
             return false;
         }
@@ -636,15 +702,14 @@ namespace Map {
         // Check if the CellBoundary is elevator
         public bool IsElevator(CellBoundary cellBoundary)
         {
-            foreach (var cellSpace in _cellSpaces)
+            EnsureIndexes();
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Source, out var sourceCell) && sourceCell.IsElevator())
             {
-                if (cellSpace.Id == cellBoundary.Source || cellSpace.Id == cellBoundary.Target)
-                {
-                    if (cellSpace.IsElevator())
-                    {
-                        return true;
-                    }
-                }
+                return true;
+            }
+            if (_cellSpaceIndex.TryGetValue(cellBoundary.Target, out var targetCell) && targetCell.IsElevator())
+            {
+                return true;
             }
             return false;
         }

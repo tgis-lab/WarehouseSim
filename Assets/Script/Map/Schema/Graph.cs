@@ -13,12 +13,14 @@ namespace Map {
     {
         public List<RoutePoint> RoutePoints { get; private set; }
         private IndoorSpace indoorSpace;
+        private Dictionary<string, RoutePoint> _routePointIndex;
         public float FloorHeight { get; set; } = 3.0f;
 
         public Graph(IndoorSpace indoorSpace, float floorHeight = 3.0f)
         {
             this.indoorSpace = indoorSpace;
             RoutePoints = new List<RoutePoint>();
+            _routePointIndex = new Dictionary<string, RoutePoint>();
             this.FloorHeight = floorHeight;
         }
         
@@ -32,49 +34,44 @@ namespace Map {
             return level * FloorHeight;
         }
 
-        public void AddNode(RoutePoint node) 
+        public void AddNode(RoutePoint node)
         {
-            if (!RoutePoints.Contains(node)) 
+            if (!RoutePoints.Contains(node))
             {
                 RoutePoints.Add(node);
+                if (node.ConnectionPoint != null)
+                    _routePointIndex[node.ConnectionPoint.Id] = node;
             }
         }
 
         public RoutePoint GetRoutePointFromConnectionPoint(ConnectionPoint connectionPoint)
         {
-            foreach (RoutePoint routePoint in RoutePoints)
-            {
-                if (routePoint.ConnectionPoint.Id == connectionPoint.Id)
-                {
-                    return routePoint;
-                }
-            }
+            if (connectionPoint == null) return null;
+            if (_routePointIndex.TryGetValue(connectionPoint.Id, out var rp))
+                return rp;
             Debug.Log("RoutePoint not found");
             return null;
         }
 
         public Vector3 GetCoordinatesFromConnectionPoint(ConnectionPoint connectionPoint)
         {
-            foreach (var routePoint in RoutePoints)
+            if (connectionPoint == null || !_routePointIndex.ContainsKey(connectionPoint.Id))
             {
-                ConnectionPoint cp = routePoint.ConnectionPoint;
-                if (cp.Id == connectionPoint.Id)
-                {
-                    Point point = (Point)connectionPoint.Point;
-                    float y = 0f; // Default height
-                    
-                    // Determine the floor where the connection point is located
-                    string floorLevel = GetFloorLevelForConnectionPoint(connectionPoint);
-                    if (!string.IsNullOrEmpty(floorLevel))
-                    {
-                        y = GetFloorHeight(floorLevel);
-                    }
-                    
-                    return new Vector3((float)point.X, y, (float)point.Y);
-                }
+                Debug.Log("Coordinates not found");
+                return Vector3.zero;
             }
-            Debug.Log("Coordinates not found");
-            return Vector3.zero;
+
+            Point point = (Point)connectionPoint.Point;
+            float y = 0f; // Default height
+
+            // Determine the floor where the connection point is located
+            string floorLevel = GetFloorLevelForConnectionPoint(connectionPoint);
+            if (!string.IsNullOrEmpty(floorLevel))
+            {
+                y = GetFloorHeight(floorLevel);
+            }
+
+            return new Vector3((float)point.X, y, (float)point.Y);
         }
         
         // Gets the floor where the connection point is located
