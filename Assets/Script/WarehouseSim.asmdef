@@ -1,0 +1,22 @@
+{
+    "name": "WarehouseSim",
+    "rootNamespace": "",
+    "references": [
+        "Cinemachine",
+        "Unity.AI.Navigation"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll",
+        "NetTopologySuite.dll",
+        "C5.dll",
+        "RBush.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
