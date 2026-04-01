@@ -117,7 +117,9 @@ namespace Map
         }
 
         /// <summary>
-        /// Clears occupancies for the specified robot and plan
+        /// Clears occupancies for the specified robot and plan.
+        /// Also clears realtime occupancies for the same robot from currentTime onwards
+        /// to prevent phantom conflicts after replan.
         /// </summary>
         public void ClearPlannedOccupancy(string robotId, string planId, float currentTime)
         {
@@ -126,12 +128,22 @@ namespace Map
             {
                 string cellId = entry.Key;
                 var timeIndex = entry.Value;
-                
+
                 var occupancies = timeIndex.QueryOverlapping(currentTime, float.MaxValue);
                 foreach (var occupancy in occupancies)
                 {
-                    if (occupancy.Occupier.RobotId == robotId && 
+                    // Clear planned occupancies matching this robot and plan
+                    if (occupancy.Occupier.RobotId == robotId &&
                         (string.IsNullOrEmpty(planId) || occupancy.Occupier.PlanId == planId))
+                    {
+                        timeIndex.RemoveInterval(occupancy);
+                    }
+                    // Also clear realtime occupancies for this robot to prevent phantom conflicts
+                    // Realtime occupancies have PlanId = null and Type = Realtime, so they are
+                    // never matched by the PlanId filter above when planId is specified.
+                    else if (occupancy.Occupier.RobotId == robotId &&
+                             occupancy.Occupier.Type == OccupancyType.Realtime &&
+                             occupancy.EndTime >= currentTime)
                     {
                         timeIndex.RemoveInterval(occupancy);
                     }
@@ -196,7 +208,8 @@ namespace Map
             var timeIndex = GetCellTimeIndex(cellId);
             if (timeIndex != null)
             {
-                var occupier = new OccupancyIdentifier(robotId, planId);
+                var type = string.IsNullOrEmpty(planId) ? OccupancyType.Realtime : OccupancyType.Planned;
+                var occupier = new OccupancyIdentifier(robotId, planId, type);
                 var occupancy = new TimeOccupancy(startTime, endTime, occupier, isStartCell, isEndCell);
                 timeIndex.AddInterval(occupancy);
                 IncrementVersion();
@@ -280,17 +293,49 @@ namespace Map
         }
 
         /// <summary>
-        /// Merges another occupancy layer
+        /// Removes all occupancies belonging to the specified robot from all cells.
+        /// Used to clear stale entries before merging updated data from a robot's personal layer.
         /// </summary>
-        public void MergeLayer(DynamicOccupancyLayer other, float startTime, float endTime)
+        public void RemoveOccupanciesByRobot(string robotId)
+        {
+            if (string.IsNullOrEmpty(robotId))
+                return;
+
+            foreach (var entry in cellTimeIndices)
+            {
+                var timeIndex = entry.Value;
+                var allOccupancies = timeIndex.GetAllOccupancies();
+                foreach (var occupancy in allOccupancies)
+                {
+                    if (occupancy.Occupier.RobotId == robotId)
+                    {
+                        timeIndex.RemoveInterval(occupancy);
+                    }
+                }
+            }
+            IncrementVersion();
+        }
+
+        /// <summary>
+        /// Merges another occupancy layer.
+        /// If robotId is provided, first removes all existing occupancies for that robot
+        /// to prevent ghost accumulation from stale entries.
+        /// </summary>
+        public void MergeLayer(DynamicOccupancyLayer other, float startTime, float endTime, string robotId = null)
         {
             if (other == null)
                 return;
-                
+
+            // Clear stale occupancies for this robot before merging new ones
+            if (!string.IsNullOrEmpty(robotId))
+            {
+                RemoveOccupanciesByRobot(robotId);
+            }
+
             foreach (var cellId in other.cellTimeIndices.Keys)
             {
                 var otherOccupancies = other.GetOccupancies(cellId, startTime, endTime);
-                
+
                 foreach (var occupancy in otherOccupancies)
                 {
                     // Add to current layer, preserving start/end cell info
@@ -301,13 +346,188 @@ namespace Map
                         occupancy.Occupier,
                         occupancy.IsStartCell,
                         occupancy.IsEndCell);
-                        
+
                     timeIndex.AddInterval(newOccupancy);
                 }
             }
             IncrementVersion();
         }
         
+        #region Intent Layer Methods
+
+        /// <summary>
+        /// Queries all occupancies overlapping with the specified time range for a given cell.
+        /// Public wrapper around the TemporalIndex QueryOverlapping method.
+        /// </summary>
+        public List<TimeOccupancy> QueryOverlapping(string cellId, float startTime, float endTime)
+        {
+            var timeIndex = GetCellTimeIndex(cellId);
+            if (timeIndex == null)
+                return new List<TimeOccupancy>();
+
+            return timeIndex.QueryOverlapping(startTime, endTime);
+        }
+
+        /// <summary>
+        /// Sets an intent occupancy for a CellSpace. Intent occupancies represent
+        /// a robot's general direction/destination before a concrete path is planned.
+        /// </summary>
+        public void SetIntentOccupancy(string cellId, float startTime, float endTime, string robotId)
+        {
+            var timeIndex = GetCellTimeIndex(cellId);
+            if (timeIndex != null)
+            {
+                var occupier = new OccupancyIdentifier(robotId, null, OccupancyType.Intent);
+                var occupancy = new TimeOccupancy(startTime, endTime, occupier);
+                timeIndex.AddInterval(occupancy);
+                IncrementVersion();
+            }
+        }
+
+        /// <summary>
+        /// Clears all intent occupancies for the specified robot across all cells.
+        /// </summary>
+        public void ClearIntent(string robotId)
+        {
+            if (string.IsNullOrEmpty(robotId))
+                return;
+
+            foreach (var entry in cellTimeIndices)
+            {
+                entry.Value.RemoveByFilter(o =>
+                    o.Occupier.Type == OccupancyType.Intent &&
+                    o.Occupier.RobotId == robotId);
+            }
+            IncrementVersion();
+        }
+
+        /// <summary>
+        /// Atomically swaps a robot's old planned path and intent with a new planned path.
+        /// All operations happen inside a single lock so version increments exactly once.
+        /// </summary>
+        public void AtomicSwapPath(
+            string robotId,
+            string oldPlanId,
+            List<string> cellIds,
+            List<float> startTimes,
+            List<float> endTimes,
+            string newPlanId)
+        {
+            lock (_versionLock)
+            {
+                // Clear old planned occupancies (skip if oldPlanId is null)
+                if (!string.IsNullOrEmpty(oldPlanId))
+                {
+                    foreach (var entry in cellTimeIndices)
+                    {
+                        entry.Value.RemoveByFilter(o =>
+                            o.Occupier.RobotId == robotId &&
+                            o.Occupier.PlanId == oldPlanId);
+                    }
+                }
+
+                // Clear intent occupancies for this robot
+                foreach (var entry in cellTimeIndices)
+                {
+                    entry.Value.RemoveByFilter(o =>
+                        o.Occupier.Type == OccupancyType.Intent &&
+                        o.Occupier.RobotId == robotId);
+                }
+
+                // Register new planned occupancies
+                for (int i = 0; i < cellIds.Count; i++)
+                {
+                    var timeIndex = GetCellTimeIndex(cellIds[i]);
+                    if (timeIndex != null)
+                    {
+                        var occupier = new OccupancyIdentifier(robotId, newPlanId, OccupancyType.Planned);
+                        var occupancy = new TimeOccupancy(startTimes[i], endTimes[i], occupier);
+                        timeIndex.AddInterval(occupancy);
+                    }
+                }
+
+                // Increment version exactly once
+                _version++;
+            }
+        }
+
+        /// <summary>
+        /// Checks if the specified occupancy conflicts with existing occupancies in the same CellSpace,
+        /// with optional type exclusion filtering.
+        /// </summary>
+        public List<TimeOccupancy> CheckCellConflict(
+            string cellId,
+            float startTime,
+            float endTime,
+            string robotId,
+            OccupancyType[] excludeTypes)
+        {
+            return CheckCellConflict(cellId, startTime, endTime, robotId,
+                isStartCell: false, isEndCell: false, excludeTypes: excludeTypes);
+        }
+
+        /// <summary>
+        /// Checks if the specified occupancy conflicts with existing occupancies in the same CellSpace,
+        /// with optional type exclusion filtering. Full overload with all parameters.
+        /// </summary>
+        public List<TimeOccupancy> CheckCellConflict(
+            string cellId,
+            float startTime,
+            float endTime,
+            string robotId,
+            bool isStartCell,
+            bool isEndCell,
+            OccupancyType[] excludeTypes)
+        {
+            // Get temporal index
+            var timeIndex = GetCellTimeIndex(cellId);
+            if (timeIndex == null)
+                return new List<TimeOccupancy>();
+
+            // Query all occupancies within the time range
+            var existingOccupancies = timeIndex.GetOccupancies(startTime, endTime);
+
+            // Filter out occupancies from the same robot
+            var result = existingOccupancies.Where(o => o.Occupier.RobotId != robotId);
+
+            // Filter out excluded types
+            if (excludeTypes != null && excludeTypes.Length > 0)
+            {
+                result = result.Where(o => !excludeTypes.Contains(o.Occupier.Type));
+            }
+
+            return result.ToList();
+        }
+
+        /// <summary>
+        /// Checks if a cell has any occupancy of the specified type at the given time.
+        /// </summary>
+        public bool HasOccupancyOfType(string cellId, float time, OccupancyType type)
+        {
+            var timeIndex = GetCellTimeIndex(cellId);
+            if (timeIndex == null)
+                return false;
+
+            var occupancies = timeIndex.QueryOverlapping(time - 0.1f, time + 0.1f);
+            return occupancies.Any(o => o.Occupier.Type == type);
+        }
+
+        /// <summary>
+        /// Checks if a cell has any occupancy of the specified type at the given time,
+        /// excluding occupancies from the specified robot.
+        /// </summary>
+        public bool HasOccupancyOfType(string cellId, float time, OccupancyType type, string excludeRobotId)
+        {
+            var timeIndex = GetCellTimeIndex(cellId);
+            if (timeIndex == null)
+                return false;
+
+            var occupancies = timeIndex.QueryOverlapping(time - 0.1f, time + 0.1f);
+            return occupancies.Any(o => o.Occupier.Type == type && o.Occupier.RobotId != excludeRobotId);
+        }
+
+        #endregion
+
         #region Spatial Queries
         
         /// <summary>

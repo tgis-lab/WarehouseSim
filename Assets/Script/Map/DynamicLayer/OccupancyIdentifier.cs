@@ -31,6 +31,10 @@ namespace Map
             {
                 return $"Robot_{RobotId}";
             }
+            if (Type == OccupancyType.Intent)
+            {
+                return $"Robot_{RobotId}_Intent";
+            }
             return $"Robot_{RobotId}_Plan_{PlanId}";
         }
 
@@ -54,6 +58,7 @@ namespace Map
     public enum OccupancyType
     {
         Realtime,
-        Planned
+        Planned,
+        Intent
     }
 }

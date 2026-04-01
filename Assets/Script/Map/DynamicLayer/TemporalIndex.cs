@@ -315,6 +315,23 @@ namespace Map
         }
 
         /// <summary>
+        /// Remove all occupancies matching the given predicate
+        /// </summary>
+        public void RemoveByFilter(Func<TimeOccupancy, bool> predicate)
+        {
+            if (predicate == null) return;
+
+            var snapshot = GetAllOccupancies();
+            foreach (var occupancy in snapshot)
+            {
+                if (predicate(occupancy))
+                {
+                    RemoveInterval(occupancy);
+                }
+            }
+        }
+
+        /// <summary>
         /// Get all time occupancies in this index
         /// </summary>
         public List<TimeOccupancy> GetAllOccupancies()

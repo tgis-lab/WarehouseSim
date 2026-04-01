@@ -10,12 +10,13 @@ namespace CentralControl
     public class CellSpaceConflictDetector
     {
         public Dictionary<string, List<TimeOccupancy>> DetectConflicts(
-            DynamicOccupancyLayer layer, 
-            IndoorSpace indoorSpace, 
-            List<ConnectionPoint> connectionPointPath, 
-            List<float> times, 
+            DynamicOccupancyLayer layer,
+            IndoorSpace indoorSpace,
+            List<ConnectionPoint> connectionPointPath,
+            List<float> times,
             string robotId,
-            string source = "Unknown")
+            string source = "Unknown",
+            OccupancyType[] excludeTypes = null)
         {
             if (connectionPointPath == null || connectionPointPath.Count < 2 || times == null || times.Count < connectionPointPath.Count)
             {
@@ -43,7 +44,9 @@ namespace CentralControl
                     bool isStartCell = occupancy.IsStartCell;
                     bool isEndCell = occupancy.IsEndCell;
                     
-                    var cellConflicts = layer.CheckCellConflict(cellId, entryTime, exitTime, robotId, isStartCell, isEndCell);
+                    var cellConflicts = excludeTypes != null && excludeTypes.Length > 0
+                        ? layer.CheckCellConflict(cellId, entryTime, exitTime, robotId, isStartCell, isEndCell, excludeTypes)
+                        : layer.CheckCellConflict(cellId, entryTime, exitTime, robotId, isStartCell, isEndCell);
                     
                     if (cellConflicts.Count > 0)
                     {
