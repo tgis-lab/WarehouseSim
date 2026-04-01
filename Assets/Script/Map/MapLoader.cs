@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.AI;
+using Unity.AI.Navigation;
 using System.Linq;
 using System;
 using System.IO;

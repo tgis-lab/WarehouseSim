@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.AI;
+using Unity.AI.Navigation;
 using NetTopologySuite.Geometries;
 using Map;
 using CentralControl.OrderAssignment;
