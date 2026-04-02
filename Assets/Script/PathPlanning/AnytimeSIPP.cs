@@ -365,20 +365,33 @@ namespace PathPlanning
             {
                 Debug.Log($"Robot {robotId}: Attempt to plan for epsilon={currentEpsilon:F1}");
 
-                closedSet.Clear();
-                inconsSet.Clear();
-
                 if (foundSolution)
                 {
-                    openSet = new PriorityQueue<SIPPState>();
+                    // A3 fix: Construct new OPEN from only:
+                    // 1. States remaining in OPEN (not yet expanded — i.e., not in CLOSED)
+                    // 2. States in INCONS (improved g-value while already in CLOSED)
+                    // Do NOT re-enqueue states that were in CLOSED but not in INCONS.
+                    // Note: closedSet/inconsSet still hold results from previous ImprovePath call.
 
-                    // Collect updates first, then apply them to avoid modifying dictionary during iteration
-                    List<SIPPState> statesToUpdate = new List<SIPPState>();
+                    // Collect state keys that should be in the new OPEN
+                    HashSet<SIPPStateKey> newOpenKeys = new HashSet<SIPPStateKey>();
 
-                    // 1-11: Update the priorities for all s ∈ OPEN according to f(s)
                     foreach (var kvp in allStates)
                     {
-                        SIPPState state = kvp.Value;
+                        SIPPStateKey key = kvp.Key;
+                        if (!closedSet.Contains(key) || inconsSet.Contains(key))
+                        {
+                            newOpenKeys.Add(key);
+                        }
+                    }
+
+                    openSet = new PriorityQueue<SIPPState>();
+
+                    // 1-11: Update the priorities for all s ∈ (OPEN ∪ INCONS) according to f(s)
+                    foreach (var key in newOpenKeys)
+                    {
+                        if (!allStates.TryGetValue(key, out SIPPState state)) continue;
+
                         if (!state.IsOptimal)
                         {
                             float newHeuristic = CalculateHeuristic(
@@ -400,17 +413,15 @@ namespace PathPlanning
                                 state.IsVerticalTransition,
                                 state.VerticalConnectorId);
 
-                            statesToUpdate.Add(updatedState);
+                            allStates[key] = updatedState;
+                            openSet.Enqueue(updatedState, updatedState.FScore);
                         }
                     }
-
-                    // Apply updates after iteration completes
-                    foreach (var updatedState in statesToUpdate)
-                    {
-                        allStates[updatedState.GetStateKey()] = updatedState;
-                        openSet.Enqueue(updatedState, updatedState.FScore);
-                    }
                 }
+
+                // Clear CLOSED and INCONS for the new iteration (after using them above)
+                closedSet.Clear();
+                inconsSet.Clear();
 
                 // 1-13: ImprovePath()
                 var result = ImprovePath(
@@ -644,12 +655,9 @@ namespace PathPlanning
                 trafficRules,
                 verticalConnectionInfo);
             
-            // Process each neighbor (direct movement)
+            // Process each neighbor (direct movement + wait-then-move via A2 analytical computation)
             foreach (var (nextRoutePoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
             {
-                // Calculate arrival time at the neighbor
-                float arriveTime = current.DepartureTime + travelTime;
-                
                 // Get all safe intervals at the destination
                 List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextRoutePoint.ConnectionPoint.Id);
                 
@@ -664,39 +672,52 @@ namespace PathPlanning
                 {
                     SafeInterval interval = intervals[i];
                     
-                    // Check if arrival time is within the safe interval
-                    if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
-                    {
-                        float departureTime = arriveTime; // No waiting after arrival
+                    // A2 fix: For each safe interval, compute the required departure time
+                    // to arrive within it (wait-then-move for all reachable intervals)
+                    float requiredDepart = Math.Max(current.DepartureTime, interval.Start - travelTime);
+                    float analyticalArriveTime = requiredDepart + travelTime;
 
-                        // Apply intent cost penalty if another robot has Intent on the target cell
-                        float intentPenalty = 1.0f;
+                    // Verify departure is within current safe interval and arrival within target interval
+                    if (requiredDepart >= current.SafeInterval.Start
+                        && requiredDepart <= current.SafeInterval.End
+                        && analyticalArriveTime >= interval.Start
+                        && analyticalArriveTime <= interval.End)
+                    {
+                        float departureTime = analyticalArriveTime; // No waiting after arrival
+
+                        bool hasWait = requiredDepart > current.DepartureTime;
+                        float waitTime = hasWait ? requiredDepart - current.DepartureTime : 0f;
+
+                        // A1 fix: g-score = pure arrival time (wait + travel), no intent penalty
+                        float newGScore = current.GScore + waitTime + travelCost;
+
+                        // Apply intent cost penalty as an additive f-score bonus, not in g-score
+                        float intentBonus = 0f;
                         if (globalOccupancyLayer != null)
                         {
                             CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(nextRoutePoint.ConnectionPoint, true);
                             if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
-                                neighborCell.Id, arriveTime, OccupancyType.Intent, robotId))
+                                neighborCell.Id, analyticalArriveTime, OccupancyType.Intent, robotId))
                             {
-                                intentPenalty = INTENT_COST_FACTOR;
+                                intentBonus = travelCost * (INTENT_COST_FACTOR - 1.0f);
                             }
                         }
-                        float newGScore = current.GScore + travelCost * intentPenalty;
-                        
+
                         float heuristic = CalculateHeuristic(
-                            nextRoutePoint, 
-                            endPosition, 
-                            searchMethod, 
-                            defaultSpeed, 
-                            nextFloor, 
+                            nextRoutePoint,
+                            endPosition,
+                            searchMethod,
+                            defaultSpeed,
+                            nextFloor,
                             goalFloor);
-                        
-                        float newFScore = newGScore + heuristic * epsilon;
-                        
-                        // Create successor state for direct movement
+
+                        float newFScore = newGScore + heuristic * epsilon + intentBonus;
+
+                        // Create successor state for movement (with optional wait)
                         SIPPState newState = new SIPPState(
                             nextRoutePoint,
                             i,
-                            arriveTime,
+                            analyticalArriveTime,
                             departureTime,
                             newGScore,
                             newFScore,
@@ -706,7 +727,7 @@ namespace PathPlanning
                             nextFloor,
                             isVertical,
                             verticalConnectorId);
-                        
+
                         successors.Add(newState);
                     }
                 }
@@ -757,90 +778,9 @@ namespace PathPlanning
                 }
             }
             
-            // 3. Motion Type: Wait and then move (especially for vertical transitions)
-            // Calculate maximum wait time possible in current interval
-            float maxWaitTimeInCurrentInterval = current.SafeInterval.End - current.DepartureTime;
-            
-            if (maxWaitTimeInCurrentInterval > TIME_EPSILON)
-            {
-                // For each neighbor, try waiting different amounts of time to find valid arrival
-                foreach (var (nextRoutePoint, baseTravelTime, baseTravelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
-                {
-                    // Focus on vertical transitions which might need waiting
-                    if (isVertical)
-                    {
-                        // Try different wait times to find valid transitions
-                        float waitStep = Math.Min(0.5f, maxWaitTimeInCurrentInterval / 10);
-                        bool foundValidWait = false;
-                        
-                        for (float waitTime = 0; waitTime <= maxWaitTimeInCurrentInterval && !foundValidWait; waitTime += waitStep)
-                        {
-                            // Calculate new departure and arrival times
-                            float newDepartureTime = current.DepartureTime + waitTime;
-                            float arriveTime = newDepartureTime + baseTravelTime;
-                            
-                            // Get safe intervals at destination
-                            List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextRoutePoint.ConnectionPoint.Id);
-                            
-                            if (intervals == null || intervals.Count == 0)
-                            {
-                                continue;
-                            }
-                            
-                            // Check each interval to see if we can arrive within it after waiting
-                            for (int i = 0; i < intervals.Count && !foundValidWait; i++)
-                            {
-                                SafeInterval interval = intervals[i];
-                                
-                                if (interval.Contains(arriveTime) || Math.Abs(interval.Start - arriveTime) < TIME_EPSILON)
-                                {
-                                    // Apply intent cost penalty if another robot has Intent on the target cell
-                                    float intentPenaltyVert = 1.0f;
-                                    if (globalOccupancyLayer != null)
-                                    {
-                                        CellSpace neighborCellVert = indoorSpace.GetCellSpaceFromConnectionPoint(nextRoutePoint.ConnectionPoint, true);
-                                        if (neighborCellVert != null && globalOccupancyLayer.HasOccupancyOfType(
-                                            neighborCellVert.Id, arriveTime, OccupancyType.Intent, robotId))
-                                        {
-                                            intentPenaltyVert = INTENT_COST_FACTOR;
-                                        }
-                                    }
-                                    float newGScore = current.GScore + waitTime + baseTravelCost * intentPenaltyVert;
-                                    
-                                    float heuristic = CalculateHeuristic(
-                                        nextRoutePoint, 
-                                        endPosition, 
-                                        searchMethod, 
-                                        defaultSpeed, 
-                                        nextFloor, 
-                                        goalFloor);
-                                    
-                                    float newFScore = newGScore + heuristic * epsilon;
-                                    
-                                    // Create successor state with waiting and then movement
-                                    SIPPState waitThenMoveSuccessor = new SIPPState(
-                                        nextRoutePoint,
-                                        i,
-                                        arriveTime,
-                                        arriveTime, // No additional waiting after arrival
-                                        newGScore,
-                                        newFScore,
-                                        current,
-                                        interval,
-                                        defaultSpeed,
-                                        nextFloor,
-                                        isVertical,
-                                        verticalConnectorId);
-                                    
-                                    successors.Add(waitThenMoveSuccessor);
-                                    foundValidWait = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
+            // Motion Type 3 (vertical wait-then-move) removed — A2 fix already covers
+            // all neighbors (horizontal + vertical) with analytical wait-then-move computation.
+
             return successors;
         }
 
@@ -1012,9 +952,14 @@ namespace PathPlanning
             foreach (var connectionPoint in allConnectionPoints)
             {
                 string connectionPointId = connectionPoint.Id;
-                
+
+                // A0 fix: Resolve ConnectionPoint to its containing CellSpace ID before querying
+                // DynamicOccupancyLayer stores data by CellSpace ID, not ConnectionPoint ID
+                CellSpace containingCell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
+                string queryId = containingCell?.Id ?? connectionPointId; // fallback to CP ID if cell not found
+
                 List<TimeOccupancy> allOccupancies = occupancyLayer != null ?
-                    occupancyLayer.GetOccupancies(connectionPointId, startTime, endTime) :
+                    occupancyLayer.GetOccupancies(queryId, startTime, endTime) :
                     new List<TimeOccupancy>();
 
                 // Filter out Intent occupancies — they are soft constraints (cost penalty only),
@@ -1029,7 +974,7 @@ namespace PathPlanning
                 }
 
                 List<SafeInterval> intervals = new List<SafeInterval>();
-                
+
                 if (occupancies.Count == 0)
                 {
                     intervals.Add(new SafeInterval(startTime, float.MaxValue));
@@ -1037,7 +982,7 @@ namespace PathPlanning
                 else
                 {
                     float lastEndTime = startTime;
-                    
+
                     foreach (var occupancy in occupancies)
                     {
                         if (occupancy.Occupier.RobotId == robotId)
@@ -1049,13 +994,13 @@ namespace PathPlanning
                         {
                             intervals.Add(new SafeInterval(lastEndTime, occupancy.StartTime));
                         }
-                        
+
                         lastEndTime = Math.Max(lastEndTime, occupancy.EndTime);
                     }
-                    
+
                     intervals.Add(new SafeInterval(lastEndTime, float.MaxValue));
                 }
-                
+
                 safeIntervals[connectionPointId] = intervals;
             }
             

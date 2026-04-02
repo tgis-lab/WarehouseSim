@@ -22,7 +22,7 @@ namespace PathPlanning
         };
         
         // Speed adjustments for turns
-        private readonly Dictionary<float, float> turnSpeedFactors = new Dictionary<float, float>
+        private readonly SortedDictionary<float, float> turnSpeedFactors = new SortedDictionary<float, float>
         {
             { 30f, 0.9f },   // Small angle turn speed reduced to 90%
             { 60f, 0.7f },   // Medium angle turn speed reduced to 70%

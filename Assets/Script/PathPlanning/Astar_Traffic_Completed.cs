@@ -404,13 +404,13 @@ namespace PathPlanning
             string goalFloor)
         {
             List<TSAStarState> successors = new List<TSAStarState>();
-            string currentNodeId = current.RoutePoint.ConnectionPoint.Id;
             string currentFloor = current.FloorLevel;
             
             var childConnections = new List<ConnectionPoint>(current.RoutePoint.Children);
             
             // Test for time-space occupancy at current node and time
-            if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentNodeId, current.ArrivalTime, robotId))
+            ConnectionPoint currentCP = current.RoutePoint.ConnectionPoint;
+            if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentCP, current.ArrivalTime, robotId, indoorSpace))
             {
                 // Current node is not available at this time, so no valid successors
                 return successors;
@@ -434,10 +434,28 @@ namespace PathPlanning
                 {
                     // Handle vertical transition (elevator, stairs)
                     int floorDifference = Math.Abs(ParseFloorLevel(childFloor) - ParseFloorLevel(currentFloor));
-                    float baseTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
-                    
+
+                    // A5 fix: Use stair constants for stairs, elevator constants for elevators
+                    float baseTime;
+                    float costFactor;
+                    if (childConnection.IsStair)
+                    {
+                        baseTime = STAIR_FLOOR_TIME * floorDifference;
+                        costFactor = STAIR_COST_FACTOR;
+                    }
+                    else if (childConnection.IsElevator)
+                    {
+                        baseTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
+                        costFactor = ELEVATOR_COST_FACTOR;
+                    }
+                    else
+                    {
+                        baseTime = DEFAULT_VERTICAL_TIME * floorDifference;
+                        costFactor = DEFAULT_VERTICAL_COST_FACTOR;
+                    }
+
                     float distance = CalculateDistance(current.RoutePoint.ConnectionPoint, childConnection);
-                    
+
                     var (adjustedSpeed, adjustedTime) = trafficRules.ModifySpeed(
                         current.RoutePoint,
                         childRoutePoint,
@@ -446,15 +464,31 @@ namespace PathPlanning
                         distance,
                         maxAcceleration,
                         maxDeceleration);
-                    
+
                     travelTime = Math.Max(baseTime, adjustedTime);
-                    travelCost = travelTime * ELEVATOR_COST_FACTOR;
+                    travelCost = travelTime * costFactor;
                     speedForMove = adjustedSpeed;
-                    
+
                     verticalConnectorId = childConnection.Id;
-                    
+
+                    // A6 fix: Check vertical cell occupancy over the FULL traversal interval
+                    CellSpace verticalCell = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection, true);
+                    if (verticalCell != null && globalOccupancyLayer != null)
+                    {
+                        string vertCellId = verticalCell.Id;
+                        float transitionStart = current.ArrivalTime;
+                        float transitionEnd = current.ArrivalTime + travelTime;
+                        var vertOccupancies = globalOccupancyLayer.GetOccupancies(
+                            vertCellId, transitionStart, transitionEnd);
+                        if (vertOccupancies.Any(o => o.Occupier.RobotId != robotId
+                            && o.Occupier.Type != OccupancyType.Intent))
+                        {
+                            continue; // Skip — vertical cell occupied during traversal
+                        }
+                    }
+
                     // For vertical transitions, record the usage
-                    CellSpace cellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection);
+                    CellSpace cellSpace = verticalCell ?? indoorSpace.GetCellSpaceFromConnectionPoint(childConnection);
                     if (cellSpace != null)
                     {
                         string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{childConnection.Id}";
@@ -490,38 +524,26 @@ namespace PathPlanning
                 // Round the arrival time to the defined resolution
                 float arrivalTime = RoundTime(current.ArrivalTime + travelTime);
                 
-                // Check time-space availability at target node and arrival time
-                if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, arrivalTime, robotId))
+                // A0 fix: Check time-space availability using CellSpace ID
+                if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection, arrivalTime, robotId, indoorSpace))
                 {
                     float nextAvailableTime = GetNextAvailableTime(
-                        globalOccupancyLayer, personalOccupancyLayer, childConnection.Id, arrivalTime, robotId, 3.0f);
-                    
+                        globalOccupancyLayer, personalOccupancyLayer, childConnection, arrivalTime, robotId, 3.0f, indoorSpace);
+
                     if (nextAvailableTime < 0)
                     {
                         continue;
                     }
-                    
+
                     float delay = nextAvailableTime - arrivalTime;
                     arrivalTime = RoundTime(nextAvailableTime);
                     travelTime += delay;
                     travelCost += delay;
                 }
-                
-                // Apply intent cost penalty if another robot has Intent on the target cell
-                float intentPenalty = 1.0f;
-                if (globalOccupancyLayer != null)
-                {
-                    CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection, true);
-                    if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
-                        neighborCell.Id, arrivalTime, OccupancyType.Intent, robotId))
-                    {
-                        intentPenalty = INTENT_COST_FACTOR;
-                    }
-                }
 
-                // Calculate path costs
-                float newGScore = current.GScore + travelCost * intentPenalty;
-                
+                // Calculate path costs — intent penalty applied to f-score only (soft constraint)
+                float newGScore = current.GScore + travelCost;
+
                 // Calculate heuristic
                 float heuristic = CalculateHeuristic(
                     childRoutePoint,
@@ -530,8 +552,20 @@ namespace PathPlanning
                     speedForMove,
                     childFloor,
                     goalFloor);
-                
-                float newFScore = newGScore + heuristic;
+
+                // Intent penalty: move from g-score to f-score bonus (soft tie-breaker, not hard cost)
+                float intentBonus = 0f;
+                if (globalOccupancyLayer != null)
+                {
+                    CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection, true);
+                    if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
+                        neighborCell.Id, arrivalTime, OccupancyType.Intent, robotId))
+                    {
+                        intentBonus = travelCost * (INTENT_COST_FACTOR - 1.0f);
+                    }
+                }
+
+                float newFScore = newGScore + heuristic + intentBonus;
                 
                 // Create successor state
                 TSAStarState successor = new TSAStarState(
@@ -548,17 +582,16 @@ namespace PathPlanning
                 successors.Add(successor);
             }
             
-            // Add waiting option
-            if (successors.Count == 0)
+            // A4 fix: Always generate a wait successor unconditionally (not only when blocked)
+            // A9 fix: Use TIME_RESOLUTION (0.1s) instead of fixed 1.0s for finer-grained waiting
             {
-                // Try to wait at current position
-                float waitTime = 1.0f;
+                float waitTime = TIME_RESOLUTION;
                 float waitArrivalTime = RoundTime(current.ArrivalTime + waitTime);
-                
-                if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentNodeId, waitArrivalTime, robotId))
+
+                if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentCP, waitArrivalTime, robotId, indoorSpace))
                 {
                     float waitGScore = current.GScore + waitTime;
-                    
+
                     float waitHeuristic = CalculateHeuristic(
                         current.RoutePoint,
                         endPosition,
@@ -566,9 +599,9 @@ namespace PathPlanning
                         current.Speed,
                         currentFloor,
                         goalFloor);
-                    
+
                     float waitFScore = waitGScore + waitHeuristic;
-                    
+
                     TSAStarState waitSuccessor = new TSAStarState(
                         current.RoutePoint,
                         waitArrivalTime,
@@ -577,7 +610,7 @@ namespace PathPlanning
                         current,
                         current.Speed,
                         currentFloor);
-                    
+
                     successors.Add(waitSuccessor);
                 }
             }
@@ -586,21 +619,32 @@ namespace PathPlanning
         }
         
         /// <summary>
-        /// Check if a node is available at a specific time
+        /// Check if a node is available at a specific time.
+        /// Resolves ConnectionPoint to CellSpace ID for correct occupancy lookup.
         /// </summary>
         private static bool IsNodeAvailableAtTime(
             DynamicOccupancyLayer globalOccupancyLayer,
             DynamicOccupancyLayer personalOccupancyLayer,
-            string nodeId,
+            ConnectionPoint connectionPoint,
             float time,
-            string robotId)
+            string robotId,
+            IndoorSpace indoorSpace,
+            string overrideCellId = null)
         {
+            // A0 fix: Resolve ConnectionPoint to CellSpace ID for correct occupancy query
+            string cellId = overrideCellId;
+            if (cellId == null)
+            {
+                CellSpace containingCell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
+                cellId = containingCell?.Id ?? connectionPoint.Id;
+            }
+
             // Check if the node is occupied by any other robot at the specified time
             // Intent occupancies are soft constraints (cost penalty only), not hard blocks
             if (globalOccupancyLayer != null)
             {
                 var occupancies = globalOccupancyLayer.GetOccupancies(
-                    nodeId,
+                    cellId,
                     time - OCCUPANCY_BUFFER,
                     time + OCCUPANCY_BUFFER);
 
@@ -610,38 +654,37 @@ namespace PathPlanning
                     return false;
                 }
             }
-            
-            // Check the personal occupancy layer (e.g., robot's own planned path)
-            if (personalOccupancyLayer != null)
-            {
-                var personalOccupancies = personalOccupancyLayer.GetOccupancies(
-                    nodeId,
-                    time - OCCUPANCY_BUFFER,
-                    time + OCCUPANCY_BUFFER);
-                
-                if (personalOccupancies.Any())
-                {
-                    return false;
-                }
-            }
-            
+
+            // A7 fix: Skip personal layer check — it only contains self data,
+            // so querying it causes the robot to block itself.
+
             return true;
         }
         
         private static float GetNextAvailableTime(
             DynamicOccupancyLayer globalOccupancyLayer,
             DynamicOccupancyLayer personalOccupancyLayer,
-            string nodeId,
+            ConnectionPoint connectionPoint,
             float startTime,
             string robotId,
-            float maxLookahead)
+            float maxLookahead,
+            IndoorSpace indoorSpace,
+            string overrideCellId = null)
         {
+            // A0 fix: Resolve ConnectionPoint to CellSpace ID for correct occupancy query
+            string cellId = overrideCellId;
+            if (cellId == null)
+            {
+                CellSpace containingCell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
+                cellId = containingCell?.Id ?? connectionPoint.Id;
+            }
+
             float endTime = startTime + maxLookahead;
             float latestOccupancyEnd = startTime;
-            
+
             if (globalOccupancyLayer != null)
             {
-                var occupancies = globalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
+                var occupancies = globalOccupancyLayer.GetOccupancies(cellId, startTime, endTime);
                 foreach (var occ in occupancies)
                 {
                     // Intent occupancies are soft constraints, skip them for hard-block timing
@@ -653,31 +696,22 @@ namespace PathPlanning
                     }
                 }
             }
-            
-            if (personalOccupancyLayer != null)
-            {
-                var personalOccupancies = personalOccupancyLayer.GetOccupancies(nodeId, startTime, endTime);
-                foreach (var occ in personalOccupancies)
-                {
-                    if (occ.EndTime > latestOccupancyEnd)
-                    {
-                        latestOccupancyEnd = occ.EndTime;
-                    }
-                }
-            }
-            
+
+            // A7 fix: Skip personal layer check — it only contains self data,
+            // so querying it causes the robot to block itself.
+
             float candidateTime = latestOccupancyEnd + OCCUPANCY_BUFFER;
-            
+
             if (candidateTime > endTime)
             {
                 return -1f;
             }
-            
-            if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, nodeId, candidateTime, robotId))
+
+            if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, connectionPoint, candidateTime, robotId, indoorSpace, cellId))
             {
                 return candidateTime;
             }
-            
+
             return -1f;
         }
         

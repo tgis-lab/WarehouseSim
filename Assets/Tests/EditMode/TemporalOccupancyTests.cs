@@ -515,5 +515,44 @@ namespace EditModeTests
         }
 
         #endregion
+
+        // =====================================================================
+        // P0: Occupancy ID Mismatch Tests
+        // =====================================================================
+
+        #region P0: Occupancy ID Mismatch Bug
+
+        [Test]
+        public void OccupancyLayer_StoredByCellSpaceId_QueryByCPId_ReturnsMismatch()
+        {
+            // This test demonstrates the bug: occupancy stored by CellSpace ID
+            // but queried by ConnectionPoint ID returns nothing
+            var layer = new DynamicOccupancyLayer();
+
+            // Store occupancy using CellSpace ID (how RecordPathOccupancy works internally)
+            layer.SetDynamicOccupancy("cellA", 0, 10, "robot2", "plan2");
+
+            // Query using a ConnectionPoint ID (how SIPP/TSA* query)
+            // ConnectionPoint IDs are typically CellBoundary IDs like "cb1", not "cellA"
+            var result = layer.QueryOverlapping("cb1", 0, 10);
+
+            // BUG: This returns 0 because "cb1" != "cellA"
+            // After fix, the algorithms should resolve CP ID → CellSpace ID before querying
+            Assert.AreEqual(0, result.Count,
+                "Demonstrates the bug: querying by CP ID finds nothing when stored by CellSpace ID");
+        }
+
+        [Test]
+        public void OccupancyLayer_QueryByCellSpaceId_ReturnsCorrectly()
+        {
+            // This test shows the correct behavior: query by CellSpace ID works
+            var layer = new DynamicOccupancyLayer();
+            layer.SetDynamicOccupancy("cellA", 0, 10, "robot2", "plan2");
+
+            var result = layer.QueryOverlapping("cellA", 0, 10);
+            Assert.AreEqual(1, result.Count, "Query by CellSpace ID should find the occupancy");
+        }
+
+        #endregion
     }
 }
