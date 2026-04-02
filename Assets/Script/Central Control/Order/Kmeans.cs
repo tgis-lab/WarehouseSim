@@ -121,33 +121,7 @@ namespace CentralControl.OrderAssignment
         
         private int ParseFloorLevel(string floorLevel)
         {
-            if (string.IsNullOrEmpty(floorLevel)) 
-                return 1;
-            
-            if (floorLevel.StartsWith("F") || floorLevel.EndsWith("F"))
-            {
-                string numPart = floorLevel.Replace("F", "");
-                if (int.TryParse(numPart, out int level))
-                {
-                    return level;
-                }
-            }
-            
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                string numPart = floorLevel.Substring(1).Replace("F", "").Replace("f", "");
-                if (int.TryParse(numPart, out int level))
-                {
-                    return -level;
-                }
-            }
-            
-            if (int.TryParse(floorLevel, out int simpleLevel))
-            {
-                return simpleLevel;
-            }
-            
-            return 1;
+            return Map.FloorLevelUtils.Parse(floorLevel, defaultValue: 1);
         }
     }
 }

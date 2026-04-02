@@ -546,30 +546,9 @@ public class MapVisualizer : MonoBehaviour
         identifier.connectedFloors = new List<string>(elevatorSpace.GetConnectedFloors());
     }
     
-    // Parse floor level as number (e.g., "1F" -> 1, "B1" -> -1)
     private int ParseFloorLevel(string floorLevel)
     {
-        if (string.IsNullOrEmpty(floorLevel))
-            return 0;
-                
-        if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-        {
-            // Basement floors
-            if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
-            {
-                return -level;
-            }
-        }
-        else
-        {
-            // Regular floors
-            if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
-            {
-                return level;
-            }
-        }
-            
-        return 0; // Default
+        return FloorLevelUtils.Parse(floorLevel);
     }
 }
 

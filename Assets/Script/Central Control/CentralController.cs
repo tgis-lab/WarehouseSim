@@ -1319,36 +1319,7 @@ namespace CentralControl
         
         private int ParseFloorLevel(string floorLevel)
         {
-            if (string.IsNullOrEmpty(floorLevel)) 
-                return 1; // Default to 1st floor
-            
-            // Handle above-ground floors: "F1" or "1F"
-            if (floorLevel.StartsWith("F") || floorLevel.EndsWith("F"))
-            {
-                string numPart = floorLevel.Replace("F", "");
-                if (int.TryParse(numPart, out int level))
-                {
-                    return level;
-                }
-            }
-            
-            // Handle below-ground floors: "B1"
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                string numPart = floorLevel.Substring(1).Replace("F", "").Replace("f", "");
-                if (int.TryParse(numPart, out int level))
-                {
-                    return -level;
-                }
-            }
-            
-            // Try simple number parsing
-            if (int.TryParse(floorLevel, out int simpleLevel))
-            {
-                return simpleLevel;
-            }
-            
-            return 1; // If parsing fails, default to 1st floor
+            return Map.FloorLevelUtils.Parse(floorLevel, defaultValue: 1);
         }
         #endregion
     }

@@ -848,30 +848,9 @@ namespace PathPlanning
             return connectionPoint.Position;
         }
         
-        /// <summary>
-        /// Parse floor level string to integer
-        /// </summary>
         private static int ParseFloorLevel(string floorLevel)
         {
-            if (string.IsNullOrEmpty(floorLevel))
-                return 0;
-                
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return -level;
-                }
-            }
-            else
-            {
-                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return level;
-                }
-            }
-            
-            return 0;
+            return Map.FloorLevelUtils.Parse(floorLevel);
         }
         
         #endregion

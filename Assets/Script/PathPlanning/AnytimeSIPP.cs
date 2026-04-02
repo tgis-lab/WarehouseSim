@@ -1258,21 +1258,7 @@ namespace PathPlanning
             if (floorLevelCache.TryGetValue(floorLevel, out int cachedLevel))
                 return cachedLevel;
 
-            int result = 0;
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
-                {
-                    result = -level;
-                }
-            }
-            else
-            {
-                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
-                {
-                    result = level;
-                }
-            }
+            int result = Map.FloorLevelUtils.Parse(floorLevel);
 
             floorLevelCache[floorLevel] = result;
             return result;

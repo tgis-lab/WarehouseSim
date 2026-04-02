@@ -314,30 +314,9 @@ namespace CentralControl
             return toRemove.Count > 0;
         }
         
-        // Parses floor level string into an integer (for comparison)
         private static int ParseFloorLevel(string floorLevel)
         {
-            if (string.IsNullOrEmpty(floorLevel))
-                return 0;
-                
-            // Handle basement floors, e.g., "B1"
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return -level;
-                }
-            }
-            // Handle regular floors, e.g., "1F"
-            else
-            {
-                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return level;
-                }
-            }
-            
-            return 0; // Default value
+            return Map.FloorLevelUtils.Parse(floorLevel);
         }
     }
 }

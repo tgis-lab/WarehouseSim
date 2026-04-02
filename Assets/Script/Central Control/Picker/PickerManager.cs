@@ -676,27 +676,7 @@ namespace CentralControl.PickerControl
         #region Helper Methods
         private int ParseFloorLevel(string floorLevel)
         {
-            if (string.IsNullOrEmpty(floorLevel))
-                return 1; // Default value
-            
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                // Basement floor
-                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return -level;
-                }
-            }
-            else
-            {
-                // Above ground floor
-                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return level;
-                }
-            }
-            
-            return 1; // Default
+            return Map.FloorLevelUtils.Parse(floorLevel, defaultValue: 1);
         }
         #endregion
     }

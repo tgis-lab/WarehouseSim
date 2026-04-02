@@ -115,30 +115,9 @@ namespace Map {
             return _floorIndex.Keys.OrderBy(f => ParseFloorLevel(f)).ToList();
         }
         
-        // Parses floor level string into an integer (e.g., "1F" -> 1, "B1" -> -1)
         private int ParseFloorLevel(string floorLevel)
         {
-            if (string.IsNullOrEmpty(floorLevel))
-                return 0;
-                
-            if (floorLevel.StartsWith("B") || floorLevel.StartsWith("b"))
-            {
-                // Basement floors
-                if (int.TryParse(floorLevel.Substring(1).Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return -level;
-                }
-            }
-            else
-            {
-                // Regular floors
-                if (int.TryParse(floorLevel.Replace("F", "").Replace("f", ""), out int level))
-                {
-                    return level;
-                }
-            }
-            
-            return 0; // Default
+            return FloorLevelUtils.Parse(floorLevel);
         }
         
         public List<CellSpace> GetCellSpacesOnFloor(string floorLevel)
