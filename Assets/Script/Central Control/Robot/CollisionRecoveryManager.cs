@@ -113,6 +113,14 @@ namespace CentralControl.RobotControl
                 return;
             }
 
+            // Skip collision recovery for robots in queue — queue distance is managed
+            // by the braking-distance speed controller, not collision recovery
+            if (currentOwner.IsQueuing || currentOwner.IsAdvancingInQueue)
+            {
+                Debug.Log($"Robot {currentOwner.Id}: Skipping collision recovery (in queue state)");
+                return;
+            }
+
             string pairKey = GetOrderedPairKey(currentOwner.Id, otherRobotId);
 
             CleanupExpiredRecords();
