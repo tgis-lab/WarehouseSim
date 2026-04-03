@@ -204,6 +204,19 @@ namespace PathPlanning
                 return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null, null);
             }
 
+            // Early return for trivial case: start and end are the same position
+            if (startPosition.ConnectionPoint.Id == endPosition.ConnectionPoint.Id)
+            {
+                string trivialPlanId = $"SIPPPlan_{robotId}_{DateTime.Now.Ticks}";
+                var trivialPath = new List<ConnectionPoint> { startPosition.ConnectionPoint };
+                var trivialTimes = new List<float> { startTime };
+                var trivialSpeeds = new List<float> { defaultSpeed };
+                var trivialMetrics = new PathPlanningMetrics(robotId, trivialPlanId);
+                trivialMetrics.PlanningTime = 0f;
+                Debug.Log($"Robot {robotId}: Start == End ({startPosition.ConnectionPoint.Id}), returning trivial path");
+                return (trivialPath, trivialTimes, trivialSpeeds, trivialPlanId, trivialMetrics);
+            }
+
             // Initialize
             TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
 
@@ -334,8 +347,27 @@ namespace PathPlanning
                 
             if (initialInterval == null)
             {
-                Debug.LogError($"Robot {robotId}: Can not find safe interval for start position {startPosition.ConnectionPoint.Id} at time {startTime}");
-                return (false, null, null, null, initialEpsilon);
+                // The robot is physically at this position but another robot's planned
+                // occupancy blocks it. Since the robot IS here and cannot teleport away,
+                // extend the earliest existing safe interval backward to startTime.
+                // SIPP's wait-successor mechanism will naturally compute the optimal
+                // departure time; CentralController's conflict detection handles any
+                // residual conflicts post-planning.
+                string startId = startPosition.ConnectionPoint.Id;
+                if (safeIntervals.TryGetValue(startId, out var existingIntervals) && existingIntervals.Count > 0)
+                {
+                    // Extend the first (earliest) interval backward to startTime
+                    var earliest = existingIntervals[0];
+                    initialInterval = new SafeInterval(startTime, earliest.End);
+                    existingIntervals[0] = initialInterval;
+                }
+                else
+                {
+                    // No intervals at all — create an open-ended one
+                    initialInterval = new SafeInterval(startTime, float.MaxValue);
+                    safeIntervals[startId] = new List<SafeInterval> { initialInterval };
+                }
+                Debug.LogWarning($"Robot {robotId}: No safe interval at start {startId} at time {startTime}, extended earliest interval to [{startTime}, {initialInterval.End}]");
             }
 
             // Calculate the initial heuristic value

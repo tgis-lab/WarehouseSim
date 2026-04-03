@@ -115,8 +115,16 @@ namespace PathPlanning
             }
             else
             {
-                // Constant speed
-                timeToReachTarget = distance / currentSpeed;
+                // Constant speed — guard against division by zero
+                if (currentSpeed > 0.001f)
+                {
+                    timeToReachTarget = distance / currentSpeed;
+                }
+                else
+                {
+                    // Robot is stationary; estimate using target speed
+                    timeToReachTarget = targetSpeed > 0.001f ? distance / targetSpeed : distance / defaultSpeed;
+                }
             }
             
             return (targetSpeed, timeToReachTarget);
