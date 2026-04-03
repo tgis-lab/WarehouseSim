@@ -256,27 +256,7 @@ namespace CentralControl.RobotControl
             RobotController robot = robotObj.GetComponent<RobotController>();
             if (robot != null)
             {
-                if (robotObj.GetComponent<Collider>() == null)
-                {
-                    BoxCollider collider = robotObj.AddComponent<BoxCollider>();
-
-                    collider.size = new Vector3(2.5f, 0.8f, 5.4f); // AGV size
-                    collider.center = new Vector3(0, 0.1f, 0.05f); // Adjust collider position
-                }
-
-                if (robotObj.GetComponent<Rigidbody>() == null)
-                {
-                    Rigidbody rb = robotObj.AddComponent<Rigidbody>();
-                    rb.isKinematic = false;
-                    rb.useGravity = false;
-                    rb.constraints = RigidbodyConstraints.FreezeRotation;
-                    rb.mass = 50f; // AGV mass
-                    rb.drag = 1f; // Add some drag to slow down the AGV
-                    rb.angularDrag = 0.05f;
-                    rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
-                }
-                
-                robot.InitializeRobot(id, indoorSpace, graph, mapGrid, globalOccupancyLayer, 
+                robot.InitializeRobot(id, indoorSpace, graph, mapGrid, globalOccupancyLayer,
                     intersectionAreaManager);
 
                 Transform targetIndicatorInstance = Instantiate(targetIndicatorPrefab);
