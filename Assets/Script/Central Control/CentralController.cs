@@ -282,6 +282,7 @@ namespace CentralControl
                 EventManager.Instance.OnRobotCollisionDetected -= HandleRobotCollision;
                 EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
                 EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
+                EventManager.Instance.OnRequestGlobalMapUpdate -= HandleGlobalMapUpdateRequest;
                 EventManager.Instance.OnPathPlanningMetricsRecorded -= OnPathPlanningMetricsRecorded;
             }
             
@@ -440,6 +441,7 @@ namespace CentralControl
 
                 EventManager.Instance.OnRobotCollisionDetected += HandleRobotCollision;
                 EventManager.Instance.OnDeadlockDetected += HandleDeadlockDetected;
+                EventManager.Instance.OnRequestGlobalMapUpdate += HandleGlobalMapUpdateRequest;
 
                 Debug.Log("[CentralControl] Collision tracking system initialized!");
             }
@@ -585,6 +587,39 @@ namespace CentralControl
             globalOccupancyLayer.RecordPathOccupancy(path, times, robotId, planId);
             
             Debug.Log($"[CentralControl] Updated occupancy for robot {robotId}, plan {planId}, path length {path.Count}");
+        }
+
+        private void HandleGlobalMapUpdateRequest(object sender, GlobalMapUpdateRequestEventArgs e)
+        {
+            if (globalOccupancyLayer == null || robotManager == null) return;
+
+            if (e.RobotIds != null && e.RobotIds.Length > 0)
+            {
+                foreach (int robotId in e.RobotIds)
+                {
+                    var robot = robotManager.GetRobotById(robotId);
+                    if (robot == null) continue;
+                    var personalLayer = robot.GetPersonalOccupancyLayer();
+                    if (personalLayer != null)
+                    {
+                        globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60, robotId.ToString());
+                    }
+                }
+                Debug.Log($"[CentralControl] Global occupancy layer updated for robots: {string.Join(", ", e.RobotIds)}");
+            }
+            else
+            {
+                var allRobots = robotManager.GetAllRobots();
+                foreach (var robot in allRobots)
+                {
+                    var personalLayer = robot.GetPersonalOccupancyLayer();
+                    if (personalLayer != null)
+                    {
+                        globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60, robot.Id.ToString());
+                    }
+                }
+                Debug.Log("[CentralControl] Global occupancy layer fully rebuilt after deadlock recovery");
+            }
         }
 
         private void MergeRobotOccupancyLayer()

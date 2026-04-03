@@ -545,10 +545,17 @@ namespace Map {
 
         public string GetCellBoundaryFloorLevel(CellBoundary cellBoundary)
         {
+            if (cellBoundary == null) return null;
+
+            CellSpace sourceCellSpace = GetCellSpaceFromId(cellBoundary.Source);
+            CellSpace targetCellSpace = GetCellSpaceFromId(cellBoundary.Target);
+
+            if (sourceCellSpace == null && targetCellSpace == null) return null;
+            if (sourceCellSpace == null) return targetCellSpace?.GetLocatedFloor();
+            if (targetCellSpace == null) return sourceCellSpace.GetLocatedFloor();
+
             if (cellBoundary.IsHorizontal())
             {
-                CellSpace sourceCellSpace = GetCellSpaceFromId(cellBoundary.Source);
-                CellSpace targetCellSpace = GetCellSpaceFromId(cellBoundary.Target);
                 if (!sourceCellSpace.IsElevator() && !targetCellSpace.IsElevator())
                 {
                     return sourceCellSpace.GetLocatedFloor();
@@ -562,7 +569,9 @@ namespace Map {
                     return sourceCellSpace.GetLocatedFloor();
                 }
             }
-            return null;
+
+            // Vertical boundary or both-elevator: fallback to source cell floor
+            return sourceCellSpace.GetLocatedFloor();
         }
 
         public Hypergraph GetHypergraph()
@@ -675,7 +684,9 @@ namespace Map {
 
         public bool IsStair(string cellBoundaryId)
         {
-            return IsStair(GetCellBoundaryFromId(cellBoundaryId));
+            CellBoundary cb = GetCellBoundaryFromId(cellBoundaryId);
+            if (cb == null) return false;
+            return IsStair(cb);
         }
 
         // Check if the CellBoundary is elevator
@@ -695,7 +706,9 @@ namespace Map {
 
         public bool IsElevator(string cellBoundaryId)
         {
-            return IsElevator(GetCellBoundaryFromId(cellBoundaryId));
+            CellBoundary cb = GetCellBoundaryFromId(cellBoundaryId);
+            if (cb == null) return false;
+            return IsElevator(cb);
         }
         
         public void LoadProperties()

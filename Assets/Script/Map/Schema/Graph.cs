@@ -302,8 +302,19 @@ namespace Map {
         {
             CellSpace nextCellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, sequence);
             CellSpace pastCellSpace = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, !sequence);
+
+            if (nextCellSpace == null || pastCellSpace == null)
+            {
+                return PointLocation.InAisle;
+            }
+
             Layer nextLayer = indoorSpace.GetLayerFromCellSpaceId(nextCellSpace.Id);
             Layer pastLayer = indoorSpace.GetLayerFromCellSpaceId(pastCellSpace.Id);
+
+            if (nextLayer == null || pastLayer == null)
+            {
+                return PointLocation.InAisle;
+            }
 
             if (pastLayer.IsAisle() && nextLayer.IsAisle())
             {
@@ -322,7 +333,7 @@ namespace Map {
                 return PointLocation.OutIntersection;
             }
 
-            throw new System.Exception($"Unable to determine location for ConnectionPoint {connectionPoint.Id}");
+            return PointLocation.InAisle;
         }
         
         // Check if two connection points are on the same floor
