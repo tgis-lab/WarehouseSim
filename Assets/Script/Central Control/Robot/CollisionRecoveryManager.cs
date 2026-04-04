@@ -17,6 +17,7 @@ namespace CentralControl.RobotControl
         private readonly float minRandomWait = 0.3f;
         private readonly float maxRandomWait = 0.8f;
         private readonly float collisionHistoryTimeout = 30f;
+        private const int MAX_WAIT_REPLAN_ATTEMPTS = 3;
         #endregion
         
         #region Private Fields
@@ -38,7 +39,6 @@ namespace CentralControl.RobotControl
             
             if (EventManager.Instance != null)
             {
-                EventManager.Instance.OnDeadlockDetected += HandleDeadlockDetected;
                 EventManager.Instance.OnAreaCongested += HandleAreaCongested;
                 EventManager.Instance.OnReplanRequested += HandleReplanRequested;
             }
@@ -48,27 +48,12 @@ namespace CentralControl.RobotControl
         {
             if (EventManager.Instance != null)
             {
-                EventManager.Instance.OnDeadlockDetected -= HandleDeadlockDetected;
                 EventManager.Instance.OnAreaCongested -= HandleAreaCongested;
                 EventManager.Instance.OnReplanRequested -= HandleReplanRequested;
             }
         }
         
         #region Event Handlers
-        private void HandleDeadlockDetected(object sender, DeadlockDetectedEventArgs e)
-        {
-            string myId = owner.Id.ToString();
-            bool isInvolved = Array.Exists(e.InvolvedRobotIds, id => id == myId);
-            
-            if (isInvolved)
-            {
-                int myIndex = Array.IndexOf(e.InvolvedRobotIds, myId);
-                float staggerDelay = myIndex * 0.5f;
-                
-                owner.StartCoroutine(HandleDeadlockResolution(staggerDelay));
-            }
-        }
-        
         private void HandleAreaCongested(object sender, AreaCongestedEventArgs e)
         {
             string myId = owner.Id.ToString();
@@ -237,28 +222,41 @@ namespace CentralControl.RobotControl
         private IEnumerator WaitInPlaceAndReplan()
         {
             isRecovering = true;
-            float waitTime = UnityEngine.Random.Range(0.5f, 1.5f);
-            yield return new WaitForSeconds(waitTime);
-            
-            isRecovering = false;
-            if (owner != null && owner.CurrentOrder != null)
+
+            for (int attempt = 0; attempt < MAX_WAIT_REPLAN_ATTEMPTS; attempt++)
             {
+                yield return new WaitForSeconds(1.0f + attempt * 0.5f);
+
+                if (owner == null || owner.CurrentOrder == null)
+                {
+                    isRecovering = false;
+                    yield break;
+                }
+
                 owner.RequestReplan("NoSafeBackupPosition");
+
+                yield return new WaitForSeconds(2.0f);
+
+                if (owner == null)
+                {
+                    isRecovering = false;
+                    yield break;
+                }
+
+                if (owner.IsMoving)
+                {
+                    isRecovering = false;
+                    yield break;
+                }
             }
+
+            isRecovering = false;
+            Debug.LogWarning($"Robot {owner.Id}: WaitInPlaceAndReplan exhausted {MAX_WAIT_REPLAN_ATTEMPTS} attempts");
+            EventManager.Instance?.TriggerRequestGlobalMapUpdate(new int[] { owner.Id });
         }
         #endregion
         
         #region Deadlock Resolution
-        private IEnumerator HandleDeadlockResolution(float delay)
-        {
-            yield return new WaitForSeconds(delay);
-            
-            if (owner != null && !owner.IsBackingUp)
-            {
-                owner.RequestReplan("DeadlockResolution");
-            }
-        }
-        
         private IEnumerator ConsiderAlternativeRoute(float delay)
         {
             yield return new WaitForSeconds(delay);

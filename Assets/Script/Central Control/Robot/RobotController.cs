@@ -136,6 +136,10 @@ namespace CentralControl.RobotControl
         private string currentPlanId;
         private string activeConfirmedPlanId;  // Currently executing confirmed path
         private string pendingPlanId;          // Path awaiting accept from CentralController
+        private string currentPendingPlanId = null;
+        private float currentPendingPlanAssignTime = 0f;
+        private string lastSwappedPlanId = null;
+        private float pendingExecutionStartTime = 0f;
         private LayerMask obstacleLayer;
         private IntersectionAreaManager intersectionManager;
         private string currentIntersectionId;
@@ -143,15 +147,19 @@ namespace CentralControl.RobotControl
         private Vector3 lastPosition;
         private float lastPositionChangeTime;
         private Vector3 finalDestination;
+        private bool hasFinalDestination = false;
         private Vector3 targetPosition;
         private bool navigationEnabled = true;
         private float lastEmergencyStopTime = 0f;
+        private float lastEmergencyStopExitTime = -999f;
+        private const float EMERGENCY_STOP_HYSTERESIS = 0.5f;
         private int? lastCollidedRobotId = null;
         private const float EMERGENCY_RECOVERY_DELAY = 0.5f;
         private LayerMask robotCollisionLayer;
         private LayerMask pickerCollisionLayer;
         private CellSpace lastCellSpace = null;
         private CellSpace firstCellSpace = null;
+        private float lastRealtimeFlushTime = 0f;
         private Dictionary<string, float> cellSpaceEntryTimes = new Dictionary<string, float>();
         
         // Floor transition related fields
@@ -180,13 +188,24 @@ namespace CentralControl.RobotControl
         private float pathPointAcceptanceRadius = 0.5f;
         private float finalDestinationAcceptanceRadius = 1.0f;
         private bool hasReportedArrival = false;
-        
+
+        // Pending collision records (extract data immediately in OnCollisionEnter)
+        private struct PendingCollisionRecord
+        {
+            public Vector3 ContactPoint;
+            public int OtherInstanceId;
+            public GameObject OtherGameObject;
+            public float Timestamp;
+        }
+        private readonly List<PendingCollisionRecord> pendingCollisions = new List<PendingCollisionRecord>();
+
         // Collision detection optimization
         private Coroutine collisionCheckCoroutine;
         private Coroutine obstacleCarvingCoroutine;
         private const float COLLISION_CHECK_INTERVAL = 0.05f; // 20Hz detection frequency
-        private const float QUEUE_GAP = 0.15f; // Safe queue distance (logical, collider is point-sized)
+        private const float QUEUE_GAP = 0.8f; // Safe queue distance — must exceed robot body width since colliders are point-sized
         private bool isBackingUp = false;
+        private bool isExecutingVerticalTransport = false;
         private RobotBehavior behaviorBeforeBackup = RobotBehavior.Idle;
         
         // Path history for backup recovery
@@ -195,6 +214,16 @@ namespace CentralControl.RobotControl
         
         // Local collision recovery manager
         private CollisionRecoveryManager collisionRecoveryManager;
+
+        // Path execution atomic guard
+        private volatile bool pathExecutionGuard = false;
+
+        // DWA local obstacle avoidance
+        private DWAPlanner dwaPlanner;
+        private bool useDWA = false;
+        private Vector3 dwaVelocity = Vector3.zero;
+        private bool dwaVelocityValid = false;
+        private Collider[] cachedNearbyDynamicObstacles = System.Array.Empty<Collider>();
         #endregion
 
         #region Event
@@ -237,6 +266,8 @@ namespace CentralControl.RobotControl
 
             recentCollisions = new List<GameObject>();
             lastCollisionClearTime = Time.time;
+
+            dwaPlanner = new DWAPlanner();
         }
 
         private void Start()
@@ -268,11 +299,20 @@ namespace CentralControl.RobotControl
             UpdateRobotStatus();
             RecordPathPosition();
 
-            lastPosition = transform.position;
-            lastPositionChangeTime = Time.time;
-            
+            if (Vector3.Distance(transform.position, lastPosition) > 0.05f)
+            {
+                lastPosition = transform.position;
+                lastPositionChangeTime = Time.time;
+            }
+
             if (navigationEnabled && !IsEmergencyStopped && !isWaitingForPicking && IsMoving)
             {
+                // Check if accepted path should start executing now
+                if (pendingExecutionStartTime > 0f)
+                {
+                    TryBeginAcceptedPathExecution();
+                }
+
                 UpdateMovement();
             }
             
@@ -493,45 +533,72 @@ namespace CentralControl.RobotControl
         private IEnumerator ExecuteOrderCoroutine(Order order)
         {
             Debug.Log($"Robot {Id} planning path to {order.Destination}");
-            SetBehavior(RobotBehavior.Moving);
-            
+
             Vector3 targetPosition = GetTargetPosition(order.PickingPoint);
             string targetFloorLevel = order.PickingPoint.FloorLevel;
             targetPosition.y = GetFloorHeight(targetFloorLevel);
-            
+
             Debug.Log($"Robot {Id} planning path from floor {CurrentFloor} to floor {targetFloorLevel}");
-            
+
             var result = PlanPath(targetPosition, targetFloorLevel);
             if (result.path == null || result.path.Count == 0)
             {
                 Debug.LogError($"Robot {Id} failed to plan path to {order.Destination}");
+                hasFinalDestination = false;
+                finalDestination = Vector3.zero;
                 SetBehavior(RobotBehavior.Idle);
                 ReportOrderFailed(order.Id, "PathPlanningFailed");
                 yield break;
             }
 
             pendingPlanId = result.planId;
+            currentPendingPlanId = pendingPlanId;
+            currentPendingPlanAssignTime = Time.time;
+
             RaisePathPlannedEvent(pendingPlanId, result.path, result.times, result.speeds);
-            // RecordPathOccupancy removed — deferred to HandlePathAccepted via AtomicSwap
-            UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
-            
+
+            // Wait for accept/modify — robot stays non-executing until HandlePathAccepted fires
+            float acceptTimeout = 10f;
+            while (pendingPlanId != null && Time.time - currentPendingPlanAssignTime < acceptTimeout)
+            {
+                if (pendingPlanId != currentPendingPlanId)
+                    break;
+                yield return null;
+            }
+
+            if (pendingPlanId != null)
+            {
+                Debug.LogWarning($"Robot {Id}: Path accept timed out");
+                hasFinalDestination = false;
+                finalDestination = Vector3.zero;
+                SetBehavior(RobotBehavior.Idle);
+                ReportOrderFailed(order.Id, "AcceptTimeout");
+                yield break;
+            }
+
+            // Path was accepted — HandlePathAccepted already called BeginPathExecution
+            // and set behavior to Moving. Continue with execution monitoring.
             float timeout = 300f;
             float startTime = Time.time;
-            
+
             while (!hasReportedArrival && Time.time - startTime < timeout)
             {
-                if (!IsMoving && !IsVerticallyMoving && !IsQueuing && !IsEmergencyStopped)
+                // Allow Idle state if pending execution (waiting for replan accept or execution start time)
+                bool isWaitingForExecution = pendingExecutionStartTime > 0f || pendingPlanId != null || isReplanning;
+                if (!IsMoving && !IsVerticallyMoving && !IsQueuing && !IsEmergencyStopped && !isWaitingForExecution && !isExecutingVerticalTransport)
                 {
-                    Debug.LogWarning($"Robot {Id} stopped moving before reaching destination. State: {currentBehavior}, Vertical: {currentVerticalTransport}");
+                    Debug.LogWarning($"Robot {Id} stopped moving before reaching destination. State: {currentBehavior}");
                     break;
                 }
-                
+
                 yield return null;
             }
             
             if (!hasReportedArrival)
             {
                 Debug.LogWarning($"Robot {Id} timed out while trying to reach destination");
+                hasFinalDestination = false;
+                finalDestination = Vector3.zero;
                 SetBehavior(RobotBehavior.Idle);
                 ReportOrderFailed(order.Id, "NavigationTimeout");
                 yield break;
@@ -542,7 +609,9 @@ namespace CentralControl.RobotControl
             
             pickingCompleted = false;
             yield return StartCoroutine(WaitForPicking(order, transform.position));
-            
+
+            hasFinalDestination = false;
+            finalDestination = Vector3.zero;
             SetBehavior(RobotBehavior.Idle);
             
             ReportOrderCompleted(order.Id);
@@ -629,9 +698,11 @@ namespace CentralControl.RobotControl
 
         private (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) PlanPath(Vector3 targetPosition, string targetFloorLevel = null)
         {
+            pathExecutionGuard = false;
             currentPath.Clear();
             currentMovement.Clear();
             finalDestination = targetPosition;
+            hasFinalDestination = true;
             hasReportedArrival = false;
 
             // Old reservations stay until AtomicSwap in HandlePathAccepted/HandlePathModified
@@ -795,10 +866,16 @@ namespace CentralControl.RobotControl
         {
             if (!IsMoving)
                 return;
-            
+
+            // Guard: do not advance along path until pending execution start time is reached.
+            // HandlePathAccepted sets Moving immediately for state tracking, but actual motion
+            // must wait until TryBeginAcceptedPathExecution fires BeginPathExecution.
+            if (pendingExecutionStartTime > 0f && Time.time < pendingExecutionStartTime)
+                return;
+
             if (IsPickingPending && (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count))
             {
-                if (finalDestination != Vector3.zero && !HasReachedFinalDestination())
+                if (hasFinalDestination && !HasReachedFinalDestination())
                 {
                     MoveDirectlyToDestination(finalDestination);
                     return;
@@ -835,7 +912,7 @@ namespace CentralControl.RobotControl
 
                 if (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count)
                 {
-                    if (finalDestination != Vector3.zero && !HasReachedFinalDestination())
+                    if (hasFinalDestination && !HasReachedFinalDestination())
                     {
                         MoveDirectlyToDestination(finalDestination);
                         return;
@@ -846,28 +923,47 @@ namespace CentralControl.RobotControl
             if (currentPath == null || currentPath.Count == 0 || currentPathIndex >= currentPath.Count)
                 return;
             
+            // Skip normal movement while executing vertical transport
+            if (isExecutingVerticalTransport) return;
+
             ConnectionPoint targetPoint = currentPath[currentPathIndex];
-            
+
             Vector3 targetPos = GetConnectionPointPosition(targetPoint);
-            
+
             targetPosition = targetPos;
-            
-            float distanceToTarget = Vector3.Distance(transform.position, targetPos);
-            
+
+            // Use 2D (XZ) distance when the target is on a different floor or is a
+            // vertical CP — the robot can't walk to a different Y, so 3D distance
+            // would never shrink below acceptance radius.
+            float distanceToTarget;
+            bool targetOnDifferentFloor = Mathf.Abs(targetPos.y - transform.position.y) > 0.5f;
+            if (targetOnDifferentFloor || targetPoint.IsVertical())
+            {
+                Vector3 pos2D = new Vector3(transform.position.x, 0, transform.position.z);
+                Vector3 tgt2D = new Vector3(targetPos.x, 0, targetPos.z);
+                distanceToTarget = Vector3.Distance(pos2D, tgt2D);
+            }
+            else
+            {
+                distanceToTarget = Vector3.Distance(transform.position, targetPos);
+            }
+
             if (distanceToTarget < pathPointAcceptanceRadius)
             {
+                int reachedIndex = currentPathIndex;
+                CorrectPlannedTimesAtCheckpoint(reachedIndex);
                 currentPathIndex++;
 
                 if (currentPathIndex >= currentPath.Count)
                 {
                     Debug.Log($"Robot {Id}: Path connection points completed");
-                    
-                    if (currentOrder != null && finalDestination == Vector3.zero && currentPath.Count > 0)
+
+                    if (currentOrder != null && !hasFinalDestination && currentPath.Count > 0)
                     {
                         ConnectionPoint lastPoint = currentPath[currentPath.Count - 1];
-                        
+
                         MoveFromConnectionPointToTargetCellSpace(lastPoint);
-                        
+
                         currentPathIndex = 0;
                         currentPath = new List<ConnectionPoint> { lastPoint };
                     }
@@ -890,12 +986,39 @@ namespace CentralControl.RobotControl
                             return;
                         }
                     }
-                    
+
                     currentSpeed = 0f;
                     currentAcceleration = 0f;
                     return;
                 }
-                
+
+                // Check if the NEXT waypoint is on a different floor — need vertical transport.
+                // The planner uses horizontal CPs on elevator/stair cells; the floor change is
+                // detected by comparing FloorLevel between consecutive CPs, not IsVertical().
+                ConnectionPoint reachedPoint = currentPath[reachedIndex];
+                ConnectionPoint nextPoint = currentPath[currentPathIndex];
+                string reachedFloor = reachedPoint.FloorLevel;
+                string nextFloor = nextPoint.FloorLevel;
+
+                bool floorChange = !string.IsNullOrEmpty(reachedFloor) &&
+                                   !string.IsNullOrEmpty(nextFloor) &&
+                                   reachedFloor != nextFloor;
+
+                if (floorChange)
+                {
+                    VerticalTransportType transportType = (reachedPoint.IsElevator || nextPoint.IsElevator)
+                        ? VerticalTransportType.Elevator
+                        : (reachedPoint.IsStair || nextPoint.IsStair)
+                            ? VerticalTransportType.Stairs
+                            : VerticalTransportType.Elevator;
+
+                    float targetFloorHeight = GetFloorHeight(nextFloor);
+                    float transitTime = transportType == VerticalTransportType.Stairs ? 4.0f : 3.5f;
+
+                    StartCoroutine(ExecuteVerticalTransport(targetFloorHeight, transitTime, transportType));
+                    return;
+                }
+
                 return;
             }
             
@@ -943,12 +1066,95 @@ namespace CentralControl.RobotControl
 
             currentVelocity = moveDirection * currentSpeed;
 
+            // DWA override: when active, use DWA-computed velocity instead of
+            // geometric waypoint following
+            if (useDWA && dwaVelocityValid)
+            {
+                // Corridor constraint: validate DWA trajectory stays in reserved corridor
+                bool trajectoryValid = true;
+                for (float t = 0f; t <= dwaPlanner.PredictionTime; t += 0.3f)
+                {
+                    Vector3 predicted = transform.position + dwaVelocity * t;
+                    if (!IsInsideReservedCorridor(predicted))
+                    {
+                        trajectoryValid = false;
+                        break;
+                    }
+                }
+
+                if (trajectoryValid)
+                {
+                    currentVelocity = dwaVelocity;
+                    currentSpeed = dwaVelocity.magnitude;
+
+                    Vector3 dwaDir = new Vector3(dwaVelocity.x, 0, dwaVelocity.z).normalized;
+                    if (dwaDir.sqrMagnitude > 0.04f)
+                    {
+                        Quaternion desiredRotation = Quaternion.LookRotation(dwaDir);
+                        targetRotation = Quaternion.Slerp(rb.rotation, desiredRotation, Time.deltaTime * rotationSpeed);
+                    }
+                    return;
+                }
+                // else: DWA trajectory leaves corridor, fall through to normal waypoint following
+            }
+
             // Rotate toward target direction (unchanged — Slerp gives smooth rotation)
             if (horizontalDirection.sqrMagnitude > 0.04f)
             {
                 Quaternion desiredRotation = Quaternion.LookRotation(horizontalDirection);
                 targetRotation = Quaternion.Slerp(rb.rotation, desiredRotation, Time.deltaTime * rotationSpeed);
             }
+        }
+
+        private void CorrectPlannedTimesAtCheckpoint(int reachedWaypointIndex)
+        {
+            if (pathTimes == null || reachedWaypointIndex >= pathTimes.Count) return;
+            if (IsBaselineMode || personalOccupancyLayer == null) return;
+
+            float actualArrival = Time.time;
+            float plannedArrival = pathTimes[reachedWaypointIndex];
+            float drift = actualArrival - plannedArrival;
+
+            if (Mathf.Abs(drift) < 0.1f) return;
+
+            Debug.Log($"Robot {Id}: Checkpoint {reachedWaypointIndex}, drift {drift:F2}s (planned {plannedArrival:F2}, actual {actualArrival:F2}), correcting remaining {pathTimes.Count - reachedWaypointIndex} waypoints");
+
+            for (int i = reachedWaypointIndex + 1; i < pathTimes.Count; i++)
+            {
+                pathTimes[i] += drift;
+            }
+
+            RewritePlannedOccupancySuffix();
+            CentralController.Instance?.FlushRobotLayer(Id);
+        }
+
+        private void RewritePlannedOccupancySuffix()
+        {
+            if (currentPath == null || pathTimes == null || string.IsNullOrEmpty(activeConfirmedPlanId))
+                return;
+
+            var cellIds = new List<string>();
+            var startTimes = new List<float>();
+            var endTimes = new List<float>();
+
+            for (int i = currentPathIndex + 1; i < currentPath.Count; i++)
+            {
+                CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(currentPath[i], true);
+                if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
+                {
+                    float st = pathTimes[i];
+                    float et = i + 1 < pathTimes.Count ? pathTimes[i + 1] : pathTimes[i] + 5f;
+                    // Guard: endTime must be >= startTime after drift correction
+                    if (et < st) et = st + 0.5f;
+                    cellIds.Add(cell.Id);
+                    startTimes.Add(st);
+                    endTimes.Add(et);
+                }
+            }
+
+            personalOccupancyLayer.AtomicSwapPath(
+                Id.ToString(), activeConfirmedPlanId,
+                cellIds, startTimes, endTimes, activeConfirmedPlanId);
         }
 
         private void MoveFromConnectionPointToTargetCellSpace(ConnectionPoint targetPoint)
@@ -968,8 +1174,9 @@ namespace CentralControl.RobotControl
             float y = GetFloorHeight(targetCellSpace.GetLocatedFloor());
             
             Vector3 targetPos = new Vector3((float)point.X, y, (float)point.Y);
-            
+
             finalDestination = targetPos;
+            hasFinalDestination = true;
         }
         
         private void MoveDirectlyToDestination(Vector3 destination)
@@ -1026,6 +1233,38 @@ namespace CentralControl.RobotControl
         }
         #endregion
 
+        private IEnumerator ExecuteVerticalTransport(float targetY, float transitTime, VerticalTransportType transportType)
+        {
+            isExecutingVerticalTransport = true;
+            currentSpeed = 0f;
+            currentVelocity = Vector3.zero;
+            currentAcceleration = 0f;
+
+            SetBehavior(RobotBehavior.Moving, transportType);
+            string fromFloor = GetFloorLevelFromPosition(transform.position);
+            Debug.Log($"Robot {Id}: Starting {transportType} transport from {fromFloor} (y={transform.position.y:F2} → y={targetY:F2}), transit {transitTime}s");
+
+            // Simulate transit time (elevator ride / stair climb)
+            yield return new WaitForSeconds(transitTime);
+
+            // Teleport to target floor height
+            Vector3 newPos = new Vector3(transform.position.x, targetY, transform.position.z);
+            if (rb != null)
+            {
+                rb.MovePosition(newPos);
+            }
+            else
+            {
+                transform.position = newPos;
+            }
+
+            string toFloor = GetFloorLevelFromPosition(newPos);
+            Debug.Log($"Robot {Id}: {transportType} transport complete, arrived at {toFloor} (y={targetY:F2})");
+
+            isExecutingVerticalTransport = false;
+            SetBehavior(RobotBehavior.Moving);
+        }
+
         #region Status Management
         private void UpdateRobotStatus()
         {
@@ -1079,6 +1318,7 @@ namespace CentralControl.RobotControl
         {
             StopAllCoroutines();
             isBackingUp = false;
+            isExecutingVerticalTransport = false;
             isReplanning = false;
             navigationEnabled = true;
             SetBehavior(RobotBehavior.Idle);
@@ -1216,24 +1456,15 @@ namespace CentralControl.RobotControl
                 if (result.path != null && result.path.Count > 0)
                 {
                     pendingPlanId = result.planId;
-                    RaisePathPlannedEvent(pendingPlanId, result.path, result.times, result.speeds);
-                    // RecordPathOccupancy removed — deferred to HandlePathAccepted via AtomicSwap
 
-                    UpdateCurrentMovementInfo(result.path, result.times, result.speeds);
-                    currentPathIndex = 0;
-                    
-                    Debug.Log($"Robot {Id}: Replanning path succeeded on attempt {attempts + 1}");
-                    
-                    SetBehavior(RobotBehavior.Moving);
+                    RaisePathPlannedEvent(pendingPlanId, result.path, result.times, result.speeds);
+
+                    Debug.Log($"Robot {Id}: Replanning path succeeded on attempt {attempts + 1}, waiting for accept");
+
+                    // Do NOT set Moving or call UpdateCurrentMovementInfo here.
+                    // HandlePathAccepted will handle that when CentralController accepts.
                     pathReplanned = true;
-                    
-                    float startDelay = 0.5f;
-                    if (waitForExecutionCoroutine != null)
-                    {
-                        StopCoroutine(waitForExecutionCoroutine);
-                    }
-                    waitForExecutionCoroutine = StartCoroutine(WaitForExecution(startDelay));
-                    
+
                     break;
                 }
                 
@@ -1333,24 +1564,24 @@ namespace CentralControl.RobotControl
             // Update occupancy for current cell space
             if (cellSpaceEntryTimes.TryGetValue(currentCellSpace.Id, out float entryTime))
             {
-                // Determine if this is a start or end cell
                 bool isStartCell = (currentCellSpace == firstCellSpace);
                 bool isEndCell = (currentOrder != null && HasReachedFinalDestination());
-                
-                personalOccupancyLayer.SetDynamicOccupancy(
+
+                personalOccupancyLayer.UpdateOccupancyEndTime(
                     currentCellSpace.Id,
-                    entryTime,
-                    currentTime,
                     Id.ToString(),
-                    activeConfirmedPlanId,
+                    currentTime,
+                    entryTime,
                     isStartCell,
                     isEndCell
                 );
-                
-                // Mark this robot's layer as dirty for incremental merge
-                if (CentralController.Instance != null)
+
+                // Same-cell realtime updates should not flush every frame, but global cache
+                // still needs periodic refresh while the robot stays in place.
+                if (currentTime - lastRealtimeFlushTime > 0.25f)
                 {
-                    CentralController.Instance.MarkRobotLayerDirty(Id);
+                    CentralController.Instance?.MarkRobotLayerDirty(Id);
+                    lastRealtimeFlushTime = currentTime;
                 }
             }
         }
@@ -1452,9 +1683,79 @@ namespace CentralControl.RobotControl
                 if ((IsMoving || isBackingUp) && !isWaitingForPicking)
                 {
                     CheckSurroundings();
+                    UpdateDWAState();
                 }
                 yield return wait;
             }
+        }
+
+        private void UpdateDWAState()
+        {
+            if (!IsMoving || isWaitingForPicking || currentPath == null || currentPathIndex >= currentPath.Count)
+            {
+                useDWA = false;
+                dwaVelocityValid = false;
+                return;
+            }
+
+            // Reuse cached obstacles from CheckSurroundings — no redundant OverlapSphere
+            Collider[] nearby = cachedNearbyDynamicObstacles;
+            if (nearby == null || nearby.Length == 0)
+            {
+                useDWA = false;
+                dwaVelocityValid = false;
+                return;
+            }
+
+            bool hasNearbyObstacles = false;
+            foreach (var col in nearby)
+            {
+                if (col.gameObject != gameObject)
+                {
+                    hasNearbyObstacles = true;
+                    break;
+                }
+            }
+
+            if (hasNearbyObstacles)
+            {
+                useDWA = true;
+                dwaPlanner.MaxSpeed = defaultSpeed;
+                dwaPlanner.MaxAccel = maxAcceleration;
+                dwaPlanner.ObstacleLayer = obstacleLayer;
+
+                Vector3 goalPos = GetConnectionPointPosition(currentPath[currentPathIndex]);
+                var filteredNearby = System.Array.FindAll(nearby, col => col != null && col.gameObject != gameObject);
+                var (velocity, needReplan) = dwaPlanner.CalculateVelocity(
+                    transform.position, currentVelocity, goalPos, filteredNearby);
+
+                dwaVelocity = velocity;
+                dwaVelocityValid = true;
+
+                if (needReplan)
+                {
+                    Debug.LogWarning($"Robot {Id}: DWA requests replan — no safe velocity found");
+                    RequestReplan("DWANoSafeVelocity");
+                }
+            }
+            else
+            {
+                useDWA = false;
+                dwaVelocityValid = false;
+            }
+        }
+
+        private bool IsInsideReservedCorridor(Vector3 worldPos)
+        {
+            if (currentPath == null || currentPathIndex >= currentPath.Count) return false;
+            CellSpace corridorCell = indoorSpace?.GetCellSpaceFromConnectionPoint(currentPath[currentPathIndex], true);
+            if (corridorCell == null) return false;
+
+            string floor = GetFloorLevelFromPosition(worldPos);
+            if (corridorCell.GetLocatedFloor() != floor) return false;
+
+            var point = new NetTopologySuite.Geometries.Point(worldPos.x, worldPos.z);
+            return corridorCell.Space.Contains(point);
         }
 
         private void RecordPathPosition()
@@ -1539,6 +1840,21 @@ namespace CentralControl.RobotControl
         /// <returns>True if safe, false otherwise</returns>
         public bool IsSafeBackupTarget(Vector3 target, bool allowLateralWithinCell = false)
         {
+            // Floor-level check: backup target must be on the current floor
+            string currentFloor = GetFloorLevelFromPosition(transform.position);
+            string targetFloor = GetFloorLevelFromPosition(target);
+            if (currentFloor != targetFloor)
+            {
+                return false;
+            }
+
+            // Navigability check: target must be in a navigable cell
+            CellSpace targetCell = indoorSpace?.GetCellSpaceFromCoordinates(target, targetFloor);
+            if (targetCell == null || !targetCell.IsNavigable())
+            {
+                return false;
+            }
+
             float robotRadius = 1.5f;
             var robotCollider = GetComponent<Collider>();
             if (robotCollider != null)
@@ -1739,7 +2055,10 @@ namespace CentralControl.RobotControl
             behaviorBeforeBackup = currentBehavior;
             isBackingUp = true;
             navigationEnabled = false;
-            
+
+            // Immediate flush: entering backup state
+            CentralController.Instance?.FlushRobotLayer(Id);
+
             Debug.Log($"Robot {Id}: Starting backup to {backupTarget}, will wait {waitTime:F2}s");
             
             currentVelocity = Vector3.zero;
@@ -1756,8 +2075,15 @@ namespace CentralControl.RobotControl
             float elapsedTime = 0f;
             while (elapsedTime < backupTime)
             {
+                // Continuous collision check during backup
+                Vector3 nextPos = transform.position + backupDirection * backupSpeed * Time.deltaTime;
+                if (!IsSafeBackupTarget(nextPos))
+                {
+                    Debug.Log($"Robot {Id}: Backup aborted — obstacle detected at {nextPos}");
+                    break;
+                }
+
                 currentVelocity = backupDirection * backupSpeed;
-                
                 elapsedTime += Time.deltaTime;
                 yield return null;
             }
@@ -1800,7 +2126,13 @@ namespace CentralControl.RobotControl
                 }
                 else if (currentPath != null && currentPath.Count > 0 && currentPathIndex < currentPath.Count)
                 {
-                    if (hasReportedArrival && currentOrder.PickingPoint != null)
+                    // Check if backup moved us outside the reserved corridor
+                    if (!IsInsideReservedCorridor(transform.position))
+                    {
+                        Debug.Log($"Robot {Id}: Backup ended outside reserved corridor, forcing replan");
+                        StartCoroutine(ReplanPath());
+                    }
+                    else if (hasReportedArrival && currentOrder.PickingPoint != null)
                     {
                         SetBehavior(RobotBehavior.PickingPending);
                         Debug.Log($"Robot {Id}: Resuming as PickingPending after backup");
@@ -1821,6 +2153,9 @@ namespace CentralControl.RobotControl
             {
                 SetBehavior(RobotBehavior.Idle);
             }
+
+            // Immediate flush: backup changed robot position, occupancy must update
+            CentralController.Instance?.FlushRobotLayer(Id);
 
             // Notify collision recovery completion for metrics
             if (collisionRecoveryManager != null)
@@ -1914,7 +2249,8 @@ namespace CentralControl.RobotControl
         public void RequestReplan(string reason)
         {
             if (isReplanning) return;
-            
+            pathExecutionGuard = false;
+
             Debug.Log($"Robot {Id}: Replan requested, reason: {reason}");
             
             StartCoroutine(DelayedReplan(reason));
@@ -1956,8 +2292,23 @@ namespace CentralControl.RobotControl
                 lastCollisionClearTime = Time.time;
             }
 
+            // Process pending collision records from OnCollisionEnter
+            if (pendingCollisions.Count > 0)
+            {
+                foreach (var record in pendingCollisions)
+                {
+                    if (record.OtherGameObject != null && !recentCollisions.Contains(record.OtherGameObject))
+                    {
+                        recentCollisions.Add(record.OtherGameObject);
+                    }
+                }
+                pendingCollisions.Clear();
+            }
+
             LayerMask dynamicObstacleLayer = LayerMask.GetMask("RobotLayer", "PickerLayer");
             Collider[] hitColliders = Physics.OverlapSphere(transform.position, detectionRadius, dynamicObstacleLayer);
+            // Cache for DWA reuse — avoid redundant OverlapSphere in UpdateDWAState
+            cachedNearbyDynamicObstacles = hitColliders;
             bool emergencySituation = false;
             bool shouldSlowDown = false;
             float closestObstacleDistance = float.MaxValue;
@@ -2030,7 +2381,9 @@ namespace CentralControl.RobotControl
                                 currentSpeed = 0f;
                                 currentAcceleration = 0f;
 
-                                if (currentOrder?.PickingPoint != null)
+                                if (currentOrder?.PickingPoint != null &&
+                                    !PickingQueueManager.Instance.IsRobotInQueueOrActive(
+                                        currentOrder.PickingPoint.Id, Id.ToString()))
                                 {
                                     PickingQueueManager.Instance.RegisterArrival(currentOrder.PickingPoint.Id, Id.ToString());
                                 }
@@ -2054,7 +2407,8 @@ namespace CentralControl.RobotControl
                         else if (!otherRobotSamePickingPoint)
                         {
                             emergencySituation = true;
-                            if (!IsEmergencyStopped && !IsQueuing && !IsPickingPending && !IsAdvancingInQueue)
+                            if (!IsEmergencyStopped && !IsQueuing && !IsPickingPending
+                                && !IsAdvancingInQueue && !isBackingUp)
                             {
                                 SetBehavior(RobotBehavior.EmergencyStopped);
                                 lastEmergencyStopTime = Time.time;
@@ -2116,7 +2470,7 @@ namespace CentralControl.RobotControl
                     else if (isRobotObstacle && otherRobotInQueue && !IsPickingPending && !IsAdvancingInQueue)
                     {
                         emergencySituation = true;
-                        if (!IsEmergencyStopped)
+                        if (!IsEmergencyStopped && !isBackingUp)
                         {
                             SetBehavior(RobotBehavior.EmergencyStopped);
                             lastEmergencyStopTime = Time.time;
@@ -2151,11 +2505,15 @@ namespace CentralControl.RobotControl
             
             if (IsEmergencyStopped && !emergencySituation && !isBackingUp)
             {
+                if (Time.time - lastEmergencyStopExitTime < EMERGENCY_STOP_HYSTERESIS)
+                    return;
+
                 float safeResumeDistance = emergencyStopDistance * 1.5f;
                 bool canResume = hitColliders.Length == 0 || closestObstacleDistance > safeResumeDistance;
-                
+
                 if (canResume)
                 {
+                    lastEmergencyStopExitTime = Time.time;
                     ResumeFromEmergencyStop();
                 }
             }
@@ -2304,7 +2662,7 @@ namespace CentralControl.RobotControl
         {
             yield return new WaitForSeconds(0.1f);
             
-            if (currentOrder != null && finalDestination != Vector3.zero)
+            if (currentOrder != null && hasFinalDestination)
             {
                 Debug.Log($"Robot {Id}: Resuming movement to destination {finalDestination}");
 
@@ -2362,16 +2720,26 @@ namespace CentralControl.RobotControl
         {
             if (collision.gameObject.layer == LayerMask.NameToLayer("GroundLayer"))
                 return;
-            
+
+            // Extract collision data immediately — physics engine reuses Collision objects
+            Vector3 contactPoint = collision.contactCount > 0 ? collision.GetContact(0).point : collision.transform.position;
+            pendingCollisions.Add(new PendingCollisionRecord
+            {
+                ContactPoint = contactPoint,
+                OtherInstanceId = collision.gameObject.GetInstanceID(),
+                OtherGameObject = collision.gameObject,
+                Timestamp = Time.time
+            });
+
             // Queue state robots should not trigger backup recovery - they handle collisions via CheckSurroundings
             if (IsQueuing || IsAdvancingInQueue || IsPickingPending)
             {
                 return;
             }
-                    
+
             GameObject collisionObject = collision.gameObject;
             string collisionObjectName = collisionObject.name;
-            
+
             Debug.LogWarning($"Robot {Id}: Detected collision with {collisionObjectName} at time {Time.time}");
             
             if (CentralController.Instance != null && CentralController.Instance.TryGetRobotId(collisionObject, out int otherRobotId))
@@ -2575,19 +2943,17 @@ namespace CentralControl.RobotControl
             currentPlanId = planId;
             pendingPlanId = null;
 
-            // Adjust waiting time
-            float newStartTime = newTimes[0];
-            float currentTime = Time.time;
-            float waitTime = Math.Max(0, newStartTime - currentTime);
-
-            // If there's an existing waiting coroutine, stop it
             if (waitForExecutionCoroutine != null)
             {
                 StopCoroutine(waitForExecutionCoroutine);
+                waitForExecutionCoroutine = null;
             }
 
-            // Execute new waiting time
-            waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
+            pendingExecutionStartTime = newTimes[0];
+            SetBehavior(RobotBehavior.Moving);
+
+            // Immediate flush after path modification
+            CentralController.Instance?.FlushRobotLayer(Id);
         }
 
         private void ApplySpeedAdjustmentModification(
@@ -2633,22 +2999,17 @@ namespace CentralControl.RobotControl
             currentPlanId = planId;
             pendingPlanId = null;
 
-            // Adjust waiting time
-            float newStartTime = newTimes[0];
-            float currentTime = Time.time;
-            float waitTime = Math.Max(0, newStartTime - currentTime);
-
-            // If there's an existing waiting coroutine, stop it
             if (waitForExecutionCoroutine != null)
             {
                 StopCoroutine(waitForExecutionCoroutine);
+                waitForExecutionCoroutine = null;
             }
 
-            // Execute new waiting time
-            waitForExecutionCoroutine = StartCoroutine(WaitForExecution(waitTime));
-
-            // Notify state change
+            pendingExecutionStartTime = newTimes[0];
             SetBehavior(RobotBehavior.Moving);
+
+            // Immediate flush after path modification
+            CentralController.Instance?.FlushRobotLayer(Id);
         }
 
         private void UpdatePathSegmentsWithSpeed(List<ConnectionPoint> path, List<float> times, List<float> speeds)
@@ -2689,11 +3050,21 @@ namespace CentralControl.RobotControl
             }
             
             Debug.Log($"Robot {Id}: Starting path execution, path length: {currentPath.Count}");
-            
+
             SetBehavior(RobotBehavior.Moving);
             
             // Reset path tracking index
             currentPathIndex = 0;
+        }
+
+        private void TryBeginAcceptedPathExecution()
+        {
+            if (currentPath == null || currentPath.Count == 0) return;
+            if (Time.time < pendingExecutionStartTime) return;
+
+            BeginPathExecution();
+            pendingExecutionStartTime = 0f; // Reset
+            pathExecutionGuard = false;
         }
         #endregion
 
@@ -2727,11 +3098,22 @@ namespace CentralControl.RobotControl
             if (e.RobotId != Id.ToString())
                 return;
 
+            if (pathExecutionGuard) return;
+            pathExecutionGuard = true;
+
             // Staleness check: if pendingPlanId has been overwritten by a newer replan,
             // this accept is stale and should be ignored.
             if (e.PlanId != pendingPlanId)
             {
                 Debug.LogWarning($"Robot {Id}: Stale path accept for plan {e.PlanId}, current pending is {pendingPlanId}. Ignoring.");
+                pathExecutionGuard = false;
+                return;
+            }
+
+            if (e.PlanId == lastSwappedPlanId)
+            {
+                Debug.LogWarning($"Robot {Id}: Plan {e.PlanId} already swapped, ignoring duplicate");
+                pathExecutionGuard = false;
                 return;
             }
 
@@ -2769,10 +3151,17 @@ namespace CentralControl.RobotControl
             }
             activeConfirmedPlanId = e.PlanId;
             currentPlanId = e.PlanId;
+            lastSwappedPlanId = e.PlanId;
             pendingPlanId = null;
 
-            // Execute response logic such as starting path execution
-            BeginPathExecution();
+            // Immediate flush: path accepted, personal layer has new planned occupancies
+            CentralController.Instance?.FlushRobotLayer(Id);
+
+            // Do NOT call BeginPathExecution() directly.
+            // Set pending execution start time; actual execution begins when
+            // local clock reaches the planned start time (TryBeginAcceptedPathExecution).
+            pendingExecutionStartTime = (e.Times != null && e.Times.Count > 0) ? e.Times[0] : Time.time;
+            SetBehavior(RobotBehavior.Moving); // Mark as ready to execute
         }
 
         private void HandlePickingCompletedEvent(object sender, PickingEventArgs e)
@@ -2890,7 +3279,7 @@ namespace CentralControl.RobotControl
         {
             if (targetIndicator != null)
             {
-                if (currentOrder != null && finalDestination != Vector3.zero)
+                if (currentOrder != null && hasFinalDestination)
                 {
                     targetIndicator.gameObject.SetActive(true);
                     targetIndicator.position = finalDestination;
@@ -2935,6 +3324,37 @@ namespace CentralControl.RobotControl
             }
 
             string floorLevel = cp.FloorLevel;
+
+            // Vertical CPs span multiple floors — FloorLevel is null.
+            // Resolve from associated CellSpaces (same logic as Graph.GetFloorLevelForConnectionPoint).
+            if (string.IsNullOrEmpty(floorLevel) && cp.IsVertical() && indoorSpace != null)
+            {
+                CellSpace sourceCell = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Source);
+                CellSpace targetCell = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Target);
+
+                if (sourceCell != null && targetCell != null)
+                {
+                    string sourceFloor = sourceCell.GetLocatedFloor();
+                    string targetFloor = targetCell.GetLocatedFloor();
+                    if (!string.IsNullOrEmpty(sourceFloor) && !string.IsNullOrEmpty(targetFloor))
+                    {
+                        int srcNum = ParseFloorLevel(sourceFloor);
+                        int tgtNum = ParseFloorLevel(targetFloor);
+                        floorLevel = srcNum <= tgtNum ? sourceFloor : targetFloor;
+                    }
+                    else
+                    {
+                        floorLevel = sourceFloor ?? targetFloor;
+                    }
+                }
+            }
+
+            // If still null after vertical resolution, use robot's current height
+            if (string.IsNullOrEmpty(floorLevel))
+            {
+                return transform.position.y;
+            }
+
             return GetFloorHeight(floorLevel);
         }
         
