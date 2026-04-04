@@ -223,7 +223,17 @@ namespace CentralControl.RobotControl
         private bool useDWA = false;
         private Vector3 dwaVelocity = Vector3.zero;
         private bool dwaVelocityValid = false;
+        private float dwaSelectedOmega = 0f;
         private Collider[] cachedNearbyDynamicObstacles = System.Array.Empty<Collider>();
+        private float currentOmega = 0f;
+        private Quaternion previousRotation;
+        private float dwaActivationTime = 0f;
+        private int dwaConsecutiveReplanCount = 0;
+        private const float DWA_ACTIVATION_DISTANCE = 2.0f;
+        private const float DWA_MIN_ACTIVE_DURATION = 0.2f;
+        private const int MAX_DWA_REPLAN_ATTEMPTS = 3;
+        private const float DWA_FORWARD_ARC_DOT = 0.5f; // cos(60°) = 120° forward cone
+        private readonly List<ObstacleData> dwaObstacleBuffer = new List<ObstacleData>(16);
         #endregion
 
         #region Event
@@ -261,13 +271,20 @@ namespace CentralControl.RobotControl
             }
 
             targetRotation = transform.rotation;
+            previousRotation = transform.rotation;
             detectionRadius = baseDetectionRadius;
             obstacleLayer = LayerMask.GetMask("RobotLayer", "PickerLayer", "CollisionLayer", "BoundaryWall");
 
             recentCollisions = new List<GameObject>();
             lastCollisionClearTime = Time.time;
 
-            dwaPlanner = new DWAPlanner();
+            dwaPlanner = new DWAPlanner
+            {
+                MaxSpeed = defaultSpeed,
+                MaxAccel = maxAcceleration,
+                MaxDecel = maxDeceleration,
+                DeltaTime = COLLISION_CHECK_INTERVAL
+            };
         }
 
         private void Start()
@@ -341,7 +358,18 @@ namespace CentralControl.RobotControl
 
             if (currentVelocity.sqrMagnitude > 0.001f)
             {
-                rb.MovePosition(rb.position + currentVelocity * Time.fixedDeltaTime);
+                Vector3 newPos = rb.position + currentVelocity * Time.fixedDeltaTime;
+                var boundary = MapBoundary.Instance;
+                if (boundary != null)
+                {
+                    Vector3 clamped = boundary.ClampPosition(newPos);
+                    if (clamped != newPos)
+                    {
+                        Debug.LogWarning($"Robot {Id}: Position clamped from {newPos} to {clamped} by map boundary");
+                        newPos = clamped;
+                    }
+                }
+                rb.MovePosition(newPos);
             }
 
             rb.MoveRotation(targetRotation);
@@ -1066,39 +1094,41 @@ namespace CentralControl.RobotControl
 
             currentVelocity = moveDirection * currentSpeed;
 
-            // DWA override: when active, use DWA-computed velocity instead of
-            // geometric waypoint following
+            // DWA override: use cached arc trajectory for corridor validation
             if (useDWA && dwaVelocityValid)
             {
-                // Corridor constraint: validate DWA trajectory stays in reserved corridor
+                float dwaV = dwaVelocity.magnitude;
+                float dwaW = dwaSelectedOmega;
+
+                // Reuse trajectory cached by CalculateVelocity (avoids duplicate SimulateArc)
                 bool trajectoryValid = true;
-                for (float t = 0f; t <= dwaPlanner.PredictionTime; t += 0.3f)
+                var arcPoints = dwaPlanner.LastSelectedTrajectory;
+                if (arcPoints != null)
                 {
-                    Vector3 predicted = transform.position + dwaVelocity * t;
-                    if (!IsInsideReservedCorridor(predicted))
+                    for (int i = 1; i < arcPoints.Count; i++)
                     {
-                        trajectoryValid = false;
-                        break;
+                        if (!IsInsideReservedCorridor(arcPoints[i]))
+                        {
+                            trajectoryValid = false;
+                            break;
+                        }
                     }
                 }
 
                 if (trajectoryValid)
                 {
                     currentVelocity = dwaVelocity;
-                    currentSpeed = dwaVelocity.magnitude;
+                    currentSpeed = dwaV;
 
-                    Vector3 dwaDir = new Vector3(dwaVelocity.x, 0, dwaVelocity.z).normalized;
-                    if (dwaDir.sqrMagnitude > 0.04f)
-                    {
-                        Quaternion desiredRotation = Quaternion.LookRotation(dwaDir);
-                        targetRotation = Quaternion.Slerp(rb.rotation, desiredRotation, Time.deltaTime * rotationSpeed);
-                    }
+                    // Direct rotation from omega — bypass Slerp for arc fidelity
+                    targetRotation = rb.rotation *
+                        Quaternion.Euler(0f, dwaW * Mathf.Rad2Deg * Time.deltaTime, 0f);
                     return;
                 }
                 // else: DWA trajectory leaves corridor, fall through to normal waypoint following
             }
 
-            // Rotate toward target direction (unchanged — Slerp gives smooth rotation)
+            // Normal rotation: Slerp toward target direction
             if (horizontalDirection.sqrMagnitude > 0.04f)
             {
                 Quaternion desiredRotation = Quaternion.LookRotation(horizontalDirection);
@@ -1248,7 +1278,16 @@ namespace CentralControl.RobotControl
             yield return new WaitForSeconds(transitTime);
 
             // Teleport to target floor height
-            Vector3 newPos = new Vector3(transform.position.x, targetY, transform.position.z);
+            float clampedX = transform.position.x;
+            float clampedZ = transform.position.z;
+            var boundary = MapBoundary.Instance;
+            if (boundary != null)
+            {
+                Vector3 clampedXZ = boundary.ClampPosition(new Vector3(clampedX, 0f, clampedZ));
+                clampedX = clampedXZ.x;
+                clampedZ = clampedXZ.z;
+            }
+            Vector3 newPos = new Vector3(clampedX, targetY, clampedZ);
             if (rb != null)
             {
                 rb.MovePosition(newPos);
@@ -1262,6 +1301,9 @@ namespace CentralControl.RobotControl
             Debug.Log($"Robot {Id}: {transportType} transport complete, arrived at {toFloor} (y={targetY:F2})");
 
             isExecutingVerticalTransport = false;
+            currentOmega = 0f;
+            previousRotation = rb.rotation;
+            dwaPlanner.Reset();
             SetBehavior(RobotBehavior.Moving);
         }
 
@@ -1680,69 +1722,125 @@ namespace CentralControl.RobotControl
             WaitForSeconds wait = new WaitForSeconds(COLLISION_CHECK_INTERVAL);
             while (true)
             {
-                if ((IsMoving || isBackingUp) && !isWaitingForPicking)
+                if ((IsMoving || isBackingUp) && !isWaitingForPicking && !isExecutingVerticalTransport)
                 {
                     CheckSurroundings();
+                    UpdateOmegaTracking();
                     UpdateDWAState();
                 }
                 yield return wait;
             }
         }
 
+        private void UpdateOmegaTracking()
+        {
+            float dt = COLLISION_CHECK_INTERVAL;
+            if (dt < 0.001f) dt = 0.05f;
+            float angleDeg = Quaternion.Angle(previousRotation, rb.rotation);
+            Vector3 cross = Vector3.Cross(previousRotation * Vector3.forward, rb.rotation * Vector3.forward);
+            float sign = cross.y >= 0f ? 1f : -1f;
+            currentOmega = Mathf.Clamp(sign * angleDeg * Mathf.Deg2Rad / dt, -dwaPlanner.MaxOmega, dwaPlanner.MaxOmega);
+            previousRotation = rb.rotation;
+        }
+
         private void UpdateDWAState()
         {
-            if (!IsMoving || isWaitingForPicking || currentPath == null || currentPathIndex >= currentPath.Count)
+            if (currentBehavior != RobotBehavior.Moving
+                || isWaitingForPicking
+                || isExecutingVerticalTransport
+                || isBackingUp
+                || currentPath == null
+                || currentPathIndex >= currentPath.Count)
             {
-                useDWA = false;
-                dwaVelocityValid = false;
+                DeactivateDWA();
                 return;
             }
 
-            // Reuse cached obstacles from CheckSurroundings — no redundant OverlapSphere
             Collider[] nearby = cachedNearbyDynamicObstacles;
             if (nearby == null || nearby.Length == 0)
             {
-                useDWA = false;
-                dwaVelocityValid = false;
+                if (!IsWithinDWAHysteresis()) DeactivateDWA();
                 return;
             }
 
-            bool hasNearbyObstacles = false;
+            Vector3 forward = transform.forward;
+            bool hasForwardObstacle = false;
+            dwaObstacleBuffer.Clear();
+
             foreach (var col in nearby)
             {
-                if (col.gameObject != gameObject)
+                if (col == null || col.gameObject == gameObject) continue;
+                Vector3 toObstacle = col.transform.position - transform.position;
+                toObstacle.y = 0f;
+                float dist = toObstacle.magnitude;
+
+                float radius = Mathf.Max(col.bounds.extents.x, col.bounds.extents.z);
+                dwaObstacleBuffer.Add(new ObstacleData(col.transform.position, radius));
+
+                if (dist < DWA_ACTIVATION_DISTANCE && dist > 0.01f)
                 {
-                    hasNearbyObstacles = true;
-                    break;
+                    float dot = Vector3.Dot(forward, toObstacle.normalized);
+                    if (dot > DWA_FORWARD_ARC_DOT)
+                        hasForwardObstacle = true;
                 }
             }
 
-            if (hasNearbyObstacles)
+            if (!hasForwardObstacle && !IsWithinDWAHysteresis())
             {
-                useDWA = true;
-                dwaPlanner.MaxSpeed = defaultSpeed;
-                dwaPlanner.MaxAccel = maxAcceleration;
-                dwaPlanner.ObstacleLayer = obstacleLayer;
+                DeactivateDWA();
+                return;
+            }
 
-                Vector3 goalPos = GetConnectionPointPosition(currentPath[currentPathIndex]);
-                var filteredNearby = System.Array.FindAll(nearby, col => col != null && col.gameObject != gameObject);
-                var (velocity, needReplan) = dwaPlanner.CalculateVelocity(
-                    transform.position, currentVelocity, goalPos, filteredNearby);
+            if (!useDWA) dwaActivationTime = Time.time;
+            useDWA = true;
 
-                dwaVelocity = velocity;
-                dwaVelocityValid = true;
+            dwaPlanner.MaxSpeed = defaultSpeed;
+            dwaPlanner.MaxAccel = maxAcceleration;
+            dwaPlanner.MaxDecel = maxDeceleration;
 
-                if (needReplan)
+            Vector3 goalPos = GetConnectionPointPosition(currentPath[currentPathIndex]);
+            var result = dwaPlanner.CalculateVelocity(
+                transform.position, transform.rotation, currentSpeed, currentOmega,
+                goalPos, dwaObstacleBuffer);
+
+            if (result.NeedReplan)
+            {
+                dwaVelocity = Vector3.zero;
+                dwaSelectedOmega = 0f;
+                dwaVelocityValid = false;
+                dwaPlanner.Reset();
+
+                dwaConsecutiveReplanCount++;
+                if (dwaConsecutiveReplanCount < MAX_DWA_REPLAN_ATTEMPTS)
                 {
-                    Debug.LogWarning($"Robot {Id}: DWA requests replan — no safe velocity found");
+                    Debug.LogWarning($"Robot {Id}: DWA no safe velocity ({dwaConsecutiveReplanCount}/{MAX_DWA_REPLAN_ATTEMPTS})");
                     RequestReplan("DWANoSafeVelocity");
+                }
+                else
+                {
+                    Debug.LogWarning($"Robot {Id}: DWA replan limit reached — staying stopped");
                 }
             }
             else
             {
-                useDWA = false;
-                dwaVelocityValid = false;
+                dwaConsecutiveReplanCount = 0;
+                dwaVelocity = transform.forward * result.LinearVelocity;
+                dwaSelectedOmega = result.AngularVelocity;
+                dwaVelocityValid = true;
             }
+        }
+
+        private void DeactivateDWA()
+        {
+            useDWA = false;
+            dwaVelocityValid = false;
+            dwaSelectedOmega = 0f;
+            dwaPlanner.Reset();
+        }
+
+        private bool IsWithinDWAHysteresis()
+        {
+            return useDWA && (Time.time - dwaActivationTime) < DWA_MIN_ACTIVE_DURATION;
         }
 
         private bool IsInsideReservedCorridor(Vector3 worldPos)
@@ -1840,6 +1938,13 @@ namespace CentralControl.RobotControl
         /// <returns>True if safe, false otherwise</returns>
         public bool IsSafeBackupTarget(Vector3 target, bool allowLateralWithinCell = false)
         {
+            // Boundary check: reject targets outside map bounds
+            var mapBoundary = MapBoundary.Instance;
+            if (mapBoundary != null && !mapBoundary.IsInsideBounds(target))
+            {
+                return false;
+            }
+
             // Floor-level check: backup target must be on the current floor
             string currentFloor = GetFloorLevelFromPosition(transform.position);
             string targetFloor = GetFloorLevelFromPosition(target);
@@ -2914,6 +3019,7 @@ namespace CentralControl.RobotControl
             // result.path in ExecuteOrderCoroutine (which UpdateCurrentMovementInfo will Clear)
             currentPath = new List<ConnectionPoint>(path);
             pathTimes = newTimes;
+            dwaConsecutiveReplanCount = 0;
 
             Debug.Log($"Robot {Id}: Applying time shift modification: {shift}s, new path length: {path.Count}");
 
@@ -2967,6 +3073,7 @@ namespace CentralControl.RobotControl
             // result.path in ExecuteOrderCoroutine (which UpdateCurrentMovementInfo will Clear)
             currentPath = new List<ConnectionPoint>(path);
             pathTimes = newTimes;
+            dwaConsecutiveReplanCount = 0;
 
             Debug.Log($"Robot {Id}: Applying speed adjustment modification: average speed change {avgSpeedChange:F2}x, new path length: {path.Count}");
 
