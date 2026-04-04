@@ -382,23 +382,23 @@ namespace CentralControl
         // System triggers
         public void TriggerMapLoaded()
         {
-            OnMapLoaded?.Invoke();
+            SafeEventInvoker.SafeInvoke(OnMapLoaded);
         }
 
         public void TriggerRobotsInitialized()
         {
-            OnRobotsInitialized?.Invoke();
+            SafeEventInvoker.SafeInvoke(OnRobotsInitialized);
         }
 
         public void TriggerPickersInitialized()
         {
-            OnPickersInitialized?.Invoke();
+            SafeEventInvoker.SafeInvoke(OnPickersInitialized);
         }
 
         // Global occupancy layer triggers
         public void TriggerGlobalOccupancyLayerUpdated(DynamicOccupancyLayer globalLayer, float updateTime)
         {
-            OnGlobalOccupancyLayerUpdated?.Invoke(this, new GlobalOccupancyLayerEventArgs(globalLayer, updateTime));
+            SafeEventInvoker.SafeInvoke(OnGlobalOccupancyLayerUpdated, this, new GlobalOccupancyLayerEventArgs(globalLayer, updateTime));
         }
 
         // Picking triggers
@@ -427,32 +427,32 @@ namespace CentralControl
                 }
             }
 
-            OnRobotReadyForPicking?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
+            SafeEventInvoker.SafeInvoke(OnRobotReadyForPicking, this, new PickingEventArgs(robotId, pickingPoint, location));
         }
 
         public void TriggerPickingCompleted(string robotId, PickingPoint pickingPoint, Vector3 location)
         {
             Debug.Log($"EventManager: Picking completed for robot {robotId} at {location}");
-            OnPickingCompleted?.Invoke(this, new PickingEventArgs(robotId, pickingPoint, location));
+            SafeEventInvoker.SafeInvoke(OnPickingCompleted, this, new PickingEventArgs(robotId, pickingPoint, location));
         }
 
         // Path triggers
         public void TriggerRobotPathPlanned(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
         {
             Debug.Log($"EventManager: Robot {robotId} planned a path with {path.Count} points");
-            OnRobotPathPlanned?.Invoke(this, new RobotPathEventArgs(robotId, planId, path, times, speeds));
+            SafeEventInvoker.SafeInvoke(OnRobotPathPlanned, this, new RobotPathEventArgs(robotId, planId, path, times, speeds));
         }
 
         public void TriggerRobotPathModified(RobotPathModificationEventArgs args)
         {
             Debug.Log($"EventManager: Triggered robot path modification event: Robot {args.RobotId}, Type {args.ModificationType}, Value {args.ModificationValue}");
-            OnRobotPathModified?.Invoke(this, args);
+            SafeEventInvoker.SafeInvoke(OnRobotPathModified, this, args);
         }
 
         public void TriggerRobotPathAccepted(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
         {
             Debug.Log($"EventManager: Robot {robotId}'s path {planId} has been accepted, with {path.Count} points");
-            OnRobotPathAccepted?.Invoke(this, new RobotPathAcceptedEventArgs(robotId, planId, path, times, speeds));
+            SafeEventInvoker.SafeInvoke(OnRobotPathAccepted, this, new RobotPathAcceptedEventArgs(robotId, planId, path, times, speeds));
         }
 
         // Collision triggers
@@ -481,7 +481,7 @@ namespace CentralControl
 
             robotCollisions[collisionId] = args;
 
-            OnRobotCollisionDetected?.Invoke(this, args);
+            SafeEventInvoker.SafeInvoke(OnRobotCollisionDetected, this, args);
         }
 
         public void ReportEnvironmentCollision(string robotId, string environmentObjectId, GameObject collisionObject, float time, Vector3 position = default)
@@ -507,7 +507,7 @@ namespace CentralControl
 
             environmentCollisions[collisionId] = args;
 
-            OnRobotCollisionDetected?.Invoke(this, args);
+            SafeEventInvoker.SafeInvoke(OnRobotCollisionDetected, this, args);
         }
 
         public List<CollisionEventArgs> GetAllRobotCollisions()
@@ -604,24 +604,24 @@ namespace CentralControl
         public void TriggerRequestGlobalMapUpdate(params int[] robotIds)
         {
             Debug.Log($"EventManager: Global map update requested by robots: {string.Join(", ", robotIds)}");
-            OnRequestGlobalMapUpdate?.Invoke(this, new GlobalMapUpdateRequestEventArgs(robotIds, Time.time));
+            SafeEventInvoker.SafeInvoke(OnRequestGlobalMapUpdate, this, new GlobalMapUpdateRequestEventArgs(robotIds, Time.time));
         }
 
         public void TriggerOrderCompleted(string orderId, string robotId)
         {
             Debug.Log($"EventManager: Order {orderId} completed by Robot {robotId}");
-            OnOrderCompleted?.Invoke(orderId, robotId);
+            SafeEventInvoker.SafeInvoke(OnOrderCompleted, orderId, robotId);
         }
 
         public void TriggerOrderFailed(string orderId, string robotId, string reason)
         {
             Debug.LogWarning($"EventManager: Order {orderId} failed by Robot {robotId}: {reason}");
-            OnOrderFailed?.Invoke(orderId, robotId, reason);
+            SafeEventInvoker.SafeInvoke(OnOrderFailed, orderId, robotId, reason);
         }
 
         public void TriggerOrderAssigned(string orderId, string robotId)
         {
-            OnOrderAssigned?.Invoke(this, new OrderAssignedEventArgs(orderId, robotId, Time.time));
+            SafeEventInvoker.SafeInvoke(OnOrderAssigned, this, new OrderAssignedEventArgs(orderId, robotId, Time.time));
         }
 
         public void TriggerRobotStateChanged(string robotId, string stateName, bool newValue)
@@ -638,43 +638,43 @@ namespace CentralControl
             }
             
             lastStateChangeTime[key] = currentTime;
-            OnRobotStateChanged?.Invoke(this, new RobotStateChangedEventArgs(robotId, stateName, newValue, currentTime));
+            SafeEventInvoker.SafeInvoke(OnRobotStateChanged, this, new RobotStateChangedEventArgs(robotId, stateName, newValue, currentTime));
         }
 
         public void TriggerCollisionRecoveryCompleted(string robotId1, string robotId2, CollisionRecoveryResult result, float recoveryTime, float collisionTime)
         {
             UpdateCollisionRecoveryResult(robotId1, robotId2, collisionTime, result, recoveryTime);
-            OnCollisionRecoveryCompleted?.Invoke(this, new CollisionRecoveryCompletedEventArgs(robotId1, robotId2, result, recoveryTime, collisionTime));
+            SafeEventInvoker.SafeInvoke(OnCollisionRecoveryCompleted, this, new CollisionRecoveryCompletedEventArgs(robotId1, robotId2, result, recoveryTime, collisionTime));
         }
 
         public void TriggerDeadlockDetected(string[] involvedRobotIds)
         {
-            OnDeadlockDetected?.Invoke(this, new DeadlockDetectedEventArgs(involvedRobotIds, Time.time));
+            SafeEventInvoker.SafeInvoke(OnDeadlockDetected, this, new DeadlockDetectedEventArgs(involvedRobotIds, Time.time));
         }
 
         public void TriggerRobotWaitStarted(string robotId, string reason)
         {
-            OnRobotWaitStarted?.Invoke(this, new RobotWaitEventArgs(robotId, reason, Time.time));
+            SafeEventInvoker.SafeInvoke(OnRobotWaitStarted, this, new RobotWaitEventArgs(robotId, reason, Time.time));
         }
 
         public void TriggerRobotWaitEnded(string robotId, string reason)
         {
-            OnRobotWaitEnded?.Invoke(this, new RobotWaitEventArgs(robotId, reason, Time.time));
+            SafeEventInvoker.SafeInvoke(OnRobotWaitEnded, this, new RobotWaitEventArgs(robotId, reason, Time.time));
         }
 
         public void TriggerAreaCongested(string areaId, string[] congestedRobotIds, CongestionLevel level)
         {
-            OnAreaCongested?.Invoke(this, new AreaCongestedEventArgs(areaId, congestedRobotIds, level, Time.time));
+            SafeEventInvoker.SafeInvoke(OnAreaCongested, this, new AreaCongestedEventArgs(areaId, congestedRobotIds, level, Time.time));
         }
 
         public void TriggerCongestionResolved(string areaId)
         {
-            OnCongestionResolved?.Invoke(this, new CongestionResolvedEventArgs(areaId, Time.time));
+            SafeEventInvoker.SafeInvoke(OnCongestionResolved, this, new CongestionResolvedEventArgs(areaId, Time.time));
         }
 
         public void TriggerReplanRequested(string robotId, string reason, float suggestedDelay = 0f)
         {
-            OnReplanRequested?.Invoke(this, new ReplanRequestEventArgs(robotId, reason, Time.time, suggestedDelay));
+            SafeEventInvoker.SafeInvoke(OnReplanRequested, this, new ReplanRequestEventArgs(robotId, reason, Time.time, suggestedDelay));
         }
 
         public void TriggerSimulationMetricsSnapshot(
@@ -682,7 +682,7 @@ namespace CentralControl
             float avgTurnaround, float avgUtilization, int deadlocks,
             int activeRobots, int idleRobots, int pendingOrders, int completedOrders)
         {
-            OnSimulationMetricsSnapshot?.Invoke(this, new SimulationMetricsSnapshotEventArgs(
+            SafeEventInvoker.SafeInvoke(OnSimulationMetricsSnapshot, this, new SimulationMetricsSnapshotEventArgs(
                 simulationTime, throughput, completionRate,
                 avgTurnaround, avgUtilization, deadlocks,
                 activeRobots, idleRobots, pendingOrders, completedOrders
@@ -714,7 +714,7 @@ namespace CentralControl
 
             pathPlanningMetrics[metricsId] = metrics;
 
-            OnPathPlanningMetricsRecorded?.Invoke(this, new PathPlanningMetricsEventArgs(metrics));
+            SafeEventInvoker.SafeInvoke(OnPathPlanningMetricsRecorded, this, new PathPlanningMetricsEventArgs(metrics));
         }
 
         public List<PathPlanningMetrics> GetAllPathPlanningMetrics()

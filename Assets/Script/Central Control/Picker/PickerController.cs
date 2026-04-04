@@ -39,9 +39,10 @@ namespace CentralControl.PickerControl
         private HashSet<PickerState> currentStates = new HashSet<PickerState>();
         private Vector3 currentPosition;
         private Vector3 targetPosition;
+        private readonly object _taskLock = new object();
         private Queue<PickingTask> pickingQueue = new Queue<PickingTask>();
         private PickingTask currentTask;
-        private bool isProcessingTasks = false;
+        private volatile bool isProcessingTasks = false;
         private bool isInitialized = false;
         private NavMeshAgent navAgent;
         private Transform baseLocation;
@@ -197,15 +198,14 @@ namespace CentralControl.PickerControl
 
         private IEnumerator HandlePickingRequest(PickingEventArgs args)
         {
-            // Short delay to prevent race conditions with multiple events
             yield return new WaitForSeconds(0.1f);
-            
-            lock (pickingQueue) // Using lock to ensure thread safety
+
+            string pickingPointId = args.PickingPoint.Id;
+            bool alreadyInQueue = false;
+            bool shouldStartProcessing = false;
+
+            lock (_taskLock)
             {
-                string pickingPointId = args.PickingPoint.Id;
-                
-                // First check if this picking point is already in the queue
-                bool alreadyInQueue = false;
                 foreach (var task in pickingQueue)
                 {
                     if (task.PickingPoint.Id == pickingPointId)
@@ -214,28 +214,25 @@ namespace CentralControl.PickerControl
                         break;
                     }
                 }
-                
+
                 if (!alreadyInQueue)
                 {
-                    // Create a new task - 确保任务中的位置是当前楼层
                     Vector3 taskLocation = args.Location;
-                    taskLocation.y = transform.position.y; // 强制使用Picker所在楼层的高度
-                    
+                    taskLocation.y = transform.position.y;
+
                     PickingTask task = new PickingTask(
                         args.RobotId,
                         args.PickingPoint,
                         taskLocation,
-                        currentFloor // 使用Picker的固定楼层
+                        currentFloor
                     );
-                    
-                    // Add to queue
+
                     pickingQueue.Enqueue(task);
                     Debug.Log($"Picker {Id}: Added picking task for robot {args.RobotId} at {taskLocation}");
-                    
-                    // If idle, start processing tasks
+
                     if (IsIdle && !isProcessingTasks)
                     {
-                        StartCoroutine(ProcessPickingTask());
+                        shouldStartProcessing = true;
                     }
                 }
                 else
@@ -243,34 +240,44 @@ namespace CentralControl.PickerControl
                     Debug.Log($"Picker {Id}: Picking point {pickingPointId} is already in queue");
                 }
             }
+
+            if (shouldStartProcessing)
+            {
+                StartCoroutine(ProcessPickingTask());
+            }
         }
 
         private void HandlePickingCompleted(object sender, PickingEventArgs args)
         {
-            lock (pickingQueue) // Using lock to ensure thread safety
+            bool shouldStartProcessing = false;
+
+            lock (_taskLock)
             {
                 if (pickingQueue.Count > 0 && pickingQueue.Peek().RobotId == args.RobotId)
                 {
                     Debug.Log($"Picker {Id}: Finished robot {args.RobotId}'s picking task");
-                    
+
                     SetState(PickerState.Idle, true);
-                    
+
                     try
                     {
-                        pickingQueue.Dequeue(); // Safely remove task
+                        pickingQueue.Dequeue();
                     }
                     catch (InvalidOperationException)
                     {
                         Debug.LogWarning($"Picker {Id}: Attempted to remove task failed, queue may be empty");
-                        // Continue execution, don't throw exception
                     }
                 }
-                
-                // Check if there are more tasks to process
+
                 if (pickingQueue.Count > 0 && !isProcessingTasks)
                 {
-                    StartCoroutine(ProcessPickingTask());
+                    shouldStartProcessing = true;
                 }
+            }
+
+            if (shouldStartProcessing)
+            {
+                StartCoroutine(ProcessPickingTask());
             }
         }
 
@@ -280,50 +287,49 @@ namespace CentralControl.PickerControl
             {
                 yield break;
             }
-            
+
             isProcessingTasks = true;
-            
-            while (pickingQueue.Count > 0)
+
+            bool hasMoreTasks = true;
+            while (hasMoreTasks)
             {
-                // Get next task
-                lock (pickingQueue)
+                lock (_taskLock)
                 {
+                    if (pickingQueue.Count == 0)
+                    {
+                        hasMoreTasks = false;
+                        continue;
+                    }
                     currentTask = pickingQueue.Peek();
                 }
-                
+
                 if (currentTask == null)
                 {
                     Debug.LogWarning($"Picker {Id}: Current task is null");
-                    yield break;
+                    break;
                 }
-                
+
                 targetPosition = currentTask.Location;
                 Debug.Log($"Picker {Id} processing task: Robot {currentTask.RobotId} at {targetPosition}");
-                
-                // Move to target position
+
                 SetState(PickerState.Moving, true);
                 Debug.Log($"Picker {Id} moving to robot {currentTask.RobotId} at {targetPosition}");
                 yield return StartCoroutine(MoveToPosition(targetPosition));
                 SetState(PickerState.Moving, false);
-                
-                // Picking operation
+
                 SetState(PickerState.Picking, true);
                 Debug.Log($"Picker {Id} starting picking operation");
                 yield return new WaitForSeconds(pickingTime);
                 SetState(PickerState.Picking, false);
-                
-                // Notify system that picking is completed
+
                 if (EventManager.Instance != null)
                 {
                     EventManager.Instance.TriggerPickingCompleted(currentTask.RobotId, currentTask.PickingPoint, currentTask.Location);
                 }
-                
-                // Wait for event handling to complete, ensuring HandlePickingCompleted has time to process
+
                 yield return null;
-                
-                // Safely remove task (if it's still the top task in the queue)
-                // Note: This is just an extra safety measure, normally handled by HandlePickingCompleted
-                lock (pickingQueue)
+
+                lock (_taskLock)
                 {
                     if (pickingQueue.Count > 0 && pickingQueue.Peek().RobotId == currentTask.RobotId)
                     {
@@ -337,9 +343,10 @@ namespace CentralControl.PickerControl
                             Debug.LogWarning($"Picker {Id}: Cannot remove task, queue may be empty");
                         }
                     }
+                    hasMoreTasks = pickingQueue.Count > 0;
                 }
             }
-            
+
             isProcessingTasks = false;
             Debug.Log($"Picker {Id}: All tasks completed");
         }

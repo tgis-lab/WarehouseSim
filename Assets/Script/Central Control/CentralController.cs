@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -94,7 +95,16 @@ namespace CentralControl
         private readonly object dirtyRobotLock = new object();
 
         // Tracks the active plan ID for each robot, used by AtomicSwapGlobalPath
-        private Dictionary<string, string> robotActivePlanIds = new Dictionary<string, string>();
+        private ConcurrentDictionary<string, string> robotActivePlanIds = new ConcurrentDictionary<string, string>();
+
+        private class AcceptedPlanMetadata
+        {
+            public string PlanId;
+            public float AcceptedAt;
+            public float? LastModifiedAt;
+        }
+
+        private readonly Dictionary<string, AcceptedPlanMetadata> acceptedPlanRegistry = new Dictionary<string, AcceptedPlanMetadata>();
 
         #endregion
         
@@ -172,6 +182,12 @@ namespace CentralControl
         private IEnumerator InitializeSystem()
         {
             Debug.Log("[CentralControl] Initializing system...");
+
+            if (mapLoader == null)
+            {
+                Debug.LogError("[CentralControl] MapLoader not assigned in Inspector!");
+                yield break;
+            }
 
             // Wait for the first frame to complete
             yield return null;
@@ -257,6 +273,8 @@ namespace CentralControl
         
         void Update()
         {
+            SafeEventInvoker.ProcessMainThreadQueue();
+
             if (!isInitialized) return;
 
             // Update dynamic occupancy layer (throttled to avoid per-frame overhead)
@@ -265,7 +283,7 @@ namespace CentralControl
                 UpdateDynamicOccupancyLayer();
                 nextDynamicUpdateTime = Time.time + dynamicUpdateInterval;
             }
-            
+
             // Rebuild NavMesh if needed
             if (autoRebuildNavMesh && Time.time >= nextNavMeshRebuildTime)
             {
@@ -658,6 +676,29 @@ namespace CentralControl
             }
         }
 
+        /// <summary>
+        /// Immediately merges a specific robot's personal layer into the global layer.
+        /// Used for time-critical events (checkpoint drift, accept, emergency stop, etc.)
+        /// that cannot wait for the 0.5s periodic merge.
+        /// </summary>
+        public void FlushRobotLayer(int robotId)
+        {
+            var robot = robotManager?.GetRobotById(robotId);
+            if (robot == null || globalOccupancyLayer == null) return;
+
+            var personalLayer = robot.GetPersonalOccupancyLayer();
+            if (personalLayer != null)
+            {
+                globalOccupancyLayer.MergeLayer(personalLayer, Time.time - windowDuration, Time.time + 60, robotId.ToString());
+            }
+
+            // Remove from dirty set since we just flushed
+            lock (dirtyRobotLock)
+            {
+                dirtyRobotIds.Remove(robotId);
+            }
+        }
+
         public DynamicOccupancyLayer GetGlobalOccupancyLayer()
         {
             return globalOccupancyLayer;
@@ -894,8 +935,7 @@ namespace CentralControl
                     // Handle the final result
                     if (conflictResolved)
                     {
-                        // Update path reservation with modified times
-                        AtomicSwapGlobalPath(robotId, planId, path, modifiedTimes);
+                        // Occupancy reservation handled by robot personal layer + merge flush.
                         
                         // Notify robot based on modification type
                         if (modificationType == "time_shift")
@@ -1028,8 +1068,9 @@ namespace CentralControl
                 }
             }
 
-            // No conflicts detected — reserve original path and accept
-            AtomicSwapGlobalPath(e.RobotId, e.PlanId, e.Path, e.Times);
+            // No conflicts detected — accept path directly.
+            // Occupancy reservation is handled by the robot's personal layer + merge flush,
+            // not by CentralController writing to global layer (single truth source principle).
             NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
         }
         
@@ -1039,9 +1080,14 @@ namespace CentralControl
             {
                 var args = new RobotPathModificationEventArgs(
                     robotId, planId, path, newTimes, modificationType, modificationValue);
-                
+
                 EventManager.Instance.TriggerRobotPathModified(args);
                 Debug.Log($"[CentralControl] Notified robot {robotId} of path modification: {modificationType}, value {modificationValue}");
+            }
+
+            if (acceptedPlanRegistry.TryGetValue(robotId, out var meta))
+            {
+                meta.LastModifiedAt = Time.time;
             }
         }
         
@@ -1051,11 +1097,16 @@ namespace CentralControl
             {
                 var args = new RobotPathModificationEventArgs(
                     robotId, planId, path, newTimes, "speed_adjustment", modificationValue);
-                
+
                 args.NewSpeeds = newSpeeds;
-                
+
                 EventManager.Instance.TriggerRobotPathModified(args);
                 Debug.Log($"[CentralControl] Notified robot {robotId} of path modification with speeds: value {modificationValue}");
+            }
+
+            if (acceptedPlanRegistry.TryGetValue(robotId, out var meta))
+            {
+                meta.LastModifiedAt = Time.time;
             }
         }
         
@@ -1067,6 +1118,13 @@ namespace CentralControl
                 EventManager.Instance.TriggerRobotPathAccepted(robotId, planId, path, times, speeds);
                 Debug.Log($"[CentralControl] Notified robot {robotId} that path {planId} was accepted with {path.Count} points");
             }
+
+            acceptedPlanRegistry[robotId] = new AcceptedPlanMetadata
+            {
+                PlanId = planId,
+                AcceptedAt = Time.time,
+                LastModifiedAt = null
+            };
         }
 
         public static void NotifyRobotFree(RobotController robot)

@@ -12,11 +12,12 @@ namespace CentralControl.OrderAssignment
         [Header("Retry Settings")]
         [SerializeField] private float retryDelaySeconds = 5f;
         [SerializeField] private float retryCheckIntervalSeconds = 2f;
-        
+
+        private readonly object _orderLock = new object();
         private List<Order> pendingOrders = new List<Order>();
         private List<Order> failedOrders = new List<Order>();
         private Dictionary<string, Order> allOrders = new Dictionary<string, Order>();
-        
+
         private Coroutine retryCoroutine;
 
         public event Action<Order> OnOrderFailed;
@@ -60,70 +61,94 @@ namespace CentralControl.OrderAssignment
 
         public void AddOrder(Order order)
         {
-            pendingOrders.Add(order);
-            allOrders[order.Id] = order;
+            lock (_orderLock)
+            {
+                pendingOrders.Add(order);
+                allOrders[order.Id] = order;
+            }
             Debug.Log($"Added new order: {order.Id} at {order.Destination} on floor {order.FloorLevel}");
         }
 
         public List<Order> GetAllOrders()
         {
-            return pendingOrders.Where(o => o.Status == OrderStatus.Pending)
-                               .OrderBy(o => o.Priority)
-                               .ToList();
+            lock (_orderLock)
+            {
+                return pendingOrders.Where(o => o.Status == OrderStatus.Pending)
+                                   .OrderBy(o => o.Priority)
+                                   .ToList();
+            }
         }
 
         public Order GetOrderById(string id)
         {
-            allOrders.TryGetValue(id, out var order);
-            return order;
+            lock (_orderLock)
+            {
+                allOrders.TryGetValue(id, out var order);
+                return order;
+            }
         }
 
         public Order GetNextOrder()
         {
-            var order = pendingOrders.Where(o => o.Status == OrderStatus.Pending)
-                                     .OrderBy(o => o.Priority)
-                                     .FirstOrDefault();
-            if (order != null)
+            lock (_orderLock)
             {
-                pendingOrders.Remove(order);
+                var order = pendingOrders.Where(o => o.Status == OrderStatus.Pending)
+                                         .OrderBy(o => o.Priority)
+                                         .FirstOrDefault();
+                if (order != null)
+                {
+                    pendingOrders.Remove(order);
+                }
+                return order;
             }
-            return order;
         }
-        
+
         public List<Order> GetOrdersByFloor(string floorLevel)
         {
-            return pendingOrders.Where(o => o.FloorLevel == floorLevel && o.Status == OrderStatus.Pending)
-                               .OrderBy(o => o.Priority)
-                               .ToList();
+            lock (_orderLock)
+            {
+                return pendingOrders.Where(o => o.FloorLevel == floorLevel && o.Status == OrderStatus.Pending)
+                                   .OrderBy(o => o.Priority)
+                                   .ToList();
+            }
         }
 
         public List<string> GetAllFloors()
         {
-            return pendingOrders.Where(o => o.Status == OrderStatus.Pending)
-                               .Select(o => o.FloorLevel)
-                               .Distinct()
-                               .ToList();
+            lock (_orderLock)
+            {
+                return pendingOrders.Where(o => o.Status == OrderStatus.Pending)
+                                   .Select(o => o.FloorLevel)
+                                   .Distinct()
+                                   .ToList();
+            }
         }
 
         public Dictionary<string, int> GetOrderCountByFloor()
         {
-            return pendingOrders.Where(o => o.Status == OrderStatus.Pending)
-                               .GroupBy(o => o.FloorLevel)
-                               .ToDictionary(g => g.Key, g => g.Count());
+            lock (_orderLock)
+            {
+                return pendingOrders.Where(o => o.Status == OrderStatus.Pending)
+                                   .GroupBy(o => o.FloorLevel)
+                                   .ToDictionary(g => g.Key, g => g.Count());
+            }
         }
-        
+
         public Order GetNextOrderOnFloor(string floorLevel)
         {
-            var order = pendingOrders.Where(o => o.FloorLevel == floorLevel && o.Status == OrderStatus.Pending)
-                                     .OrderBy(o => o.Priority)
-                                     .FirstOrDefault();
-            
-            if (order != null)
+            lock (_orderLock)
             {
-                pendingOrders.Remove(order);
+                var order = pendingOrders.Where(o => o.FloorLevel == floorLevel && o.Status == OrderStatus.Pending)
+                                         .OrderBy(o => o.Priority)
+                                         .FirstOrDefault();
+
+                if (order != null)
+                {
+                    pendingOrders.Remove(order);
+                }
+
+                return order;
             }
-            
-            return order;
         }
         
         public void AddOrders(IEnumerable<Order> newOrders)
@@ -138,17 +163,24 @@ namespace CentralControl.OrderAssignment
 
         public void ReportOrderFailed(string orderId, string reason)
         {
-            if (!allOrders.TryGetValue(orderId, out var order)) return;
-            
+            Order order;
+            lock (_orderLock)
+            {
+                if (!allOrders.TryGetValue(orderId, out order)) return;
+            }
+
             order.MarkFailed(reason);
-            
+
             Debug.LogWarning($"Order {orderId} failed: {reason} (Attempt {order.RetryCount}/{Order.MaxRetries})");
-            
+
             OnOrderFailed?.Invoke(order);
-            
+
             if (order.CanRetry())
             {
-                failedOrders.Add(order);
+                lock (_orderLock)
+                {
+                    failedOrders.Add(order);
+                }
                 OnOrderRetryScheduled?.Invoke(order);
                 Debug.Log($"Order {orderId} scheduled for retry in {retryDelaySeconds}s");
             }
@@ -161,16 +193,24 @@ namespace CentralControl.OrderAssignment
 
         public void ReportOrderCompleted(string orderId)
         {
-            if (!allOrders.TryGetValue(orderId, out var order)) return;
-            
+            Order order;
+            lock (_orderLock)
+            {
+                if (!allOrders.TryGetValue(orderId, out order)) return;
+            }
+
             order.MarkCompleted();
             Debug.Log($"Order {orderId} completed successfully");
         }
 
         public void ReportOrderInProgress(string orderId)
         {
-            if (!allOrders.TryGetValue(orderId, out var order)) return;
-            
+            Order order;
+            lock (_orderLock)
+            {
+                if (!allOrders.TryGetValue(orderId, out order)) return;
+            }
+
             order.MarkInProgress();
         }
 
@@ -188,55 +228,70 @@ namespace CentralControl.OrderAssignment
 
         private void ProcessFailedOrders()
         {
-            if (failedOrders.Count == 0) return;
-            
-            DateTime now = DateTime.Now;
-            List<Order> ordersToRetry = new List<Order>();
-            
-            foreach (var order in failedOrders.ToList())
+            lock (_orderLock)
             {
-                if (order.LastAttemptTime.HasValue)
+                if (failedOrders.Count == 0) return;
+
+                DateTime now = DateTime.Now;
+                List<Order> ordersToRetry = new List<Order>();
+
+                foreach (var order in failedOrders.ToList())
                 {
-                    TimeSpan elapsed = now - order.LastAttemptTime.Value;
-                    if (elapsed.TotalSeconds >= retryDelaySeconds)
+                    if (order.LastAttemptTime.HasValue)
                     {
-                        ordersToRetry.Add(order);
+                        TimeSpan elapsed = now - order.LastAttemptTime.Value;
+                        if (elapsed.TotalSeconds >= retryDelaySeconds)
+                        {
+                            ordersToRetry.Add(order);
+                        }
                     }
                 }
-            }
-            
-            foreach (var order in ordersToRetry)
-            {
-                failedOrders.Remove(order);
-                order.PrepareForRetry();
-                pendingOrders.Add(order);
-                Debug.Log($"Order {order.Id} requeued for retry (Attempt {order.RetryCount + 1}/{Order.MaxRetries})");
+
+                foreach (var order in ordersToRetry)
+                {
+                    failedOrders.Remove(order);
+                    order.PrepareForRetry();
+                    pendingOrders.Add(order);
+                    Debug.Log($"Order {order.Id} requeued for retry (Attempt {order.RetryCount + 1}/{Order.MaxRetries})");
+                }
             }
         }
 
         public int GetPendingOrderCount()
         {
-            return pendingOrders.Count(o => o.Status == OrderStatus.Pending);
+            lock (_orderLock)
+            {
+                return pendingOrders.Count(o => o.Status == OrderStatus.Pending);
+            }
         }
 
         public int GetFailedOrderCount()
         {
-            return failedOrders.Count;
+            lock (_orderLock)
+            {
+                return failedOrders.Count;
+            }
         }
 
         public List<Order> GetFailedOrders()
         {
-            return new List<Order>(failedOrders);
+            lock (_orderLock)
+            {
+                return new List<Order>(failedOrders);
+            }
         }
 
         public (int pending, int inProgress, int completed, int failed) GetOrderStatistics()
         {
-            int pending = allOrders.Values.Count(o => o.Status == OrderStatus.Pending);
-            int inProgress = allOrders.Values.Count(o => o.Status == OrderStatus.InProgress || o.Status == OrderStatus.Assigned);
-            int completed = allOrders.Values.Count(o => o.Status == OrderStatus.Completed);
-            int failed = allOrders.Values.Count(o => o.Status == OrderStatus.Failed && !o.CanRetry());
-            
-            return (pending, inProgress, completed, failed);
+            lock (_orderLock)
+            {
+                int pending = allOrders.Values.Count(o => o.Status == OrderStatus.Pending);
+                int inProgress = allOrders.Values.Count(o => o.Status == OrderStatus.InProgress || o.Status == OrderStatus.Assigned);
+                int completed = allOrders.Values.Count(o => o.Status == OrderStatus.Completed);
+                int failed = allOrders.Values.Count(o => o.Status == OrderStatus.Failed && !o.CanRetry());
+
+                return (pending, inProgress, completed, failed);
+            }
         }
     }
 }

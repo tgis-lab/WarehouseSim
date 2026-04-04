@@ -7,7 +7,21 @@ namespace CentralControl.PickingQueueControl
     public class PickingQueueManager
     {
         private static PickingQueueManager instance;
-        public static PickingQueueManager Instance => instance ??= new PickingQueueManager();
+        private static readonly object _instanceLock = new object();
+        public static PickingQueueManager Instance
+        {
+            get
+            {
+                if (instance == null)
+                {
+                    lock (_instanceLock)
+                    {
+                        instance ??= new PickingQueueManager();
+                    }
+                }
+                return instance;
+            }
+        }
 
         // Queue for each picking point: Key = PickingPointId, Value = Queue of RobotIds
         private Dictionary<string, Queue<string>> pickingQueues = new Dictionary<string, Queue<string>>();
