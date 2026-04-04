@@ -8,17 +8,59 @@ namespace Map
 {
     public class MapBoundary : MonoBehaviour
     {
+        public static MapBoundary Instance { get; private set; }
+
         public float wallHeight = 9f;
         public float wallThickness = 0.2f;
-        
+
         [Range(0f, 1f)]
-        public float wallTransparency = 0f; 
-        
+        public float wallTransparency = 0f;
+
         public Color wallColor = new Color(0.2f, 0.2f, 0.8f);
         public Material boundaryMaterial;
         public float boundaryExtension = 0.2f;
         private float minX, maxX, minZ, maxZ;
         private bool boundaryDetected = false;
+
+        public float MinX => minX;
+        public float MaxX => maxX;
+        public float MinZ => minZ;
+        public float MaxZ => maxZ;
+
+        private const float CLAMP_MARGIN = 0.1f;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
+
+        public Vector3 ClampPosition(Vector3 position)
+        {
+            if (!boundaryDetected) return position;
+            position.x = Mathf.Clamp(position.x, minX + CLAMP_MARGIN, maxX - CLAMP_MARGIN);
+            position.z = Mathf.Clamp(position.z, minZ + CLAMP_MARGIN, maxZ - CLAMP_MARGIN);
+            return position;
+        }
+
+        public bool IsInsideBounds(Vector3 position)
+        {
+            if (!boundaryDetected) return true;
+            return position.x >= minX && position.x <= maxX &&
+                   position.z >= minZ && position.z <= maxZ;
+        }
 
         public void Initialize(IndoorSpace indoorSpace = null)
         {
