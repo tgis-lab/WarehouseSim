@@ -490,7 +490,11 @@ namespace Map {
             }
             if (_cellBoundaryIndex.TryGetValue(cellBoundaryId, out var cellBoundary))
             {
-                var cp = cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary));
+                CellSpace source = GetCellSpaceFromId(cellBoundary.Source);
+                CellSpace target = GetCellSpaceFromId(cellBoundary.Target);
+                var cp = cellBoundary.ConvertToConnectionPoint(
+                    GetConnectionPointFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary),
+                    source, target);
                 _connectionPointIndex[cellBoundaryId] = cp;
                 return cp;
             }
@@ -568,10 +572,39 @@ namespace Map {
                 {
                     return sourceCellSpace.GetLocatedFloor();
                 }
+                // Both-elevator horizontal: fallback to source cell floor
+                return sourceCellSpace.GetLocatedFloor();
             }
 
-            // Vertical boundary or both-elevator: fallback to source cell floor
-            return sourceCellSpace.GetLocatedFloor();
+            // Vertical boundary spans multiple floors, no single floor level
+            return null;
+        }
+
+        /// <summary>
+        /// Returns a usable floor level for a CellBoundary's ConnectionPoint.
+        /// For horizontal boundaries, delegates to GetCellBoundaryFloorLevel.
+        /// For vertical boundaries (which return null from GetCellBoundaryFloorLevel),
+        /// resolves the lower floor from the connected CellSpaces.
+        /// Path planning requires non-null floor levels for state deduplication.
+        /// </summary>
+        public string GetConnectionPointFloorLevel(CellBoundary cellBoundary)
+        {
+            string floor = GetCellBoundaryFloorLevel(cellBoundary);
+            if (floor != null) return floor;
+
+            // Vertical boundary — resolve from connected cells (use lower floor)
+            CellSpace source = GetCellSpaceFromId(cellBoundary.Source);
+            CellSpace target = GetCellSpaceFromId(cellBoundary.Target);
+            string srcFloor = source?.GetLocatedFloor();
+            string tgtFloor = target?.GetLocatedFloor();
+
+            if (srcFloor != null && tgtFloor != null)
+            {
+                int srcNum = FloorLevelUtils.Parse(srcFloor);
+                int tgtNum = FloorLevelUtils.Parse(tgtFloor);
+                return srcNum <= tgtNum ? srcFloor : tgtFloor;
+            }
+            return srcFloor ?? tgtFloor;
         }
 
         public Hypergraph GetHypergraph()
@@ -580,7 +613,11 @@ namespace Map {
 
             foreach (var cellBoundary in _cellBoundaries)
             {
-                ConnectionPoint connectionPoint = cellBoundary.ConvertToConnectionPoint(GetCellBoundaryFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary));
+                CellSpace source = GetCellSpaceFromId(cellBoundary.Source);
+                CellSpace target = GetCellSpaceFromId(cellBoundary.Target);
+                ConnectionPoint connectionPoint = cellBoundary.ConvertToConnectionPoint(
+                    GetConnectionPointFloorLevel(cellBoundary), IsStair(cellBoundary), IsElevator(cellBoundary),
+                    source, target);
                 hypergraph.AddHyperNode(connectionPoint);
             }
             

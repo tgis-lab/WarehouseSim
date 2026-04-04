@@ -19,7 +19,9 @@ namespace Map
         private float lastCleanupTime;
         private bool enable3D;
         
-        // Optimistic locking: version number increments on every modification
+        // Version management:
+        // - Single-step mutations use Interlocked.Increment (lock-free, atomic)
+        // - Compound mutations (AtomicSwapPath) use lock(_versionLock) for multi-step atomicity
         private long _version = 0;
         private readonly object _versionLock = new object();
         
@@ -194,13 +196,26 @@ namespace Map
         }
 
         /// <summary>
+        /// Checks cell conflict and captures the layer version at query time.
+        /// Used for optimistic locking: the caller can later verify the version
+        /// hasn't changed before committing a path.
+        /// </summary>
+        public (List<TimeOccupancy> conflicts, long capturedVersion) CheckCellConflictWithVersion(
+            string cellId, float startTime, float endTime, string robotId)
+        {
+            long version = Version;
+            var conflicts = CheckCellConflict(cellId, startTime, endTime, robotId);
+            return (conflicts, version);
+        }
+
+        /// <summary>
         /// Sets dynamic occupancy for a CellSpace
         /// </summary>
         public void SetDynamicOccupancy(
-            string cellId, 
-            float startTime, 
-            float endTime, 
-            string robotId, 
+            string cellId,
+            float startTime,
+            float endTime,
+            string robotId,
             string planId = null,
             bool isStartCell = false,
             bool isEndCell = false)
@@ -214,6 +229,39 @@ namespace Map
                 timeIndex.AddInterval(occupancy);
                 IncrementVersion();
             }
+        }
+
+        /// <summary>
+        /// Updates the end time of an existing realtime occupancy for a robot in a cell,
+        /// or creates a new realtime occupancy if none exists.
+        /// </summary>
+        public void UpdateOccupancyEndTime(
+            string cellId,
+            string robotId,
+            float newEndTime,
+            float entryTime,
+            bool isStartCell = false,
+            bool isEndCell = false)
+        {
+            var timeIndex = GetCellTimeIndex(cellId);
+            if (timeIndex == null) return;
+
+            var existing = timeIndex.FindInterval(o =>
+                o.Occupier.RobotId == robotId &&
+                o.Occupier.Type == OccupancyType.Realtime &&
+                Mathf.Abs(o.StartTime - entryTime) < 1.0f);
+
+            if (existing != null)
+            {
+                timeIndex.UpdateIntervalEndTime(existing, newEndTime);
+            }
+            else
+            {
+                var occupier = new OccupancyIdentifier(robotId, null, OccupancyType.Realtime);
+                var occupancy = new TimeOccupancy(entryTime, newEndTime, occupier, isStartCell, isEndCell);
+                timeIndex.AddInterval(occupancy);
+            }
+            IncrementVersion();
         }
 
         /// <summary>

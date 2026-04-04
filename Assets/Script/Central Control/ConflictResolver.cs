@@ -399,7 +399,12 @@ namespace CentralControl
                 segmentTimes.Add(times[i]);
                 segmentSpeeds.Add(speeds[i]);
             }
-            
+
+            if (segmentTimes.Count == 0)
+            {
+                return (false, times, speeds);
+            }
+
             // Calculate current arrival time at conflict area
             float currentArrivalTime = segmentTimes[segmentTimes.Count - 1];
             

@@ -69,6 +69,8 @@ namespace Map
     /// </summary>
     public class TemporalIndex
     {
+        public const int MAX_OCCUPANCY_COUNT = 10000;
+
         // Dictionary storing all occupancies, key is GUID, value is TimeOccupancy
         private readonly HashDictionary<Guid, TimeOccupancy> allOccupancies;
         
@@ -98,7 +100,12 @@ namespace Map
         public void AddInterval(TimeOccupancy interval)
         {
             if (interval == null) return;
-            
+
+            if (allOccupancies.Count >= MAX_OCCUPANCY_COUNT)
+            {
+                EvictOldest();
+            }
+
             // Add to all occupancies dictionary
             allOccupancies[interval.Id] = interval;
             
@@ -115,6 +122,35 @@ namespace Map
                 endTimeIndex[interval.EndTime] = new HashedLinkedList<TimeOccupancy>();
             }
             endTimeIndex[interval.EndTime].Add(interval);
+        }
+
+        /// <summary>
+        /// Evicts the oldest 25% of occupancies by end time to enforce capacity limit.
+        /// </summary>
+        private void EvictOldest()
+        {
+            int removeCount = allOccupancies.Count / 4;
+            if (removeCount == 0) removeCount = 1;
+
+            var toRemove = new List<TimeOccupancy>();
+            if (endTimeIndex.IsEmpty) return;
+
+            var enumerator = endTimeIndex.RangeFrom(endTimeIndex.FindMin().Key).GetEnumerator();
+            while (enumerator.MoveNext() && toRemove.Count < removeCount)
+            {
+                foreach (var interval in enumerator.Current.Value)
+                {
+                    toRemove.Add(interval);
+                    if (toRemove.Count >= removeCount) break;
+                }
+            }
+
+            foreach (var interval in toRemove)
+            {
+                RemoveInterval(interval);
+            }
+
+            Debug.Log($"TemporalIndex capacity limit reached, evicted {toRemove.Count} oldest occupancies");
         }
 
         /// <summary>
@@ -312,6 +348,30 @@ namespace Map
                 // Remove from ongoing occupancies
                 ongoingOccupancies.Remove(key);
             }
+        }
+
+        /// <summary>
+        /// Find the first occupancy matching the given predicate
+        /// </summary>
+        public TimeOccupancy FindInterval(Func<TimeOccupancy, bool> predicate)
+        {
+            if (predicate == null) return null;
+            foreach (var interval in GetAllOccupancies())
+            {
+                if (predicate(interval)) return interval;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Update the end time of an existing interval by removing it, updating, and re-inserting
+        /// </summary>
+        public void UpdateIntervalEndTime(TimeOccupancy target, float newEndTime)
+        {
+            if (target == null) return;
+            RemoveInterval(target);
+            target.UpdateEndTime(newEndTime);
+            AddInterval(target);
         }
 
         /// <summary>

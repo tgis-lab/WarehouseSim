@@ -469,6 +469,48 @@ namespace EditModeTests
             Assert.AreEqual("2F", cp.FloorLevel);
         }
 
+        [Test]
+        public void CellBoundary_ConvertToConnectionPoint_Vertical_UsesCellCentroids()
+        {
+            var cb = MakeVerticalBoundary("cb_vert", "EV1", "EV2");
+
+            var propsEV1 = new Dictionary<string, object> { { "navigable", true } };
+            var ev1 = MakeCell("EV1", propsEV1, 5.0, 3.0);
+
+            var propsEV2 = new Dictionary<string, object> { { "navigable", true } };
+            var ev2 = MakeCell("EV2", propsEV2, 5.0, 3.0);
+
+            var cp = cb.ConvertToConnectionPoint(null, false, true, ev1, ev2);
+
+            Assert.IsNotNull(cp);
+            Assert.IsNotNull(cp.Point);
+            Assert.AreEqual(5.0, ((Point)cp.Point).X, 0.001,
+                "Vertical CP should use midpoint of source/target cell centroids");
+            Assert.AreEqual(3.0, ((Point)cp.Point).Y, 0.001,
+                "Vertical CP should use midpoint of source/target cell centroids");
+        }
+
+        [Test]
+        public void CellBoundary_ConvertToConnectionPoint_Vertical_FloorLevelIsNull_WhenPassedNull()
+        {
+            var cb = MakeVerticalBoundary("cb_fl", "EV1", "EV2");
+            var cp = cb.ConvertToConnectionPoint(null, false, true);
+
+            Assert.IsTrue(cp.IsVertical());
+            Assert.IsNull(cp.FloorLevel,
+                "Vertical ConnectionPoint should preserve null FloorLevel — " +
+                "callers must resolve floor from associated CellSpaces");
+        }
+
+        [Test]
+        public void FloorLevelUtils_Parse_ReturnsDefault_ForNull()
+        {
+            Assert.AreEqual(0, FloorLevelUtils.Parse(null, defaultValue: 0),
+                "Null floor should return default, not 1");
+            Assert.AreEqual(1, FloorLevelUtils.Parse(null, defaultValue: 1),
+                "Null floor with defaultValue=1 should return 1");
+        }
+
         // ==================== ConnectionPoint Tests ====================
 
         [Test]
@@ -961,6 +1003,54 @@ namespace EditModeTests
             Assert.AreEqual("n1", hypergraph.HyperNodes[0].Id);
             Assert.AreEqual(1, hypergraph.HyperEdges.Count);
             Assert.AreEqual("e1", hypergraph.HyperEdges[0].Id);
+        }
+
+        // ==================== SpatialIndex Floor Matching Tests ====================
+
+        [Test]
+        public void SpatialIndex_QueryIntersect_VerticalCellMatchesOnlyAssociatedFloors()
+        {
+            var spatialIndex = new SpatialIndex(enable3D: true);
+
+            // Create a vertical connection cell on floors 1F and 2F
+            var vertProps = new Dictionary<string, object>
+            {
+                { "navigable", true },
+                { "isVerticalConnection", true }
+            };
+            var associations = new JArray();
+            associations.Add(new JObject
+            {
+                ["floorLevel"] = "1F",
+                ["associationType"] = "located"
+            });
+            associations.Add(new JObject
+            {
+                ["floorLevel"] = "2F",
+                ["associationType"] = "connected"
+            });
+            vertProps["verticalFeatures"] = new JObject
+            {
+                ["verticalType"] = "elevator",
+                ["floorAssociation"] = associations
+            };
+            var vertCell = MakeCell("ev1", vertProps, 5.0, 5.0);
+
+            spatialIndex.Insert(vertCell);
+
+            var envelope = new Envelope(4.0, 6.0, 4.0, 6.0);
+
+            // Should match when querying for 1F
+            var result1F = spatialIndex.QueryIntersect(envelope, "1F");
+            Assert.AreEqual(1, result1F.Count, "Vertical cell should match floor 1F");
+
+            // Should match when querying for 2F
+            var result2F = spatialIndex.QueryIntersect(envelope, "2F");
+            Assert.AreEqual(1, result2F.Count, "Vertical cell should match floor 2F");
+
+            // Should NOT match when querying for 3F
+            var result3F = spatialIndex.QueryIntersect(envelope, "3F");
+            Assert.AreEqual(0, result3F.Count, "Vertical cell should NOT match floor 3F");
         }
     }
 }

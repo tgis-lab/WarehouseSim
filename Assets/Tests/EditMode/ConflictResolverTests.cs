@@ -657,5 +657,48 @@ namespace EditModeTests
             Assert.Greater(modifiedTime, 0f,
                 "Time should be positive for non-zero distance");
         }
+
+        // ====================================================================
+        //  ConflictResolver - TrySpeedAdjustment empty segment handling
+        // ====================================================================
+
+        [Test]
+        public void ResolveConflictBySpeedAdjustment_HandlesEmptySegmentTimes()
+        {
+            var (indoorSpace, layer, detector, path, _) = BuildLinearScenario();
+
+            // startIndex > endIndex or out of bounds so segmentTimes is empty
+            // We force this via a single-point path (path.Count=1) which is
+            // rejected by parameter validation, so instead test with a path where
+            // the conflict maps to segmentIndex that when clamped yields an empty
+            // segment range.
+            // Build a two-CP path with times that skip the conflict cell entirely.
+            var times = new List<float> { 0f, 1f };
+
+            // Create a conflict for a cell that IS in the path but produces
+            // adjustmentStartIndex == adjustmentEndIndex == 0 with empty segment.
+            var occupier = new OccupancyIdentifier("otherRobot", "plan1", OccupancyType.Planned);
+            var conflict = new TimeOccupancy(0f, 0.5f, occupier);
+            var conflicts = new Dictionary<string, List<TimeOccupancy>>
+            {
+                { "A", new List<TimeOccupancy> { conflict } }
+            };
+
+            var resolver = new ConflictResolver(layer, detector, indoorSpace);
+
+            var (success, newTimes, newSpeeds, hasChanges) = resolver.ResolveConflictBySpeedAdjustment(
+                "testRobot", path, times, conflicts);
+
+            // Should not throw IndexOutOfRangeException on empty segmentTimes
+            // The method may or may not succeed, but must not crash.
+            if (newTimes != null)
+            {
+                foreach (float t in newTimes)
+                {
+                    Assert.IsFalse(float.IsNaN(t), "No time value should be NaN");
+                    Assert.IsFalse(float.IsInfinity(t), "No time value should be Infinity");
+                }
+            }
+        }
     }
 }

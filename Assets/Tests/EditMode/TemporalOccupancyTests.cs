@@ -554,5 +554,115 @@ namespace EditModeTests
         }
 
         #endregion
+
+        // =====================================================================
+        // TemporalIndex: Capacity Limit
+        // =====================================================================
+
+        #region TemporalIndex: Capacity Limit
+
+        [Test]
+        public void TemporalIndex_AddInterval_EnforcesCapacityLimit()
+        {
+            var index = new TemporalIndex();
+
+            // Add more than MAX_OCCUPANCY_COUNT intervals
+            int overLimit = TemporalIndex.MAX_OCCUPANCY_COUNT + 100;
+            for (int i = 0; i < overLimit; i++)
+            {
+                var occ = new TimeOccupancy(i, i + 1f, new OccupancyIdentifier($"r{i}"));
+                index.AddInterval(occ);
+            }
+
+            var all = index.GetAllOccupancies();
+            Assert.LessOrEqual(all.Count, TemporalIndex.MAX_OCCUPANCY_COUNT,
+                "Occupancy count should not exceed MAX_OCCUPANCY_COUNT after cleanup");
+        }
+
+        #endregion
+
+        // =====================================================================
+        // DynamicOccupancyLayer: CheckCellConflictWithVersion
+        // =====================================================================
+
+        #region DynamicOccupancyLayer: CheckCellConflictWithVersion
+
+        [Test]
+        public void Layer_CheckCellConflictWithVersion_CapturesVersionAtQueryTime()
+        {
+            var layer = new DynamicOccupancyLayer();
+            layer.SetDynamicOccupancy("cell1", 0f, 10f, "r1", "p1");
+            long versionBefore = layer.Version;
+
+            var (conflicts, capturedVersion) = layer.CheckCellConflictWithVersion("cell1", 0f, 10f, "r2");
+
+            Assert.AreEqual(versionBefore, capturedVersion,
+                "Captured version should match the version at query time");
+            Assert.AreEqual(1, conflicts.Count,
+                "Should detect conflict with r1's occupancy");
+        }
+
+        [Test]
+        public void Layer_CheckCellConflictWithVersion_VersionChangesAfterModification()
+        {
+            var layer = new DynamicOccupancyLayer();
+            layer.SetDynamicOccupancy("cell1", 0f, 10f, "r1", "p1");
+
+            var (_, v1) = layer.CheckCellConflictWithVersion("cell1", 0f, 10f, "r2");
+
+            layer.SetDynamicOccupancy("cell1", 5f, 15f, "r3", "p3");
+
+            var (_, v2) = layer.CheckCellConflictWithVersion("cell1", 0f, 10f, "r2");
+
+            Assert.Greater(v2, v1,
+                "Version should be higher after additional modification");
+        }
+
+        #endregion
+
+        // =====================================================================
+        // DynamicOccupancyLayer: UpdateOccupancyEndTime entryTime match
+        // =====================================================================
+
+        #region DynamicOccupancyLayer: UpdateOccupancyEndTime entryTime match
+
+        [Test]
+        public void Layer_UpdateOccupancyEndTime_ReentryCreatesNewInterval()
+        {
+            var layer = new DynamicOccupancyLayer();
+
+            // First entry at time 0
+            layer.UpdateOccupancyEndTime("cell1", "r1", 5f, 0f);
+
+            // Re-entry at time 100 (well beyond proximity threshold)
+            layer.UpdateOccupancyEndTime("cell1", "r1", 105f, 100f);
+
+            var results = layer.QueryOverlapping("cell1", 0f, 200f);
+            var r1Results = results.FindAll(o => o.Occupier.RobotId == "r1");
+
+            Assert.AreEqual(2, r1Results.Count,
+                "Re-entering same cell should create a new interval, not extend the old one");
+        }
+
+        [Test]
+        public void Layer_UpdateOccupancyEndTime_SameEntryExtendsExisting()
+        {
+            var layer = new DynamicOccupancyLayer();
+
+            // First entry at time 10
+            layer.UpdateOccupancyEndTime("cell1", "r1", 12f, 10f);
+
+            // Update end time with same entry time (within proximity)
+            layer.UpdateOccupancyEndTime("cell1", "r1", 15f, 10.5f);
+
+            var results = layer.QueryOverlapping("cell1", 0f, 200f);
+            var r1Results = results.FindAll(o => o.Occupier.RobotId == "r1");
+
+            Assert.AreEqual(1, r1Results.Count,
+                "Updating with same entry time should extend existing interval");
+            Assert.AreEqual(15f, r1Results[0].EndTime, 0.001f);
+        }
+
+        #endregion
     }
 }

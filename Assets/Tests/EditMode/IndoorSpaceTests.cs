@@ -373,6 +373,34 @@ namespace EditModeTests
             Assert.IsFalse(vertCp.IsStair, "cb_vert is not a stair connection");
         }
 
+        [Test]
+        public void GetHypergraph_VerticalConnectionPoint_HasResolvedFloorLevel()
+        {
+            BuildTestIndoorSpace();
+
+            Hypergraph hypergraph = indoorSpace.GetHypergraph();
+
+            ConnectionPoint vertCp = hypergraph.HyperNodes.FirstOrDefault(n => n.Id == "cb_vert");
+            Assert.IsNotNull(vertCp);
+            Assert.IsNotNull(vertCp.FloorLevel,
+                "Vertical CP FloorLevel must NOT be null — it should be resolved from " +
+                "associated CellSpaces (lower floor) for path planning state deduplication");
+            Assert.AreEqual("1F", vertCp.FloorLevel,
+                "Vertical CP connecting 1F↔2F should resolve to lower floor (1F)");
+        }
+
+        [Test]
+        public void GetConnectionPointFromCellBoundary_VerticalBoundary_HasResolvedFloorLevel()
+        {
+            BuildTestIndoorSpace();
+
+            ConnectionPoint vertCp = indoorSpace.GetConnectionPointFromCellBoundary("cb_vert");
+            Assert.IsNotNull(vertCp);
+            Assert.IsNotNull(vertCp.FloorLevel,
+                "Vertical CP from GetConnectionPointFromCellBoundary must have resolved FloorLevel");
+            Assert.AreEqual("1F", vertCp.FloorLevel);
+        }
+
         // ===================================================================
         //  6. GetAllFloorLevels
         // ===================================================================

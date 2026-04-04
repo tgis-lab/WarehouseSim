@@ -62,17 +62,39 @@ namespace Map {
             this.TransitionTypeString = transitionType;
         }
         
-        public ConnectionPoint ConvertToConnectionPoint(string FloorLevel, bool isStair, bool isElevator)
+        public ConnectionPoint ConvertToConnectionPoint(string FloorLevel, bool isStair, bool isElevator,
+            CellSpace sourceCellSpace = null, CellSpace targetCellSpace = null)
         {
             // For vertical transitions, we create a synthetic centroid since there's no geometry
             if (TransitionType == TransitionType.Vertical)
             {
-                // Create a synthetic point as centroid
                 var geometryFactory = new GeometryFactory();
-                Point syntheticPoint = geometryFactory.CreatePoint(new Coordinate(0, 0));
+                Point syntheticPoint;
+
+                if (sourceCellSpace?.Node != null && targetCellSpace?.Node != null)
+                {
+                    double midX = (sourceCellSpace.Node.Centroid.X + targetCellSpace.Node.Centroid.X) / 2.0;
+                    double midY = (sourceCellSpace.Node.Centroid.Y + targetCellSpace.Node.Centroid.Y) / 2.0;
+                    syntheticPoint = geometryFactory.CreatePoint(new Coordinate(midX, midY));
+                }
+                else if (sourceCellSpace?.Node != null)
+                {
+                    syntheticPoint = geometryFactory.CreatePoint(new Coordinate(
+                        sourceCellSpace.Node.Centroid.X, sourceCellSpace.Node.Centroid.Y));
+                }
+                else if (targetCellSpace?.Node != null)
+                {
+                    syntheticPoint = geometryFactory.CreatePoint(new Coordinate(
+                        targetCellSpace.Node.Centroid.X, targetCellSpace.Node.Centroid.Y));
+                }
+                else
+                {
+                    syntheticPoint = geometryFactory.CreatePoint(new Coordinate(0, 0));
+                }
+
                 return new ConnectionPoint(this.Id, this, syntheticPoint, FloorLevel, isStair, isElevator);
             }
-            
+
             // For horizontal transitions, use the existing boundary centroid
             return new ConnectionPoint(this.Id, this, this.Boundary != null ? this.Boundary.Centroid : null, FloorLevel, isStair, isElevator);
         }
