@@ -172,6 +172,7 @@ namespace PathPlanning
         #region private fields
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
+        private const float STAIR_FLOOR_TIME = 2.0f;
         private const float DEFAULT_VERTICAL_TIME = 6.0f;
         private const float TIME_EPSILON = 0.001f;
         private const float INTENT_COST_FACTOR = 1.3f;
@@ -839,23 +840,37 @@ namespace PathPlanning
             
             foreach (var childConnection in childConnections)
             {
-                if (childConnection.IsStair) continue;
-
                 RoutePoint childRoutePoint = graph.GetRoutePointFromConnectionPoint(childConnection);
                 if (childRoutePoint == null) continue;
-                
+
                 string childFloor = childConnection.FloorLevel;
-                
-                bool isVertical = childFloor != currentFloor;
+
+                // Defensive: if FloorLevel is somehow null, resolve from CellBoundary
+                if (string.IsNullOrEmpty(childFloor) && childConnection.IsVertical() && indoorSpace != null)
+                {
+                    childFloor = indoorSpace.GetConnectionPointFloorLevel(childConnection.CellBoundary);
+                }
+
+                bool isVertical = !string.IsNullOrEmpty(childFloor)
+                                  && !string.IsNullOrEmpty(currentFloor)
+                                  && childFloor != currentFloor;
                 string verticalConnectorId = null;
-                
+
                 float travelTime, travelCost;
                 float speedForMove = defaultSpeed;
-                
+
                 if (isVertical)
                 {
                     int floorDifference = Math.Abs(ParseFloorLevel(childFloor) - ParseFloorLevel(currentFloor));
-                    float baseTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
+                    float baseTime;
+                    if (childConnection.IsStair)
+                    {
+                        baseTime = STAIR_FLOOR_TIME * floorDifference;
+                    }
+                    else
+                    {
+                        baseTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
+                    }
                     
                     float distance = CalculateDistance(state.RoutePoint.ConnectionPoint, childConnection);
                     

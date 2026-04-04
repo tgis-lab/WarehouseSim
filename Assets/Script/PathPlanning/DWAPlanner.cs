@@ -34,6 +34,25 @@ namespace PathPlanning
         private Vector3 previousBestVelocity = Vector3.zero;
         private bool hasPreviousVelocity = false;
 
+        private Collider[] cachedObstacles;
+        private bool useExternalObstacles = false;
+
+        /// <summary>
+        /// Calculate the best velocity using externally detected obstacles.
+        /// Avoids redundant OverlapSphere calls by reusing CheckSurroundings results.
+        /// </summary>
+        public (Vector3, bool) CalculateVelocity(
+            Vector3 currentPosition, Vector3 currentVelocity, Vector3 goalPosition,
+            Collider[] externalObstacles)
+        {
+            cachedObstacles = externalObstacles;
+            useExternalObstacles = true;
+            var result = CalculateVelocity(currentPosition, currentVelocity, goalPosition);
+            useExternalObstacles = false;
+            cachedObstacles = null;
+            return result;
+        }
+
         /// <summary>
         /// Calculate the best velocity
         /// </summary>
@@ -41,30 +60,33 @@ namespace PathPlanning
         {
             var samplingTimer = new Stopwatch();
             samplingTimer.Start();
-            
+
             bool needReplan = false;
             Vector3 bestVelocity = Vector3.zero;
             float bestScore = -float.MaxValue;
-            
+
+            int velocitySamples = Mathf.Max(2, VelocitySamples);
+            int angleSamples = Mathf.Max(2, AngleSamples);
+
             // Calculate the direction to the goal
             Vector3 dirToGoal = (goalPosition - currentPosition).normalized;
             float distToGoal = Vector3.Distance(currentPosition, goalPosition);
-            
+
             // Adjust speed based on distance to goal
             if (distToGoal < 0.5f)
             {
                 MaxSpeed = Mathf.Min(MaxSpeed, distToGoal + 0.1f);
             }
-            
+
             // Velocity sampling
-            for (int i = 0; i < VelocitySamples; i++)
+            for (int i = 0; i < velocitySamples; i++)
             {
-                float sampledVelocityMagnitude = Mathf.Lerp(MinSpeed, MaxSpeed, i / (float)(VelocitySamples - 1));
-                
+                float sampledVelocityMagnitude = Mathf.Lerp(MinSpeed, MaxSpeed, i / (float)(velocitySamples - 1));
+
                 // Angle sampling
-                for (int j = 0; j < AngleSamples; j++)
+                for (int j = 0; j < angleSamples; j++)
                 {
-                    float angle = Mathf.Lerp(-MaxRotSpeed, MaxRotSpeed, j / (float)(AngleSamples - 1));
+                    float angle = Mathf.Lerp(-MaxRotSpeed, MaxRotSpeed, j / (float)(angleSamples - 1));
                     
                     // Velocity vector
                     Quaternion rot = Quaternion.Euler(0, angle * Mathf.Rad2Deg, 0);
@@ -121,7 +143,7 @@ namespace PathPlanning
             samplingTimer.Stop();
             if (samplingTimer.ElapsedMilliseconds > 10)
             {
-                UnityEngine.Debug.Log($"DWA sampling cost: {samplingTimer.ElapsedMilliseconds}ms, sample count: {VelocitySamples * AngleSamples}");
+                UnityEngine.Debug.Log($"DWA sampling cost: {samplingTimer.ElapsedMilliseconds}ms, sample count: {velocitySamples * angleSamples}");
             }
             
             // If no valid velocity found, replan
@@ -148,43 +170,39 @@ namespace PathPlanning
             return (bestVelocity, needReplan);
         }
         
-        /// <summary>
-        /// Obstacle score evaluation
-        /// </summary>
         private float EvaluateObstacleDistance(Vector3 position, Vector3 velocity)
         {
             float minDistance = float.MaxValue;
-            
-            // Predict the trajectory along the velocity direction
+
             for (float t = 0; t <= PredictionTime; t += 0.1f)
             {
                 Vector3 predictedPosition = position + velocity * t;
-                
-                // Detect surrounding obstacles
-                Collider[] hitColliders = Physics.OverlapSphere(predictedPosition, 1.0f, ObstacleLayer);
-                
+
+                Collider[] hitColliders;
+                if (useExternalObstacles && cachedObstacles != null)
+                {
+                    hitColliders = cachedObstacles;
+                }
+                else
+                {
+                    hitColliders = Physics.OverlapSphere(predictedPosition, 1.0f, ObstacleLayer);
+                }
+
                 foreach (var hitCollider in hitColliders)
                 {
-                    // 忽略触发器
-                    if (hitCollider.isTrigger)
-                        continue;
-                    
-                    // 使用不同方法获取距离，不依赖于ClosestPoint
-                    
-                    // 直接使用边界盒计算距离
+                    if (hitCollider.isTrigger) continue;
+
                     Bounds bounds = hitCollider.bounds;
                     Vector3 closest = bounds.ClosestPoint(predictedPosition);
                     float distance = Vector3.Distance(predictedPosition, closest);
 
-                    // 更新最小距离
                     minDistance = Mathf.Min(minDistance, distance);
                 }
             }
-            
 
             if (minDistance == float.MaxValue)
                 return 1.0f;
-            
+
             return Mathf.Clamp01(minDistance / 1.5f);
         }
         
@@ -193,14 +211,17 @@ namespace PathPlanning
         /// </summary>
         private bool WillHitObstacle(Vector3 position, Vector3 velocity)
         {
-            // Calculate the length of the predicted trajectory
             float distance = velocity.magnitude * PredictionTime;
-            
-            if (Physics.Raycast(position, velocity.normalized, distance + ObstacleInflation, ObstacleLayer))
+            if (distance < 0.01f) return false;
+
+            int steps = Mathf.Max(2, Mathf.CeilToInt(distance / 0.3f));
+            for (int i = 1; i <= steps; i++)
             {
-                return true;
+                float t = (i / (float)steps) * PredictionTime;
+                Vector3 checkPos = position + velocity * t;
+                if (Physics.OverlapSphere(checkPos, 0.3f, ObstacleLayer).Length > 0)
+                    return true;
             }
-            
             return false;
         }
         

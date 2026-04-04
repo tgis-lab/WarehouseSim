@@ -423,7 +423,16 @@ namespace PathPlanning
                 if (childRoutePoint == null) continue;
                 
                 string childFloor = childConnection.FloorLevel;
-                bool isVertical = childFloor != currentFloor;
+
+                // Defensive: if FloorLevel is null for vertical CPs, resolve from CellBoundary
+                if (string.IsNullOrEmpty(childFloor) && childConnection.IsVertical() && indoorSpace != null)
+                {
+                    childFloor = indoorSpace.GetConnectionPointFloorLevel(childConnection.CellBoundary);
+                }
+
+                bool isVertical = !string.IsNullOrEmpty(childFloor)
+                                  && !string.IsNullOrEmpty(currentFloor)
+                                  && childFloor != currentFloor;
                 string verticalConnectorId = null;
                 
                 float travelTime, travelCost;
