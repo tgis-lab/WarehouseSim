@@ -1,3 +1,5 @@
+// [Not wired] 当前未接入运行时。垂直资源通过 occupancy layer 标准时空模型建模。
+// 保留为未来独立调度参考。
 using System;
 using System.Collections;
 using System.Collections.Generic;

@@ -47,5 +47,24 @@ namespace Map
 
             return defaultValue;
         }
+
+        /// <summary>
+        /// Computes the world-space Y position for a given floor level string.
+        /// Positive levels (1F, 2F...): (level - 1) * floorHeight + baseHeight
+        /// Zero/negative levels (B1 → -1, B2 → -2...): level * floorHeight + baseHeight
+        /// </summary>
+        /// <param name="floorLevel">Floor level string, e.g. "1F", "2F", "B1".</param>
+        /// <param name="floorHeight">Height of each floor in world units.</param>
+        /// <param name="baseHeight">Base offset above the computed floor plane.</param>
+        /// <returns>World-space Y coordinate for the floor.</returns>
+        public static float GetFloorHeight(string floorLevel, float floorHeight = 3.0f, float baseHeight = 0.05f)
+        {
+            int level = Parse(floorLevel, defaultValue: 1);
+            if (level > 0)
+            {
+                return ((level - 1) * floorHeight) + baseHeight;
+            }
+            return (level * floorHeight) + baseHeight;
+        }
     }
 }

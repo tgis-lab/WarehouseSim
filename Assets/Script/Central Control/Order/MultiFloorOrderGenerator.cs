@@ -155,15 +155,7 @@ namespace CentralControl.OrderAssignment
         
         private float GetFloorHeight(string floorLevel)
         {
-            float baseHeight = 0.05f;
-            float floorHeight = 3.0f;
-            
-            int level = ParseFloorLevel(floorLevel);
-            if (level > 0)
-            {
-                return ((level - 1) * floorHeight) + baseHeight;
-            }
-            return (level * floorHeight) + baseHeight;
+            return Map.FloorLevelUtils.GetFloorHeight(floorLevel);
         }
         
         private int ParseFloorLevel(string floorLevel)

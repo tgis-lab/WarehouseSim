@@ -278,10 +278,10 @@ namespace EditModeTests
             ConnectionPoint cp12 = space.GetConnectionPointFromCellBoundary("cb12");
             Vector3 coords = graph.GetCoordinatesFromConnectionPoint(cp12);
 
-            // X = point.X, Z = point.Y, Y = floor height
-            // 1F floor height = (1-1) * 3.0 = 0
+            // X = point.X, Z = point.Y, Y = floor height (unified: includes baseHeight 0.05)
+            // 1F floor height = (1-1) * 3.0 + 0.05 = 0.05
             Assert.AreEqual(1.0f, coords.x, 0.01f, "X should be the point's X coordinate");
-            Assert.AreEqual(0.0f, coords.y, 0.01f, "Y should be 0 for floor 1F");
+            Assert.AreEqual(0.05f, coords.y, 0.01f, "Y should be 0.05 for floor 1F (with baseHeight)");
             Assert.AreEqual(0.0f, coords.z, 0.01f, "Z should be the point's Y coordinate");
         }
 
@@ -294,9 +294,9 @@ namespace EditModeTests
             ConnectionPoint cpH2 = space.GetConnectionPointFromCellBoundary("cb_EV2_c1F2");
             Vector3 coords = graph.GetCoordinatesFromConnectionPoint(cpH2);
 
-            // 2F floor height = (2-1) * 3.0 = 3.0
-            Assert.AreEqual(3.0f, coords.y, 0.01f,
-                "Y coordinate on 2F should be 3.0 (one floor height above ground)");
+            // 2F floor height = (2-1) * 3.0 + 0.05 = 3.05 (unified with baseHeight)
+            Assert.AreEqual(3.05f, coords.y, 0.01f,
+                "Y coordinate on 2F should be 3.05 (one floor height above ground + baseHeight)");
         }
 
         [Test]

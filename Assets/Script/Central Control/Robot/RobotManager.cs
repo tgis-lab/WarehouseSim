@@ -233,13 +233,7 @@ namespace CentralControl.RobotControl
         
         private float GetFloorYPosition(string floorLevel)
         {
-            int level = ParseFloorLevel(floorLevel);
-            return ((level - 1) * floorHeight) + baseHeight;
-        }
-        
-        private int ParseFloorLevel(string floorLevel)
-        {
-            return Map.FloorLevelUtils.Parse(floorLevel, defaultValue: 1);
+            return Map.FloorLevelUtils.GetFloorHeight(floorLevel, floorHeight, baseHeight);
         }
 
         public void ResetSpawnPoints()

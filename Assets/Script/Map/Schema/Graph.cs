@@ -24,14 +24,10 @@ namespace Map {
             this.FloorHeight = floorHeight;
         }
         
+        [System.Obsolete("Use FloorLevelUtils.GetFloorHeight instead.")]
         private float GetFloorHeight(string floorLevel)
         {
-            int level = ParseFloorLevel(floorLevel);
-            if (level > 0)
-            {
-                return (level - 1) * FloorHeight;
-            }
-            return level * FloorHeight;
+            return FloorLevelUtils.GetFloorHeight(floorLevel, FloorHeight);
         }
 
         public void AddNode(RoutePoint node)
