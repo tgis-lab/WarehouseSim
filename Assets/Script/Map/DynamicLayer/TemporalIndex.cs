@@ -159,38 +159,52 @@ namespace Map
         public void RemoveInterval(TimeOccupancy interval)
         {
             if (interval == null) return;
-            
+            RemoveInterval(interval, interval.EndTime);
+        }
+
+        /// <summary>
+        /// Remove time interval from index using an explicit endTime for the endTimeIndex lookup.
+        /// This prevents stale index entries when EndTime has been mutated in-place before removal.
+        /// </summary>
+        private bool RemoveInterval(TimeOccupancy interval, float explicitEndTime)
+        {
+            if (interval == null) return false;
+
             // Remove from all occupancies dictionary
             if (allOccupancies.Contains(interval.Id))
             {
                 allOccupancies.Remove(interval.Id);
-                
+
                 // Remove from start time index
                 if (startTimeIndex.Contains(interval.StartTime))
                 {
                     var list = startTimeIndex[interval.StartTime];
                     list.Remove(interval);
-                    
+
                     // If no more occupancies at this time, remove the entry
                     if (list.Count == 0)
                     {
                         startTimeIndex.Remove(interval.StartTime);
                     }
                 }
-                
-                // Remove from end time index
-                if (endTimeIndex.Contains(interval.EndTime))
+
+                // Remove from end time index using the explicitly captured endTime
+                if (endTimeIndex.Contains(explicitEndTime))
                 {
-                    var list = endTimeIndex[interval.EndTime];
+                    var list = endTimeIndex[explicitEndTime];
                     list.Remove(interval);
-                    
+
                     // If no more occupancies at this time, remove the entry
                     if (list.Count == 0)
                     {
-                        endTimeIndex.Remove(interval.EndTime);
+                        endTimeIndex.Remove(explicitEndTime);
                     }
                 }
+
+                return true;
             }
+
+            return false;
         }
 
         /// <summary>
@@ -225,10 +239,10 @@ namespace Map
                     }
                 }
                 
-                // Filter out intervals that truly overlap
+                // Filter out intervals that truly overlap (half-open: [Start, End) semantics)
                 foreach (var interval in potentialOverlaps)
                 {
-                    if (interval.EndTime >= startTime)
+                    if (interval.EndTime > startTime)
                     {
                         result.Add(interval);
                     }
@@ -305,16 +319,19 @@ namespace Map
         public void UpdateCurrentOccupancy(string robotId, float currentTime)
         {
             string key = robotId;
-            
+
             if (ongoingOccupancies.TryGetValue(key, out TimeOccupancy current))
             {
-                // Remove from index (as end time will change)
-                RemoveInterval(current);
-                
-                // Update end time
+                // Capture old EndTime before mutation for precise endTimeIndex lookup
+                float oldEndTime = current.EndTime;
+
+                // Remove from index using the captured old EndTime
+                RemoveInterval(current, oldEndTime);
+
+                // Update end time (mutates in-place)
                 current.UpdateEndTime(currentTime);
-                
-                // Re-add to index
+
+                // Re-add to index with the new EndTime
                 AddInterval(current);
             }
             else
@@ -333,18 +350,21 @@ namespace Map
         public void EndCurrentOccupancy(string robotId, float endTime)
         {
             string key = robotId;
-            
+
             if (ongoingOccupancies.TryGetValue(key, out TimeOccupancy current))
             {
-                // Remove from index
-                RemoveInterval(current);
-                
-                // Update end time
+                // Capture old EndTime before mutation for precise endTimeIndex lookup
+                float oldEndTime = current.EndTime;
+
+                // Remove from index using the captured old EndTime
+                RemoveInterval(current, oldEndTime);
+
+                // Update end time (mutates in-place)
                 current.UpdateEndTime(endTime);
-                
-                // Re-add to index
+
+                // Re-add to index with the new EndTime
                 AddInterval(current);
-                
+
                 // Remove from ongoing occupancies
                 ongoingOccupancies.Remove(key);
             }
@@ -369,7 +389,11 @@ namespace Map
         public void UpdateIntervalEndTime(TimeOccupancy target, float newEndTime)
         {
             if (target == null) return;
-            RemoveInterval(target);
+
+            // Capture old EndTime before mutation for precise endTimeIndex lookup
+            float oldEndTime = target.EndTime;
+
+            RemoveInterval(target, oldEndTime);
             target.UpdateEndTime(newEndTime);
             AddInterval(target);
         }
@@ -400,22 +424,53 @@ namespace Map
         }
 
         /// <summary>
+        /// Get the number of ongoing (tracked) occupancies
+        /// </summary>
+        public int OngoingOccupancyCount => ongoingOccupancies.Count;
+
+        /// <summary>
+        /// Check whether a robot has an ongoing occupancy
+        /// </summary>
+        public bool HasOngoingOccupancy(string robotId) => ongoingOccupancies.ContainsKey(robotId);
+
+        /// <summary>
         /// Remove all time intervals before a specified time
         /// </summary>
         public void RemoveIntervalsBefore(float cutoffTime)
         {
             // Find all end times earlier than cutoffTime
             var endTimes = endTimeIndex.RangeFrom(float.MinValue).TakeWhile(kvp => kvp.Key <= cutoffTime).ToList();
-            
+
+            // Collect all removed interval IDs for ongoingOccupancies cleanup
+            var removedIds = new SystemCollections.HashSet<Guid>();
+
             foreach (var kvp in endTimes)
             {
                 float endTime = kvp.Key;
                 var intervals = kvp.Value.ToList();
-                
+
                 foreach (var interval in intervals)
                 {
+                    removedIds.Add(interval.Id);
                     // Remove this time interval
                     RemoveInterval(interval);
+                }
+            }
+
+            // Clean ongoingOccupancies: remove entries whose intervals were pruned
+            if (removedIds.Count > 0)
+            {
+                var staleKeys = new List<string>();
+                foreach (var kvp in ongoingOccupancies)
+                {
+                    if (removedIds.Contains(kvp.Value.Id))
+                    {
+                        staleKeys.Add(kvp.Key);
+                    }
+                }
+                foreach (var key in staleKeys)
+                {
+                    ongoingOccupancies.Remove(key);
                 }
             }
         }
@@ -461,12 +516,33 @@ namespace Map
                     }
                 }
                 
+                // Collect removed IDs for ongoingOccupancies cleanup
+                var removedIds = new SystemCollections.HashSet<Guid>();
+
                 // Remove expired occupancies
                 foreach (var interval in toRemove)
                 {
+                    removedIds.Add(interval.Id);
                     RemoveInterval(interval);
                 }
-                
+
+                // Clean ongoingOccupancies: remove entries whose intervals were cleaned up
+                if (removedIds.Count > 0)
+                {
+                    var staleKeys = new List<string>();
+                    foreach (var kvp in ongoingOccupancies)
+                    {
+                        if (removedIds.Contains(kvp.Value.Id))
+                        {
+                            staleKeys.Add(kvp.Key);
+                        }
+                    }
+                    foreach (var key in staleKeys)
+                    {
+                        ongoingOccupancies.Remove(key);
+                    }
+                }
+
                 Debug.Log($"Cleaned up {toRemove.Count} expired occupancy records");
             }
             catch (Exception ex)

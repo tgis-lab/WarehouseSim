@@ -220,6 +220,23 @@ namespace Map
             bool isStartCell = false,
             bool isEndCell = false)
         {
+            SetDynamicOccupancyInternal(cellId, startTime, endTime, robotId, planId, isStartCell, isEndCell);
+            IncrementVersion();
+        }
+
+        /// <summary>
+        /// Internal version without version increment — for batch operations
+        /// that call IncrementVersion once at the end.
+        /// </summary>
+        private void SetDynamicOccupancyInternal(
+            string cellId,
+            float startTime,
+            float endTime,
+            string robotId,
+            string planId = null,
+            bool isStartCell = false,
+            bool isEndCell = false)
+        {
             var timeIndex = GetCellTimeIndex(cellId);
             if (timeIndex != null)
             {
@@ -227,7 +244,6 @@ namespace Map
                 var occupier = new OccupancyIdentifier(robotId, planId, type);
                 var occupancy = new TimeOccupancy(startTime, endTime, occupier, isStartCell, isEndCell);
                 timeIndex.AddInterval(occupancy);
-                IncrementVersion();
             }
         }
 
@@ -374,31 +390,34 @@ namespace Map
             if (other == null)
                 return;
 
-            // Clear stale occupancies for this robot before merging new ones
-            if (!string.IsNullOrEmpty(robotId))
+            lock (_versionLock)
             {
-                RemoveOccupanciesByRobot(robotId);
-            }
-
-            foreach (var cellId in other.cellTimeIndices.Keys)
-            {
-                var otherOccupancies = other.GetOccupancies(cellId, startTime, endTime);
-
-                foreach (var occupancy in otherOccupancies)
+                // Clear stale occupancies for this robot before merging new ones
+                if (!string.IsNullOrEmpty(robotId))
                 {
-                    // Add to current layer, preserving start/end cell info
-                    var timeIndex = GetCellTimeIndex(cellId);
-                    var newOccupancy = new TimeOccupancy(
-                        occupancy.StartTime,
-                        occupancy.EndTime,
-                        occupancy.Occupier,
-                        occupancy.IsStartCell,
-                        occupancy.IsEndCell);
-
-                    timeIndex.AddInterval(newOccupancy);
+                    RemoveOccupanciesByRobot(robotId);
                 }
+
+                foreach (var cellId in other.cellTimeIndices.Keys)
+                {
+                    var otherOccupancies = other.GetOccupancies(cellId, startTime, endTime);
+
+                    foreach (var occupancy in otherOccupancies)
+                    {
+                        // Add to current layer, preserving start/end cell info
+                        var timeIndex = GetCellTimeIndex(cellId);
+                        var newOccupancy = new TimeOccupancy(
+                            occupancy.StartTime,
+                            occupancy.EndTime,
+                            occupancy.Occupier,
+                            occupancy.IsStartCell,
+                            occupancy.IsEndCell);
+
+                        timeIndex.AddInterval(newOccupancy);
+                    }
+                }
+                _version++; // Single version bump for entire merge operation
             }
-            IncrementVersion();
         }
         
         #region Intent Layer Methods
@@ -452,8 +471,9 @@ namespace Map
         /// <summary>
         /// Atomically swaps a robot's old planned path and intent with a new planned path.
         /// All operations happen inside a single lock so version increments exactly once.
+        /// Returns false if the new path conflicts with existing reservations from other robots.
         /// </summary>
-        public void AtomicSwapPath(
+        public bool AtomicSwapPath(
             string robotId,
             string oldPlanId,
             List<string> cellIds,
@@ -463,6 +483,34 @@ namespace Map
         {
             lock (_versionLock)
             {
+                // Pre-flight conflict scan: check each new cell reservation against
+                // existing occupancies, excluding this robot's own entries.
+                // Intent occupancies are soft constraints (cost penalty only) and must not
+                // block path commits — consistent with SIPP which excludes them from safe intervals.
+                for (int i = 0; i < cellIds.Count; i++)
+                {
+                    var timeIndex = GetCellTimeIndex(cellIds[i]);
+                    if (timeIndex != null)
+                    {
+                        var conflicts = timeIndex.CheckConflict(
+                            startTimes[i], endTimes[i], excludeRobotId: robotId);
+                        // Filter out Intent occupancies — they are soft constraints
+                        bool hasHardConflict = false;
+                        foreach (var c in conflicts)
+                        {
+                            if (c.Occupier.Type != OccupancyType.Intent)
+                            {
+                                hasHardConflict = true;
+                                break;
+                            }
+                        }
+                        if (hasHardConflict)
+                        {
+                            return false;
+                        }
+                    }
+                }
+
                 // Clear old planned occupancies (skip if oldPlanId is null)
                 if (!string.IsNullOrEmpty(oldPlanId))
                 {
@@ -496,6 +544,7 @@ namespace Map
 
                 // Increment version exactly once
                 _version++;
+                return true;
             }
         }
 
@@ -715,10 +764,10 @@ namespace Map
                 // Calculate CellSpaces the path passes through and their time windows
                 var pathOccupancies = CalculatePathCellOccupancies(connectionPointPath, times);
                 
-                // Record occupancy for each CellSpace
+                // Record occupancy for each CellSpace (batch — single version bump at end)
                 foreach (var cellOccupancy in pathOccupancies)
                 {
-                    SetDynamicOccupancy(
+                    SetDynamicOccupancyInternal(
                         cellOccupancy.CellId,
                         cellOccupancy.EntryTime,
                         cellOccupancy.ExitTime,
@@ -727,6 +776,7 @@ namespace Map
                         cellOccupancy.IsStartCell,
                         cellOccupancy.IsEndCell);
                 }
+                IncrementVersion();
                 
                 Debug.Log($"Recorded path occupancy for robot {robotId}, affecting {pathOccupancies.Count} cells");
             }

@@ -517,6 +517,154 @@ namespace EditModeTests
         #endregion
 
         // =====================================================================
+        // TemporalIndex: EndTime Key Mutation Safety
+        // =====================================================================
+
+        #region TemporalIndex: EndTime Key Mutation Safety
+
+        [Test]
+        public void TemporalIndex_UpdateCurrentOccupancy_MultipleUpdates_NoStaleEndTimeEntries()
+        {
+            var index = new TemporalIndex();
+
+            // Create ongoing occupancy at time 0
+            index.UpdateCurrentOccupancy("r1", 0f);
+            Assert.AreEqual(1, index.GetAllOccupancies().Count);
+
+            // Update end time multiple times (simulates real-time tracking ticks)
+            index.UpdateCurrentOccupancy("r1", 5f);
+            index.UpdateCurrentOccupancy("r1", 10f);
+            index.UpdateCurrentOccupancy("r1", 15f);
+            index.UpdateCurrentOccupancy("r1", 20f);
+
+            // Should still be exactly 1 occupancy (the ongoing one, re-indexed each time)
+            var all = index.GetAllOccupancies();
+            Assert.AreEqual(1, all.Count, "Should have exactly 1 occupancy after multiple updates");
+            Assert.AreEqual(0f, all[0].StartTime, 0.001f, "StartTime should remain at initial value");
+            Assert.AreEqual(20f, all[0].EndTime, 0.001f, "EndTime should reflect the latest update");
+
+            // The critical check: querying old end-time ranges should NOT find any occupancy
+            // If stale endTimeIndex entries existed, queries at old EndTimes would still find the interval
+            var queryAtOldEndTime = index.GetOccupancies(4f, 6f);
+            Assert.AreEqual(1, queryAtOldEndTime.Count,
+                "Occupancy [0, 20] should overlap query [4, 6]");
+
+            // Query a range that would only match stale entries (past the start, before the current end)
+            // This occupancy [0, 20] spans this whole range, so it should be found
+            var queryFullRange = index.GetOccupancies(0f, 25f);
+            Assert.AreEqual(1, queryFullRange.Count,
+                "Should find exactly 1 occupancy in full range query");
+        }
+
+        [Test]
+        public void TemporalIndex_UpdateCurrentOccupancy_ThenEnd_NoLeakedEntries()
+        {
+            var index = new TemporalIndex();
+
+            // Create and update ongoing occupancy
+            index.UpdateCurrentOccupancy("r1", 0f);
+            index.UpdateCurrentOccupancy("r1", 5f);
+            index.UpdateCurrentOccupancy("r1", 10f);
+
+            // End the occupancy at time 15
+            index.EndCurrentOccupancy("r1", 15f);
+
+            // Should still have exactly 1 occupancy, now finalized
+            var all = index.GetAllOccupancies();
+            Assert.AreEqual(1, all.Count, "Should have exactly 1 finalized occupancy");
+            Assert.AreEqual(0f, all[0].StartTime, 0.001f);
+            Assert.AreEqual(15f, all[0].EndTime, 0.001f);
+
+            // The ongoing tracker should be empty
+            Assert.IsFalse(index.HasOngoingOccupancy("r1"),
+                "Robot should not be in ongoing occupancies after EndCurrentOccupancy");
+        }
+
+        [Test]
+        public void TemporalIndex_UpdateIntervalEndTime_NoStaleEndTimeIndex()
+        {
+            var index = new TemporalIndex();
+            var occ = new TimeOccupancy(0f, 10f, new OccupancyIdentifier("r1"));
+            index.AddInterval(occ);
+
+            // Update end time multiple times via UpdateIntervalEndTime
+            index.UpdateIntervalEndTime(occ, 20f);
+            index.UpdateIntervalEndTime(occ, 30f);
+            index.UpdateIntervalEndTime(occ, 40f);
+
+            // Should still be exactly 1 occupancy
+            var all = index.GetAllOccupancies();
+            Assert.AreEqual(1, all.Count, "Should have exactly 1 occupancy after multiple EndTime updates");
+            Assert.AreEqual(40f, all[0].EndTime, 0.001f, "EndTime should be the latest value");
+
+            // Remove the occupancy -- should fully clean up
+            index.RemoveInterval(occ);
+            Assert.AreEqual(0, index.GetAllOccupancies().Count,
+                "All occupancies should be removed after RemoveInterval");
+        }
+
+        #endregion
+
+        // =====================================================================
+        // TemporalIndex: RemoveIntervalsBefore cleans ongoingOccupancies
+        // =====================================================================
+
+        #region TemporalIndex: RemoveIntervalsBefore cleans ongoingOccupancies
+
+        [Test]
+        public void TemporalIndex_RemoveIntervalsBefore_CleansOngoingOccupancies()
+        {
+            var index = new TemporalIndex();
+
+            // Create ongoing occupancies for two robots
+            index.UpdateCurrentOccupancy("r1", 0f);
+            index.UpdateCurrentOccupancy("r1", 5f);  // r1 occupancy: [0, 5]
+
+            index.UpdateCurrentOccupancy("r2", 20f);
+            index.UpdateCurrentOccupancy("r2", 30f);  // r2 occupancy: [20, 30]
+
+            Assert.IsTrue(index.HasOngoingOccupancy("r1"));
+            Assert.IsTrue(index.HasOngoingOccupancy("r2"));
+
+            // Remove all intervals ending at or before time 10
+            // r1's occupancy [0, 5] should be removed; r2's [20, 30] should survive
+            index.RemoveIntervalsBefore(10f);
+
+            var all = index.GetAllOccupancies();
+            Assert.AreEqual(1, all.Count, "Only r2's occupancy should remain");
+            Assert.AreEqual("r2", all[0].Occupier.RobotId);
+
+            // r1's ongoing entry should also be cleaned up
+            Assert.IsFalse(index.HasOngoingOccupancy("r1"),
+                "r1 should be removed from ongoingOccupancies after its interval is pruned");
+            Assert.IsTrue(index.HasOngoingOccupancy("r2"),
+                "r2 should still be in ongoingOccupancies since its interval survived");
+        }
+
+        [Test]
+        public void TemporalIndex_RemoveIntervalsBefore_KeepsOngoingIfIntervalSurvives()
+        {
+            var index = new TemporalIndex();
+
+            // Create an ongoing occupancy that spans across the cutoff
+            index.UpdateCurrentOccupancy("r1", 0f);
+            index.UpdateCurrentOccupancy("r1", 25f);  // r1 occupancy: [0, 25]
+
+            Assert.IsTrue(index.HasOngoingOccupancy("r1"));
+
+            // Remove intervals ending at or before time 10
+            // r1's occupancy [0, 25] ends at 25 > 10, so it should survive
+            index.RemoveIntervalsBefore(10f);
+
+            Assert.AreEqual(1, index.GetAllOccupancies().Count,
+                "r1's occupancy should survive since it ends at 25 > 10");
+            Assert.IsTrue(index.HasOngoingOccupancy("r1"),
+                "r1 should still be in ongoingOccupancies since its interval survived");
+        }
+
+        #endregion
+
+        // =====================================================================
         // P0: Occupancy ID Mismatch Tests
         // =====================================================================
 
@@ -661,6 +809,151 @@ namespace EditModeTests
             Assert.AreEqual(1, r1Results.Count,
                 "Updating with same entry time should extend existing interval");
             Assert.AreEqual(15f, r1Results[0].EndTime, 0.001f);
+        }
+
+        #endregion
+
+        // =====================================================================
+        // DynamicOccupancyLayer: AtomicSwapPath Conflict Scanning
+        // =====================================================================
+
+        #region DynamicOccupancyLayer: AtomicSwapPath Conflict Scanning
+
+        [Test]
+        public void AtomicSwapPath_NoConflict_ReturnsTrueAndWritesReservations()
+        {
+            var layer = new DynamicOccupancyLayer();
+            // r2 occupies cellA [0, 10]
+            layer.SetDynamicOccupancy("cellA", 0f, 10f, "r2", "plan2");
+            long vBefore = layer.Version;
+
+            // r1 swaps into cellA [20, 30] -- no overlap with r2
+            bool result = layer.AtomicSwapPath("r1", null,
+                new List<string> { "cellA" },
+                new List<float> { 20f },
+                new List<float> { 30f },
+                "plan1");
+
+            Assert.IsTrue(result, "Swap with no conflict should return true");
+            Assert.AreEqual(vBefore + 1, layer.Version, "Version should increment once on success");
+
+            var occupancies = layer.QueryOverlapping("cellA", 20f, 30f);
+            Assert.AreEqual(1, occupancies.FindAll(o => o.Occupier.RobotId == "r1").Count,
+                "r1 reservation should be written");
+        }
+
+        [Test]
+        public void AtomicSwapPath_ConflictDetected_ReturnsFalseAndDoesNotWrite()
+        {
+            var layer = new DynamicOccupancyLayer();
+            // r2 occupies cellA [5, 15]
+            layer.SetDynamicOccupancy("cellA", 5f, 15f, "r2", "plan2");
+            long vBefore = layer.Version;
+
+            // r1 tries to swap into cellA [10, 20] -- overlaps with r2's [5, 15]
+            bool result = layer.AtomicSwapPath("r1", null,
+                new List<string> { "cellA" },
+                new List<float> { 10f },
+                new List<float> { 20f },
+                "plan1");
+
+            Assert.IsFalse(result, "Swap with conflict should return false");
+            Assert.AreEqual(vBefore, layer.Version, "Version should not change on conflict");
+
+            // r1 reservation should NOT have been written
+            var occupancies = layer.QueryOverlapping("cellA", 10f, 20f);
+            var r1Occupancies = occupancies.FindAll(o => o.Occupier.RobotId == "r1");
+            Assert.AreEqual(0, r1Occupancies.Count,
+                "r1 reservation should not be written when conflict exists");
+        }
+
+        [Test]
+        public void AtomicSwapPath_TwoRobots_SecondSwapConflicts_ReturnsFalse()
+        {
+            var layer = new DynamicOccupancyLayer();
+
+            // First robot swaps successfully
+            bool first = layer.AtomicSwapPath("r1", null,
+                new List<string> { "cellA" },
+                new List<float> { 0f },
+                new List<float> { 10f },
+                "plan1");
+            Assert.IsTrue(first, "First swap should succeed");
+
+            // Second robot tries the same cell at overlapping time
+            bool second = layer.AtomicSwapPath("r2", null,
+                new List<string> { "cellA" },
+                new List<float> { 5f },
+                new List<float> { 15f },
+                "plan2");
+            Assert.IsFalse(second, "Second swap should fail due to conflict with r1");
+
+            // r1's reservation should still be there, r2's should not
+            var occupancies = layer.QueryOverlapping("cellA", 0f, 15f);
+            Assert.AreEqual(1, occupancies.Count);
+            Assert.AreEqual("r1", occupancies[0].Occupier.RobotId);
+        }
+
+        [Test]
+        public void AtomicSwapPath_SameRobotOwnOccupancy_DoesNotConflict()
+        {
+            var layer = new DynamicOccupancyLayer();
+
+            // r1 has an existing reservation
+            layer.SetDynamicOccupancy("cellA", 0f, 10f, "r1", "oldPlan");
+
+            // r1 swaps its own path -- should succeed despite temporal overlap
+            // because conflict check excludes the robot's own occupancies
+            bool result = layer.AtomicSwapPath("r1", "oldPlan",
+                new List<string> { "cellA" },
+                new List<float> { 5f },
+                new List<float> { 15f },
+                "newPlan");
+
+            Assert.IsTrue(result, "Robot should be able to swap its own overlapping reservations");
+        }
+
+        #endregion
+
+        #region Half-Open Interval Semantics
+
+        [Test]
+        public void TemporalIndex_QueryOverlapping_AdjacentIntervals_DoNotOverlap()
+        {
+            // [0, 5] and [5, 10] should NOT overlap with half-open semantics
+            // Robot A occupies until t=5, Robot B starts at t=5
+            var index = new TemporalIndex();
+            var occA = new TimeOccupancy(0f, 5f, new OccupancyIdentifier("r1"));
+            index.AddInterval(occA);
+
+            // Query for [5, 10] — should NOT find occA since occA ends exactly at 5
+            var result = index.QueryOverlapping(5f, 10f);
+            Assert.AreEqual(0, result.Count,
+                "Adjacent interval [0,5] should not overlap with query [5,10] under half-open semantics");
+        }
+
+        [Test]
+        public void TemporalIndex_QueryOverlapping_TrueOverlap_StillDetected()
+        {
+            var index = new TemporalIndex();
+            var occ = new TimeOccupancy(0f, 5f, new OccupancyIdentifier("r1"));
+            index.AddInterval(occ);
+
+            // Query for [4.99, 10] — should find occ since it overlaps at 4.99-5.0
+            var result = index.QueryOverlapping(4.99f, 10f);
+            Assert.AreEqual(1, result.Count, "Truly overlapping interval should still be detected");
+        }
+
+        [Test]
+        public void TemporalIndex_QueryOverlapping_NonOverlapping_NotDetected()
+        {
+            var index = new TemporalIndex();
+            var occ = new TimeOccupancy(0f, 5f, new OccupancyIdentifier("r1"));
+            index.AddInterval(occ);
+
+            // Query for [6, 10] — clearly no overlap
+            var result = index.QueryOverlapping(6f, 10f);
+            Assert.AreEqual(0, result.Count, "Non-overlapping intervals should not be detected");
         }
 
         #endregion

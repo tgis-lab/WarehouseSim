@@ -132,11 +132,13 @@ namespace EditModeTests
 
             long versionBefore = layer.Version;
 
-            layer.AtomicSwapPath("r1", "oldPlan",
+            bool result = layer.AtomicSwapPath("r1", "oldPlan",
                 new List<string>{"cellC", "cellD"},
                 new List<float>{10, 15},
                 new List<float>{20, 25},
                 "newPlan");
+
+            Assert.IsTrue(result);
 
             // Old r1 planned cleared
             var cellA_r1 = layer.QueryOverlapping("cellA", 0, 10)
@@ -171,12 +173,13 @@ namespace EditModeTests
         {
             var layer = new DynamicOccupancyLayer();
             // No old occupancy - first-time path
-            layer.AtomicSwapPath("r1", null,
+            bool result = layer.AtomicSwapPath("r1", null,
                 new List<string>{"cellA"},
                 new List<float>{0},
                 new List<float>{10},
                 "firstPlan");
 
+            Assert.IsTrue(result);
             var cellA = layer.QueryOverlapping("cellA", 0, 10);
             Assert.AreEqual(1, cellA.Count);
         }
