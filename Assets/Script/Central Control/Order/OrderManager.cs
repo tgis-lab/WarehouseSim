@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Map;
+using CentralControl.RobotControl;
 
 namespace CentralControl.OrderAssignment
 {
@@ -151,6 +152,37 @@ namespace CentralControl.OrderAssignment
             }
         }
         
+        public bool TryAssignOrderToRobot(Order order, RobotController robot)
+        {
+            if (order == null || robot == null) return false;
+
+            lock (_orderLock)
+            {
+                if (order.Status != OrderStatus.Pending)
+                {
+                    Debug.LogWarning($"[OrderManager] Cannot assign order {order.Id}: status is {order.Status}, not Pending");
+                    return false;
+                }
+                order.MarkAssigned(robot.Id);
+            }
+
+            try
+            {
+                robot.ReceiveOrder(order);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[OrderManager] Robot {robot.Id} rejected order {order.Id}: {ex.Message}");
+                lock (_orderLock)
+                {
+                    order.ResetAssignment();
+                }
+                return false;
+            }
+
+            return true;
+        }
+
         public void AddOrders(IEnumerable<Order> newOrders)
         {
             if (newOrders == null) return;

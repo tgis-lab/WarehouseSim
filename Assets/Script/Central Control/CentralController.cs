@@ -106,6 +106,10 @@ namespace CentralControl
 
         private readonly Dictionary<string, AcceptedPlanMetadata> acceptedPlanRegistry = new Dictionary<string, AcceptedPlanMetadata>();
 
+        // Replan storm prevention: per-robot cooldown
+        private Dictionary<string, float> lastReplanRequestTime = new Dictionary<string, float>();
+        private const float REPLAN_COOLDOWN = 5.0f;
+
         #endregion
         
         public bool TryGetRobotId(GameObject robotObject, out int robotId)
@@ -214,6 +218,9 @@ namespace CentralControl
             // Initialize conflict resolver
             InitializeConflictDetector();
 
+            // Reset PickingQueueManager singleton state (survives scene reload in Unity)
+            PickingQueueManager.Instance.Reset();
+
             // Initialize robot manager with elevator manager
             InitializeRobotManager();
 
@@ -263,6 +270,7 @@ namespace CentralControl
                 EventManager.Instance.TriggerMapLoaded();
                 EventManager.Instance.TriggerRobotsInitialized();
                 EventManager.Instance.TriggerPickersInitialized();
+                EventManager.Instance.OnPathPlanningMetricsRecorded -= OnPathPlanningMetricsRecorded;
                 EventManager.Instance.OnPathPlanningMetricsRecorded += OnPathPlanningMetricsRecorded;
             }
 
@@ -459,6 +467,7 @@ namespace CentralControl
 
                 EventManager.Instance.OnRobotCollisionDetected += HandleRobotCollision;
                 EventManager.Instance.OnDeadlockDetected += HandleDeadlockDetected;
+                EventManager.Instance.OnRequestGlobalMapUpdate -= HandleGlobalMapUpdateRequest;
                 EventManager.Instance.OnRequestGlobalMapUpdate += HandleGlobalMapUpdateRequest;
 
                 Debug.Log("[CentralControl] Collision tracking system initialized!");
@@ -542,29 +551,25 @@ namespace CentralControl
                 return;
             }
             
-            // Get unassigned orders
-            List<Order> orders = orderManager.GetAllOrders()
-                .Where(o => o.AssignedRobotId == null)
-                .ToList();
-            
+            // Get unassigned orders (GetAllOrders already filters by Pending status)
+            List<Order> orders = orderManager.GetAllOrders();
+
             if (orders.Count == 0)
             {
                 Debug.Log("[CentralControl] No unassigned orders available for distribution");
                 return;
             }
-            
+
             Debug.Log($"[CentralControl] Found {freeRobots.Count} free robots and {orders.Count} unassigned orders");
-            
-            // Create order assigner with indoor space for multi-floor path calculations
-            OrderAssignmentSelector assigner = new OrderAssignmentSelector(indoorSpace);
-            
+
+            // Create order assigner with indoor space and order manager for transactional assignment
+            OrderAssignmentSelector assigner = new OrderAssignmentSelector(indoorSpace, orderManager);
+
             // Initial distribution (one order per robot)
             assigner.InitialOrderDistribution(orders, freeRobots);
-            
+
             // After initial distribution, distribute remaining orders using clustering
-            orders = orderManager.GetAllOrders()
-                .Where(o => o.AssignedRobotId == null)
-                .ToList();
+            orders = orderManager.GetAllOrders();
             
             if (orders.Count > 0)
             {
@@ -722,6 +727,7 @@ namespace CentralControl
             // Register event listeners
             if (EventManager.Instance != null)
             {
+                EventManager.Instance.OnRobotPathPlanned -= HandleRobotPathPlanned;
                 EventManager.Instance.OnRobotPathPlanned += HandleRobotPathPlanned;
             }
         }
@@ -758,6 +764,13 @@ namespace CentralControl
 
             foreach (var robotId in e.InvolvedRobotIds)
             {
+                // Replan cooldown: skip if this robot recently received a replan request
+                if (lastReplanRequestTime.TryGetValue(robotId, out float lastTime) && Time.time - lastTime < REPLAN_COOLDOWN)
+                {
+                    Debug.Log($"[CentralControl] Replan cooldown active for Robot {robotId}, skipping deadlock replan ({Time.time - lastTime:F1}s < {REPLAN_COOLDOWN}s)");
+                    continue;
+                }
+
                 float delay = GetDeadlockStaggerDelay(e.InvolvedRobotIds, robotId);
                 if (robotId == yieldRobotId)
                 {
@@ -767,6 +780,7 @@ namespace CentralControl
                 {
                     EventManager.Instance?.TriggerReplanRequested(robotId, "DeadlockResolution", delay);
                 }
+                lastReplanRequestTime[robotId] = Time.time;
             }
         }
 
@@ -919,8 +933,18 @@ namespace CentralControl
                         // Check if conflicts are truly resolved
                         if (remainingConflicts.Count == 0)
                         {
-                            conflictResolved = true;
-                            Debug.Log($"[CentralControl] Conflicts successfully resolved: Robot {robotId}, strategy: {modificationType}");
+                            // Unit 12B: Reject partial_speed_adjustment — do not send incomplete
+                            // modifications to the robot. Fall through to replan instead.
+                            if (modificationType == "partial_speed_adjustment")
+                            {
+                                conflictResolved = false;
+                                Debug.LogWarning($"[CentralControl] Rejecting partial_speed_adjustment for Robot {robotId} — falling through to replan");
+                            }
+                            else
+                            {
+                                conflictResolved = true;
+                                Debug.Log($"[CentralControl] Conflicts successfully resolved: Robot {robotId}, strategy: {modificationType}");
+                            }
                         }
                         else
                         {
@@ -942,7 +966,7 @@ namespace CentralControl
                         {
                             NotifyRobotPathModified(robotId, planId, path, modifiedTimes, modificationType, modificationValue);
                         }
-                        else if (modificationType == "speed_adjustment" || modificationType == "partial_speed_adjustment")
+                        else if (modificationType == "speed_adjustment")
                         {
                             NotifyRobotPathModifiedWithSpeed(robotId, planId, path, modifiedTimes, modifiedSpeeds, modificationValue);
                         }
@@ -997,11 +1021,17 @@ namespace CentralControl
             }
 
             // Atomic swap on global layer (single lock)
-            globalOccupancyLayer.AtomicSwapPath(robotId, oldPlanId, cellIds, startTimes, endTimes, newPlanId);
+            bool swapOk = globalOccupancyLayer.AtomicSwapPath(robotId, oldPlanId, cellIds, startTimes, endTimes, newPlanId);
 
-            robotActivePlanIds[robotId] = newPlanId;
-
-            Debug.Log($"[CentralControl] AtomicSwap for robot {robotId}: {oldPlanId} -> {newPlanId}");
+            if (swapOk)
+            {
+                robotActivePlanIds[robotId] = newPlanId;
+                Debug.Log($"[CentralControl] AtomicSwap for robot {robotId}: {oldPlanId} -> {newPlanId}");
+            }
+            else
+            {
+                Debug.LogWarning($"[CentralControl] AtomicSwap conflict for robot {robotId}, plan {newPlanId} rejected");
+            }
         }
         
         private void RecordCellSpaceConflict(string robotId, string planId, List<ConnectionPoint> path, List<float> times, Dictionary<string, List<TimeOccupancy>> conflicts)
@@ -1059,8 +1089,17 @@ namespace CentralControl
                     if (unresolvedConflicts)
                     {
                         // All resolution strategies failed — request replan
-                        Debug.LogWarning($"[CentralControl] Robot {e.RobotId} path has unresolvable conflicts, requesting replan");
-                        EventManager.Instance?.TriggerReplanRequested(e.RobotId, "UnresolvedPathConflict");
+                        // Replan cooldown: skip if this robot recently received a replan request
+                        if (lastReplanRequestTime.TryGetValue(e.RobotId, out float lastReplanTime) && Time.time - lastReplanTime < REPLAN_COOLDOWN)
+                        {
+                            Debug.Log($"[CentralControl] Replan cooldown active for Robot {e.RobotId}, skipping conflict replan ({Time.time - lastReplanTime:F1}s < {REPLAN_COOLDOWN}s)");
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[CentralControl] Robot {e.RobotId} path has unresolvable conflicts, requesting replan");
+                            EventManager.Instance?.TriggerReplanRequested(e.RobotId, "UnresolvedPathConflict");
+                            lastReplanRequestTime[e.RobotId] = Time.time;
+                        }
                     }
                     // else: DetectPathConflicts already reserved the modified path and
                     // notified the robot of the modification. No further action needed.
@@ -1154,24 +1193,22 @@ namespace CentralControl
         private IEnumerator AssignOrderToRobot(RobotController robot)
         {
             yield return new WaitForSeconds(0.5f);
-            
+
             if (robot.IsFree && orderManager != null)
             {
-                List<Order> unassignedOrders = orderManager.GetAllOrders()
-                    .Where(o => o.AssignedRobotId == null)
-                    .ToList();
-                    
+                List<Order> unassignedOrders = orderManager.GetAllOrders();
+
                 if (unassignedOrders.Count > 0)
                 {
-                    OrderAssignmentSelector assigner = new OrderAssignmentSelector(indoorSpace);
+                    OrderAssignmentSelector assigner = new OrderAssignmentSelector(indoorSpace, orderManager);
                     Order bestOrder = assigner.FindBestOrder(robot, unassignedOrders);
-                    
+
                     if (bestOrder != null)
                     {
-                        robot.ReceiveOrder(bestOrder);
-                        bestOrder.AssignedRobotId = robot.Id;
-                        
-                        Debug.Log($"[CentralControl] Assigned order {bestOrder.Id} to free robot {robot.Id}");
+                        if (orderManager.TryAssignOrderToRobot(bestOrder, robot))
+                        {
+                            Debug.Log($"[CentralControl] Assigned order {bestOrder.Id} to free robot {robot.Id}");
+                        }
                     }
                 }
             }

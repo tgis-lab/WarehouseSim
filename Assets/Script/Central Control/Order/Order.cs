@@ -22,7 +22,7 @@ namespace CentralControl.OrderAssignment
         public DateTime CreationTime { get; private set; }
         public DateTime Priority => CreationTime;
         public float ExecutionTime { get; private set; }
-        public int? AssignedRobotId { get; set; }
+        public int? AssignedRobotId { get; private set; }
         public string FloorLevel { get; private set; }
         
         public OrderStatus Status { get; private set; } = OrderStatus.Pending;
@@ -65,6 +65,12 @@ namespace CentralControl.OrderAssignment
             AssignedRobotId = robotId;
             Status = OrderStatus.Assigned;
             LastAttemptTime = DateTime.Now;
+        }
+
+        public void ResetAssignment()
+        {
+            AssignedRobotId = null;
+            Status = OrderStatus.Pending;
         }
 
         public void MarkInProgress()

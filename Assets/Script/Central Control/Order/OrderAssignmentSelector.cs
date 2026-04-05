@@ -12,23 +12,31 @@ namespace CentralControl.OrderAssignment
     {
         private KMeans kMeans;
         private IndoorSpace indoorSpace;
+        private OrderManager orderManager;
         private Queue<Order> waitingQueue = new Queue<Order>();
 
         public OrderAssignmentSelector()
         {
             kMeans = new KMeans();
             indoorSpace = null;
+            orderManager = null;
         }
-        
-        public OrderAssignmentSelector(IndoorSpace indoorSpace)
+
+        public OrderAssignmentSelector(IndoorSpace indoorSpace, OrderManager orderManager = null)
         {
             kMeans = new KMeans();
             this.indoorSpace = indoorSpace;
+            this.orderManager = orderManager;
         }
-        
+
         public void SetIndoorSpace(IndoorSpace indoorSpace)
         {
             this.indoorSpace = indoorSpace;
+        }
+
+        public void SetOrderManager(OrderManager orderManager)
+        {
+            this.orderManager = orderManager;
         }
 
         public void AssignOrders(List<Order> orders, List<RobotController> robots)
@@ -170,8 +178,14 @@ namespace CentralControl.OrderAssignment
 
         private void AssignOrderToRobot(Order order, RobotController robot)
         {
-            robot.ReceiveOrder(order);
-            order.AssignedRobotId = robot.Id;
+            if (orderManager != null)
+            {
+                orderManager.TryAssignOrderToRobot(order, robot);
+            }
+            else
+            {
+                UnityEngine.Debug.LogWarning("OrderAssignmentSelector: orderManager is null, cannot assign atomically. Skipping.");
+            }
         }
         
         private float CalculatePathDistance(RobotController robot, Order order)
