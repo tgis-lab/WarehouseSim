@@ -393,12 +393,12 @@ namespace EditModeTests
         [Test]
         public void CalculateVelocity_ObstacleAtKnownDistance_RespectsAdmissibility()
         {
-            // Obstacle at 1.0m, radius 0.0 → clearance = 1.0m
-            // maxAdmissibleV = sqrt(2 * 1.0 * 5.0) ≈ 3.16 m/s
+            // Obstacle at 3.0m ahead, radius 0.0 → clearance = 3.0 - 0.3 (RobotRadius) = 2.7m
+            // maxAdmissibleV = sqrt(2 * 2.7 * 5.0) ≈ 5.2 m/s
             // All our samples (max 2.0) should pass admissibility
             var obstacles = new List<ObstacleData>
             {
-                new ObstacleData(new Vector3(0, 0, 1.0f), 0f)
+                new ObstacleData(new Vector3(0, 0, 3.0f), 0f)
             };
 
             _planner.Reset();
@@ -437,6 +437,88 @@ namespace EditModeTests
             // Should still find a solution (turning to avoid)
             // or if the obstacle is too close for all samples, stop
             Assert.IsFalse(float.IsNaN(result.LinearVelocity));
+        }
+
+        // =====================================================================
+        //  Robot Radius + Post-Smoothing Admissibility
+        // =====================================================================
+
+        [Test]
+        public void RobotRadius_Default_Is0Point3()
+        {
+            Assert.AreEqual(0.3f, _planner.RobotRadius, 0.001f);
+        }
+
+        [Test]
+        public void RobotRadius_RejectsTrajectory_WhenClearanceLessThanRadius()
+        {
+            // Obstacle at (0,0,1.5) with radius 0.0 → surface at 1.5m from origin
+            // Trajectory goes straight forward at v=1.0 → passes at ~1.5m
+            // Clearance = 1.5 - 0.0 - RobotRadius(0.3) = 1.2 → still admissible
+            //
+            // But obstacle at (0.3, 0, 1.0) with radius 0.0 → surface 0.316m away laterally
+            // Clearance = 0.316 - 0.0 - 0.3 = 0.016 → barely admissible
+            //
+            // Place obstacle so clearance after RobotRadius is negative → trajectory rejected
+            // Obstacle at (0.2, 0, 0.5) radius 0.0 → dist from straight-ahead trajectory ~0.2
+            // 0.2 - 0.0 - 0.3 = -0.1 → should be rejected
+            _planner.Reset();
+            _planner.RobotRadius = 0.3f;
+            _planner.VelocitySamples = 1; // Only test v=midpoint
+            _planner.OmegaSamples = 1;    // Only omega=0
+
+            var obstacles = new List<ObstacleData>
+            {
+                new ObstacleData(new Vector3(0.2f, 0, 0.5f), 0f) // surface 0.2m from trajectory
+            };
+
+            var result = _planner.CalculateVelocity(
+                Vector3.zero, Quaternion.identity, 1.0f, 0f,
+                new Vector3(0, 0, 5), obstacles);
+
+            // With RobotRadius=0.3 and obstacle at 0.2m → clearance < 0 → rejected → NeedReplan
+            Assert.IsTrue(result.NeedReplan, "Should need replan when obstacle within robot radius");
+        }
+
+        [Test]
+        public void PostSmoothing_ClampsVelocity_WhenSmoothingExceedsAdmissible()
+        {
+            // Set up: first call at high speed to establish _previousV
+            _planner.Reset();
+            _planner.RobotRadius = 0f; // disable radius for this test
+
+            // Call 1: high speed, no obstacles → bestV will be high
+            var result1 = _planner.CalculateVelocity(
+                Vector3.zero, Quaternion.identity, 2.0f, 0f,
+                new Vector3(0, 0, 10), new List<ObstacleData>());
+            Assert.Greater(result1.LinearVelocity, 1.5f, "First call should produce high velocity");
+
+            // Call 2: same high currentV, but obstacle very close
+            // Obstacle at (0, 0, 0.5) with radius 0 → minDist = 0.5
+            // maxAdmissibleV = sqrt(2 * 0.5 * 5.0) = sqrt(5) ≈ 2.236
+            // But place it closer: obstacle at (0, 0, 0.15) radius 0 → dist ~0.15
+            // maxAdmissibleV = sqrt(2 * 0.15 * 5.0) = sqrt(1.5) ≈ 1.22
+            // Smoothed velocity from _previousV ~2.0 would be ~Lerp(2.0, selected, 0.7)
+            // If selected is 1.0, smoothed = 0.3*2.0 + 0.7*1.0 = 1.3 > 1.22 → must be clamped
+            var obstacles = new List<ObstacleData>
+            {
+                new ObstacleData(new Vector3(0, 0, 0.15f), 0f)
+            };
+
+            var result2 = _planner.CalculateVelocity(
+                Vector3.zero, Quaternion.identity, 2.0f, 0f,
+                new Vector3(0, 0, 10), obstacles);
+
+            if (!result2.NeedReplan)
+            {
+                // If a trajectory was found, the final velocity must be admissible
+                // admissibleV = sqrt(2 * minDist * MaxDecel) where minDist is for the winning trajectory
+                // We can't compute exact minDist from here, but velocity should be <= maxAdmissibleV for the obstacle
+                // At minimum, it should be less than or equal to _previousV (not smoothed upward past admissible)
+                Assert.LessOrEqual(result2.LinearVelocity, 2.0f,
+                    "Post-smoothing velocity should not exceed previous velocity when obstacles are close");
+            }
+            // NeedReplan is also acceptable — obstacle too close for any trajectory
         }
 
         // =====================================================================

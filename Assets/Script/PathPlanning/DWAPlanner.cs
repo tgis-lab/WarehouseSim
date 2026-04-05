@@ -55,6 +55,9 @@ namespace PathPlanning
         public int OmegaSamples { get; set; } = 15;
         public int TrajectorySteps { get; set; } = 10;
 
+        // --- Robot geometry ---
+        public float RobotRadius { get; set; } = 0.3f;
+
         // --- Score weights ---
         public float HeadingWeight { get; set; } = 0.3f;
         public float ClearanceWeight { get; set; } = 0.4f;
@@ -170,8 +173,8 @@ namespace PathPlanning
                     // Simulate circular arc into reusable buffer
                     SimulateArcInto(_trajectoryBuffer, position, orientation, v, omega, predTime, trajSteps);
 
-                    // Min obstacle distance along the arc (with early exit)
-                    float minDist = MinObstacleDistanceAlongArc(_trajectoryBuffer, obstacles);
+                    // Min obstacle distance along the arc (with early exit), accounting for robot body
+                    float minDist = MinObstacleDistanceAlongArc(_trajectoryBuffer, obstacles, RobotRadius);
 
                     // Admissibility: robot must be able to stop before nearest obstacle
                     if (v > 0f && minDist < float.MaxValue)
@@ -235,6 +238,7 @@ namespace PathPlanning
 
             float bestScore = float.MinValue;
             float bestV = 0f, bestOmega = 0f;
+            float bestMinDist = float.MaxValue;
 
             for (int i = 0; i < _candidateBuffer.Count; i++)
             {
@@ -255,14 +259,27 @@ namespace PathPlanning
                     bestScore = score;
                     bestV = c.V;
                     bestOmega = c.Omega;
+                    bestMinDist = c.ClearanceRaw;
                 }
             }
 
-            // --- 5. Apply smoothing ---
+            // --- 5. Apply smoothing with post-smoothing admissibility clamp ---
+            float preSmoothBestV = bestV;
             if (_hasPreviousResult)
             {
                 bestV = Mathf.Lerp(_previousV, bestV, 0.7f);
                 bestOmega = Mathf.Lerp(_previousOmega, bestOmega, 0.7f);
+
+                // Re-check admissibility after smoothing — smoothing may pull velocity
+                // above the safe stopping threshold for the winning trajectory's obstacle distance
+                if (bestV > 0f && bestMinDist < float.MaxValue)
+                {
+                    float maxAdmissibleV = Mathf.Sqrt(2f * bestMinDist * MaxDecel);
+                    if (bestV > maxAdmissibleV)
+                    {
+                        bestV = preSmoothBestV;
+                    }
+                }
             }
 
             _previousV = bestV;
@@ -335,7 +352,7 @@ namespace PathPlanning
         }
 
         private static float MinObstacleDistanceAlongArc(
-            List<Vector3> trajectory, IReadOnlyList<ObstacleData> obstacles)
+            List<Vector3> trajectory, IReadOnlyList<ObstacleData> obstacles, float robotRadius = 0f)
         {
             if (obstacles == null || obstacles.Count == 0)
                 return float.MaxValue;
@@ -351,7 +368,7 @@ namespace PathPlanning
                 {
                     float dx = px - obstacles[j].Position.x;
                     float dz = pz - obstacles[j].Position.z;
-                    float dist = Mathf.Sqrt(dx * dx + dz * dz) - obstacles[j].Radius;
+                    float dist = Mathf.Sqrt(dx * dx + dz * dz) - obstacles[j].Radius - robotRadius;
                     if (dist < minDist)
                         minDist = dist;
                     if (minDist <= 0f)
