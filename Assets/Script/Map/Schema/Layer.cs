@@ -24,7 +24,11 @@ namespace Map {
 
         public float SpeedLimit()
         {
-            return Convert.ToSingle(this.Properties["speed"]);
+            if (this.Properties.TryGetValue("speed", out var speed) && speed != null)
+            {
+                return Convert.ToSingle(speed);
+            }
+            return 1.0f;
         }
 
         public float DeaccelerationFactor()
@@ -39,29 +43,17 @@ namespace Map {
 
         public bool IsIntersection()
         {
-            if (this.Properties["type"].Equals("intersection"))
-            {
-                return true;
-            }
-            return false;
+            return this.Properties.TryGetValue("type", out var t) && "intersection".Equals(t);
         }
-        
+
         public bool IsAisle()
         {
-            if (this.Properties["type"].Equals("aisle"))
-            {
-                return true;
-            }
-            return false;
+            return this.Properties.TryGetValue("type", out var t) && "aisle".Equals(t);
         }
 
         public bool IsQueue()
         {
-            if (this.Properties["type"].Equals("queue"))
-            {
-                return true;
-            }
-            return false;
+            return this.Properties.TryGetValue("type", out var t) && "queue".Equals(t);
         }
 
         public string ToJson()

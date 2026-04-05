@@ -438,7 +438,7 @@ namespace Map {
             List<Layer> layers = new List<Layer>();
             foreach (var layer in _layers)
             {
-                if (layer.Properties["type"].Equals(type))
+                if (layer.Properties.TryGetValue("type", out var t) && type.Equals(t))
                 {
                     layers.Add(layer);
                 }
@@ -693,7 +693,10 @@ namespace Map {
                     {
                         y = (level - 1) * 3.0f;
                     }
-                    y = level * 3.0f;
+                    else
+                    {
+                        y = level * 3.0f;
+                    }
                 }
                 
                 cellSpaceCentroids.Add(

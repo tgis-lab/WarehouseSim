@@ -664,6 +664,73 @@ namespace EditModeTests
             Assert.Contains("c3", layer.CellSpaces);
         }
 
+        // ==================== Layer Safe Access Tests ====================
+
+        [Test]
+        public void Layer_SpeedLimit_ReturnsDefault_WhenSpeedKeyMissing()
+        {
+            var props = new Dictionary<string, object>
+            {
+                { "type", "aisle" }
+                // no "speed" key
+            };
+            var layer = new Layer("l_nospeed", new List<string>(), props);
+
+            Assert.AreEqual(1.0f, layer.SpeedLimit(), 0.001f);
+        }
+
+        [Test]
+        public void Layer_IsIntersection_ReturnsFalse_WhenTypeKeyMissing()
+        {
+            var props = new Dictionary<string, object>
+            {
+                { "speed", 1.0f }
+                // no "type" key
+            };
+            var layer = new Layer("l_notype", new List<string>(), props);
+
+            Assert.IsFalse(layer.IsIntersection());
+        }
+
+        [Test]
+        public void Layer_IsAisle_ReturnsFalse_WhenTypeKeyMissing()
+        {
+            var props = new Dictionary<string, object>
+            {
+                { "speed", 1.0f }
+            };
+            var layer = new Layer("l_notype2", new List<string>(), props);
+
+            Assert.IsFalse(layer.IsAisle());
+        }
+
+        [Test]
+        public void Layer_IsQueue_ReturnsFalse_WhenTypeKeyMissing()
+        {
+            var props = new Dictionary<string, object>
+            {
+                { "speed", 1.0f }
+            };
+            var layer = new Layer("l_notype3", new List<string>(), props);
+
+            Assert.IsFalse(layer.IsQueue());
+        }
+
+        [Test]
+        public void Layer_TypeChecks_ReturnFalse_WhenTypeValueIsNull()
+        {
+            var props = new Dictionary<string, object>
+            {
+                { "type", null },
+                { "speed", 1.0f }
+            };
+            var layer = new Layer("l_nulltype", new List<string>(), props);
+
+            Assert.IsFalse(layer.IsIntersection());
+            Assert.IsFalse(layer.IsAisle());
+            Assert.IsFalse(layer.IsQueue());
+        }
+
         // ==================== Container / RLineGroup Tests ====================
 
         [Test]

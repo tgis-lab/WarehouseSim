@@ -111,18 +111,21 @@ namespace Map {
             string jsonText = jsonFile.text;
             Debug.Log($"JSON file size: {jsonText.Length} characters");
             
-            return await Task.Run(() =>
+            var logMessages = new List<string>();
+            var errorMessages = new List<string>();
+
+            var result = await Task.Run(() =>
             {
-                try 
+                try
                 {
                     JsonSerializerSettings settings = new JsonSerializerSettings
                     {
                         Converters = new List<JsonConverter> { new GeometryConverter() },
                         MissingMemberHandling = MissingMemberHandling.Ignore,
                         NullValueHandling = NullValueHandling.Ignore,
-                        Error = (sender, args) => 
+                        Error = (sender, args) =>
                         {
-                            Debug.LogError($"JSON Error: {args.ErrorContext.Error.Message}, Path: {args.ErrorContext.Path}");
+                            errorMessages.Add($"JSON Error: {args.ErrorContext.Error.Message}, Path: {args.ErrorContext.Path}");
                             args.ErrorContext.Handled = true;
                         }
                     };
@@ -131,20 +134,32 @@ namespace Map {
                     if (indoorSpace != null)
                     {
                         indoorSpace.LoadProperties();
-                        Debug.Log($"JSON Deserialized successfully: {indoorSpace.CellSpaces.Count} cell spaces, {indoorSpace.CellBoundaries.Count} cell boundaries");
+                        logMessages.Add($"JSON Deserialized successfully: {indoorSpace.CellSpaces.Count} cell spaces, {indoorSpace.CellBoundaries.Count} cell boundaries");
                     }
                     else
                     {
-                        Debug.LogError("Deserialized IndoorSpace is null");
+                        errorMessages.Add("Deserialized IndoorSpace is null");
                     }
                     return indoorSpace;
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"Error deserializing JSON: {ex.Message}\n{ex.StackTrace}");
+                    errorMessages.Add($"Error deserializing JSON: {ex.Message}\n{ex.StackTrace}");
                     throw;
                 }
             });
+
+            // Flush collected log messages on main thread (Unity Debug API is not thread-safe)
+            foreach (var msg in errorMessages)
+            {
+                Debug.LogError(msg);
+            }
+            foreach (var msg in logMessages)
+            {
+                Debug.Log(msg);
+            }
+
+            return result;
         }
         # endregion
 

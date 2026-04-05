@@ -4,6 +4,7 @@ using Map;
 using NetTopologySuite.Geometries;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace EditModeTests
 {
@@ -625,6 +626,59 @@ namespace EditModeTests
 
             Assert.AreEqual("1F", floorLevel,
                 "When one side is an elevator, should return the non-elevator cell's floor");
+        }
+
+        // ===================================================================
+        //  13. GetCellSpaceCentroids — Y coordinate per floor level
+        // ===================================================================
+
+        [Test]
+        public void GetCellSpaceCentroids_ReturnsCorrectYForMultipleFloors()
+        {
+            // Build a multi-floor IndoorSpace: B1, 1F, 2F, 3F
+            indoorSpace = new IndoorSpace();
+            indoorSpace.CellSpaces.Add(MakeCell("b1_cell", 0, 0, "B1"));
+            indoorSpace.CellSpaces.Add(MakeCell("f1_cell", 1, 0, "1F"));
+            indoorSpace.CellSpaces.Add(MakeCell("f2_cell", 2, 0, "2F"));
+            indoorSpace.CellSpaces.Add(MakeCell("f3_cell", 3, 0, "3F"));
+
+            Dictionary<string, Vector3> centroids = indoorSpace.GetCellSpaceCentroids();
+
+            Assert.AreEqual(4, centroids.Count);
+
+            // B1 -> ParseFloorLevel returns -1 -> y = -1 * 3.0 = -3.0
+            Assert.AreEqual(-3.0f, centroids["b1_cell"].y, 0.001f,
+                "B1 (level=-1) should map to y=-3.0");
+
+            // 1F -> ParseFloorLevel returns 1 -> y = (1-1) * 3.0 = 0.0
+            Assert.AreEqual(0.0f, centroids["f1_cell"].y, 0.001f,
+                "1F (level=1) should map to y=0.0");
+
+            // 2F -> ParseFloorLevel returns 2 -> y = (2-1) * 3.0 = 3.0
+            Assert.AreEqual(3.0f, centroids["f2_cell"].y, 0.001f,
+                "2F (level=2) should map to y=3.0");
+
+            // 3F -> ParseFloorLevel returns 3 -> y = (3-1) * 3.0 = 6.0
+            Assert.AreEqual(6.0f, centroids["f3_cell"].y, 0.001f,
+                "3F (level=3) should map to y=6.0");
+        }
+
+        [Test]
+        public void GetCellSpaceCentroids_XZMatchCellSpaceCentroid()
+        {
+            // Verify X and Z coordinates come from the cell's geometry centroid
+            indoorSpace = new IndoorSpace();
+            indoorSpace.CellSpaces.Add(MakeCell("c_xz", 5.0, 7.0, "1F"));
+
+            Dictionary<string, Vector3> centroids = indoorSpace.GetCellSpaceCentroids();
+
+            Assert.AreEqual(1, centroids.Count);
+            Assert.AreEqual(5.0f, centroids["c_xz"].x, 0.001f,
+                "X should match cell centroid X");
+            Assert.AreEqual(7.0f, centroids["c_xz"].z, 0.001f,
+                "Z should match cell centroid Y (2D Y maps to 3D Z)");
+            Assert.AreEqual(0.0f, centroids["c_xz"].y, 0.001f,
+                "1F should have y=0.0");
         }
     }
 }
