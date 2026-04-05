@@ -133,6 +133,7 @@ namespace CentralControl.RobotControl
         private List<PathSegment> currentMovement = new List<PathSegment>();
         private int currentPathIndex = 0;
         private bool pickingCompleted = false;
+        private bool pickingWaitSucceeded = false;
         private string currentPlanId;
         private string activeConfirmedPlanId;  // Currently executing confirmed path
         private string pendingPlanId;          // Path awaiting accept from CentralController
@@ -171,7 +172,13 @@ namespace CentralControl.RobotControl
         private float lastPathRecoveryTime = 0f;
         private const int MAX_RECOVERY_ATTEMPTS = 5;
         private const float RECOVERY_INTERVAL = 1.0f;
-        
+
+        // Replan storm prevention: local cooldown + per-order limit
+        private int replanCountForCurrentOrder = 0;
+        private const int MAX_REPLAN_PER_ORDER = 10;
+        private float lastLocalReplanTime = 0f;
+        private const float LOCAL_REPLAN_COOLDOWN = 3.0f;
+
         // Conflict resolution
         private Coroutine waitForExecutionCoroutine;
         private List<float> pathTimes = new List<float>();
@@ -197,7 +204,7 @@ namespace CentralControl.RobotControl
             public GameObject OtherGameObject;
             public float Timestamp;
         }
-        private readonly List<PendingCollisionRecord> pendingCollisions = new List<PendingCollisionRecord>();
+        private readonly ConcurrentQueue<PendingCollisionRecord> pendingCollisions = new ConcurrentQueue<PendingCollisionRecord>();
 
         // Collision detection optimization
         private Coroutine collisionCheckCoroutine;
@@ -515,6 +522,7 @@ namespace CentralControl.RobotControl
             
             if (!isProcessingOrdersRunning)
             {
+                isProcessingOrdersRunning = true;
                 StartCoroutine(ProcessOrders());
             }
         }
@@ -536,7 +544,10 @@ namespace CentralControl.RobotControl
                     Debug.LogError($"Robot {Id} failed to dequeue order");
                     break;
                 }
-                
+
+                // Reset replan counter for new order
+                replanCountForCurrentOrder = 0;
+
                 Debug.Log($"Robot {Id} processing order {currentOrder.Id}, destination: {currentOrder.Destination}, floor: {currentOrder.FloorLevel}");
                 
                 // Execute order
@@ -641,7 +652,14 @@ namespace CentralControl.RobotControl
             hasFinalDestination = false;
             finalDestination = Vector3.zero;
             SetBehavior(RobotBehavior.Idle);
-            
+
+            if (!pickingWaitSucceeded)
+            {
+                ReportOrderFailed(order.Id, "PickingTimeout");
+                Debug.LogWarning($"Robot {Id} failed picking for order {order.Id} due to timeout");
+                yield break;
+            }
+
             ReportOrderCompleted(order.Id);
             Debug.Log($"Robot {Id} completed picking for order {order.Id}");
         }
@@ -665,29 +683,37 @@ namespace CentralControl.RobotControl
         private IEnumerator WaitForPicking(Order order, Vector3 location)
         {
             isWaitingForPicking = true;
+            pickingWaitSucceeded = false;
             currentVelocity = Vector3.zero; // Stop moving
             currentSpeed = 0f;
             currentAcceleration = 0f;
 
             // Notify picker
             EventManager.Instance.TriggerRobotReadyForPicking(Id.ToString(), order.PickingPoint, location);
-            
-            // Wait until picking is completed
-            float timeout = 10f;  // 1 minutes timeout
+
+            // Wait until picking is completed (10s simulates picking duration when no real picker is used)
+            float timeout = 10f;
             float startTime = Time.time;
-            
+
             while (!pickingCompleted && Time.time - startTime < timeout)
             {
                 yield return null;
             }
-            
-            if (!pickingCompleted)
-            {
-                Debug.LogWarning($"Robot {Id} timed out waiting for picking");
-            }
-            
+
             isWaitingForPicking = false;
-            NotifyPickingCompleted();
+
+            if (pickingCompleted)
+            {
+                // Picker fired OnPickingCompleted → HandlePickingCompletedEvent already called
+                // NotifyPickingCompleted(). Do NOT call it again here — it would double-complete.
+                pickingWaitSucceeded = true;
+            }
+            else
+            {
+                // Timeout = simulated picking complete (no real picker in current setup)
+                pickingWaitSucceeded = true;
+                NotifyPickingCompleted();
+            }
         }
 
         public void NotifyPickingCompleted()
@@ -1041,7 +1067,15 @@ namespace CentralControl.RobotControl
                             : VerticalTransportType.Elevator;
 
                     float targetFloorHeight = GetFloorHeight(nextFloor);
-                    float transitTime = transportType == VerticalTransportType.Stairs ? 4.0f : 3.5f;
+                    // Align transit time with SIPP planner constants
+                    int floorDiff = Math.Max(1, Math.Abs(
+                        Map.FloorLevelUtils.Parse(nextFloor) - Map.FloorLevelUtils.Parse(reachedFloor)));
+                    const float STAIR_FLOOR_TIME = 2.0f;
+                    const float ELEVATOR_BASE_TIME = 3.0f;
+                    const float ELEVATOR_FLOOR_TIME = 0.5f;
+                    float transitTime = transportType == VerticalTransportType.Stairs
+                        ? STAIR_FLOOR_TIME * floorDiff
+                        : ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDiff;
 
                     StartCoroutine(ExecuteVerticalTransport(targetFloorHeight, transitTime, transportType));
                     return;
@@ -1182,9 +1216,14 @@ namespace CentralControl.RobotControl
                 }
             }
 
-            personalOccupancyLayer.AtomicSwapPath(
+            bool swapOk = personalOccupancyLayer.AtomicSwapPath(
                 Id.ToString(), activeConfirmedPlanId,
                 cellIds, startTimes, endTimes, activeConfirmedPlanId);
+            if (!swapOk)
+            {
+                Debug.LogWarning($"Robot {Id}: Occupancy suffix rewrite conflict detected, triggering replan");
+                RequestReplan("PathCommitConflict");
+            }
         }
 
         private void MoveFromConnectionPointToTargetCellSpace(ConnectionPoint targetPoint)
@@ -1298,6 +1337,7 @@ namespace CentralControl.RobotControl
             }
 
             string toFloor = GetFloorLevelFromPosition(newPos);
+            CurrentFloor = toFloor;
             Debug.Log($"Robot {Id}: {transportType} transport complete, arrived at {toFloor} (y={targetY:F2})");
 
             isExecutingVerticalTransport = false;
@@ -1318,10 +1358,6 @@ namespace CentralControl.RobotControl
                 lastReportedFreeStatus = IsFree;
             }
 
-            if (ordersQueue.Count > 0 && !isProcessingOrdersRunning)
-            {
-                StartCoroutine(ProcessOrders());
-            }
         }
 
         private void SetBehavior(RobotBehavior behavior, VerticalTransportType verticalTransport = VerticalTransportType.None)
@@ -2354,10 +2390,28 @@ namespace CentralControl.RobotControl
         public void RequestReplan(string reason)
         {
             if (isReplanning) return;
+
+            // Replan storm prevention: local cooldown
+            if (Time.time - lastLocalReplanTime < LOCAL_REPLAN_COOLDOWN)
+            {
+                Debug.Log($"Robot {Id}: Replan cooldown active, skipping replan for '{reason}' ({Time.time - lastLocalReplanTime:F1}s < {LOCAL_REPLAN_COOLDOWN}s)");
+                return;
+            }
+
+            // Replan storm prevention: per-order limit
+            if (replanCountForCurrentOrder >= MAX_REPLAN_PER_ORDER)
+            {
+                Debug.LogWarning($"Robot {Id}: Max replan limit reached ({MAX_REPLAN_PER_ORDER}) for current order, failing order");
+                ReportOrderFailed(currentOrder?.Id ?? "unknown", "MaxReplanExceeded");
+                return;
+            }
+
+            replanCountForCurrentOrder++;
+            lastLocalReplanTime = Time.time;
             pathExecutionGuard = false;
 
-            Debug.Log($"Robot {Id}: Replan requested, reason: {reason}");
-            
+            Debug.Log($"Robot {Id}: Replan requested, reason: {reason} (replan {replanCountForCurrentOrder}/{MAX_REPLAN_PER_ORDER})");
+
             StartCoroutine(DelayedReplan(reason));
         }
 
@@ -2397,17 +2451,13 @@ namespace CentralControl.RobotControl
                 lastCollisionClearTime = Time.time;
             }
 
-            // Process pending collision records from OnCollisionEnter
-            if (pendingCollisions.Count > 0)
+            // Process pending collision records from OnCollisionEnter (thread-safe drain)
+            while (pendingCollisions.TryDequeue(out var record))
             {
-                foreach (var record in pendingCollisions)
+                if (record.OtherGameObject != null && !recentCollisions.Contains(record.OtherGameObject))
                 {
-                    if (record.OtherGameObject != null && !recentCollisions.Contains(record.OtherGameObject))
-                    {
-                        recentCollisions.Add(record.OtherGameObject);
-                    }
+                    recentCollisions.Add(record.OtherGameObject);
                 }
-                pendingCollisions.Clear();
             }
 
             LayerMask dynamicObstacleLayer = LayerMask.GetMask("RobotLayer", "PickerLayer");
@@ -2828,7 +2878,7 @@ namespace CentralControl.RobotControl
 
             // Extract collision data immediately — physics engine reuses Collision objects
             Vector3 contactPoint = collision.contactCount > 0 ? collision.GetContact(0).point : collision.transform.position;
-            pendingCollisions.Add(new PendingCollisionRecord
+            pendingCollisions.Enqueue(new PendingCollisionRecord
             {
                 ContactPoint = contactPoint,
                 OtherInstanceId = collision.gameObject.GetInstanceID(),
@@ -3041,9 +3091,15 @@ namespace CentralControl.RobotControl
                     }
                 }
 
-                personalOccupancyLayer.AtomicSwapPath(
+                bool swapOk = personalOccupancyLayer.AtomicSwapPath(
                     Id.ToString(), activeConfirmedPlanId,
                     cellIds, startTimes, endTimes, planId);
+                if (!swapOk)
+                {
+                    Debug.LogWarning($"Robot {Id}: Time shift path commit conflict, triggering replan");
+                    RequestReplan("PathCommitConflict");
+                    return;
+                }
             }
             activeConfirmedPlanId = planId;
             currentPlanId = planId;
@@ -3056,6 +3112,15 @@ namespace CentralControl.RobotControl
             }
 
             pendingExecutionStartTime = newTimes[0];
+
+            // Do not override EmergencyStopped — defer execution to recovery
+            if (IsEmergencyStopped || isBackingUp)
+            {
+                Debug.Log($"Robot {Id}: TimeShift applied but deferring execution (EmergencyStopped={IsEmergencyStopped}, BackingUp={isBackingUp})");
+                CentralController.Instance?.FlushRobotLayer(Id);
+                return;
+            }
+
             SetBehavior(RobotBehavior.Moving);
 
             // Immediate flush after path modification
@@ -3098,9 +3163,15 @@ namespace CentralControl.RobotControl
                     }
                 }
 
-                personalOccupancyLayer.AtomicSwapPath(
+                bool swapOk = personalOccupancyLayer.AtomicSwapPath(
                     Id.ToString(), activeConfirmedPlanId,
                     cellIds, startTimes, endTimes, planId);
+                if (!swapOk)
+                {
+                    Debug.LogWarning($"Robot {Id}: Speed adjustment path commit conflict, triggering replan");
+                    RequestReplan("PathCommitConflict");
+                    return;
+                }
             }
             activeConfirmedPlanId = planId;
             currentPlanId = planId;
@@ -3113,6 +3184,15 @@ namespace CentralControl.RobotControl
             }
 
             pendingExecutionStartTime = newTimes[0];
+
+            // Do not override EmergencyStopped — defer execution to recovery
+            if (IsEmergencyStopped || isBackingUp)
+            {
+                Debug.Log($"Robot {Id}: SpeedAdjustment applied but deferring execution (EmergencyStopped={IsEmergencyStopped}, BackingUp={isBackingUp})");
+                CentralController.Instance?.FlushRobotLayer(Id);
+                return;
+            }
+
             SetBehavior(RobotBehavior.Moving);
 
             // Immediate flush after path modification
@@ -3167,6 +3247,7 @@ namespace CentralControl.RobotControl
         private void TryBeginAcceptedPathExecution()
         {
             if (currentPath == null || currentPath.Count == 0) return;
+            if (IsEmergencyStopped || isBackingUp) return;
             if (Time.time < pendingExecutionStartTime) return;
 
             BeginPathExecution();
@@ -3181,7 +3262,14 @@ namespace CentralControl.RobotControl
             // Check if this is for the current robot
             if (e.RobotId != Id.ToString())
                 return;
-            
+
+            // Guard: reject modifications for stale/unknown plan IDs
+            if (e.PlanId != pendingPlanId && e.PlanId != activeConfirmedPlanId)
+            {
+                Debug.Log($"Robot {Id}: Ignoring stale path modification for plan {e.PlanId} (active={activeConfirmedPlanId}, pending={pendingPlanId})");
+                return;
+            }
+
             Debug.Log($"Robot {Id}: Received path modification: type {e.ModificationType}, value {e.ModificationValue}");
             
             // Handle based on modification type
@@ -3226,6 +3314,9 @@ namespace CentralControl.RobotControl
 
             Debug.Log($"Robot {Id}: Path has been accepted by central controller with {e.Path.Count} points");
 
+            // Reset replan counter on successful path acceptance
+            replanCountForCurrentOrder = 0;
+
             // Update path and times
             currentPath = new List<ConnectionPoint>(e.Path);
             pathTimes = new List<float>(e.Times);
@@ -3252,9 +3343,16 @@ namespace CentralControl.RobotControl
                     }
                 }
 
-                personalOccupancyLayer.AtomicSwapPath(
+                bool swapOk = personalOccupancyLayer.AtomicSwapPath(
                     Id.ToString(), activeConfirmedPlanId,
                     cellIds, startTimes, endTimes, e.PlanId);
+                if (!swapOk)
+                {
+                    Debug.LogWarning($"Robot {Id}: Accepted path commit conflict for plan {e.PlanId}, triggering replan");
+                    pathExecutionGuard = false;
+                    RequestReplan("PathCommitConflict");
+                    return;
+                }
             }
             activeConfirmedPlanId = e.PlanId;
             currentPlanId = e.PlanId;
@@ -3268,6 +3366,14 @@ namespace CentralControl.RobotControl
             // Set pending execution start time; actual execution begins when
             // local clock reaches the planned start time (TryBeginAcceptedPathExecution).
             pendingExecutionStartTime = (e.Times != null && e.Times.Count > 0) ? e.Times[0] : Time.time;
+
+            // Do not override EmergencyStopped — defer execution to recovery
+            if (IsEmergencyStopped || isBackingUp)
+            {
+                Debug.Log($"Robot {Id}: Path accepted but deferring execution (EmergencyStopped={IsEmergencyStopped}, BackingUp={isBackingUp})");
+                return;
+            }
+
             SetBehavior(RobotBehavior.Moving); // Mark as ready to execute
         }
 
@@ -3472,12 +3578,7 @@ namespace CentralControl.RobotControl
         
         private float GetFloorHeight(string floorLevel)
         {
-            int level = ParseFloorLevel(floorLevel);
-            if (level > 0)
-            {
-                return ((level - 1) * floorHeight) + baseHeight;
-            }
-            return (level * floorHeight) + baseHeight;
+            return Map.FloorLevelUtils.GetFloorHeight(floorLevel, floorHeight, baseHeight);
         }
 
         private string GetFloorLevelFromPosition(Vector3 position)
