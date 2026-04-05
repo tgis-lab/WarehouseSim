@@ -269,25 +269,9 @@ namespace PathPlanning
                 return (null, null, null, null, null);
             }
 
-            // Path found - set the occupancy layer for vertical connections
-            if (globalOccupancyLayer != null)
-            {
-                foreach (var info in verticalConnectionInfo.Values)
-                {
-                    if (!string.IsNullOrEmpty(info.CellSpaceId))
-                    {
-                        globalOccupancyLayer.SetDynamicOccupancy(
-                            info.CellSpaceId,
-                            info.StartTime,
-                            info.EndTime,
-                            robotId,
-                            newPlanId,
-                            false,
-                            false
-                        );
-                    }
-                }
-            }
+            // Vertical connection occupancy is NOT written directly to the global layer here.
+            // It flows through the normal path commit (AtomicSwapPath) along with all other cells,
+            // ensuring occupancy is only committed after conflict checking passes.
 
             return (result.path, result.times, result.speeds, newPlanId, metrics);
         }
@@ -342,10 +326,11 @@ namespace PathPlanning
             Dictionary<SIPPStateKey, SIPPState> allStates = new Dictionary<SIPPStateKey, SIPPState>();
 
             // 1-4: insert s_start into OPEN with ε * h(s_start)
-            // Get the initial safe interval for the start position
+            // Get the initial safe interval for the start position (using CellSpace key)
+            string startCellKey = GetCellKeyForConnectionPoint(startPosition.ConnectionPoint.Id, indoorSpace);
             SafeInterval initialInterval = GetSafeIntervalContainingTime(
-                safeIntervals, startPosition.ConnectionPoint.Id, startTime);
-                
+                safeIntervals, startCellKey, startTime);
+
             if (initialInterval == null)
             {
                 // The robot is physically at this position but another robot's planned
@@ -354,8 +339,7 @@ namespace PathPlanning
                 // SIPP's wait-successor mechanism will naturally compute the optimal
                 // departure time; CentralController's conflict detection handles any
                 // residual conflicts post-planning.
-                string startId = startPosition.ConnectionPoint.Id;
-                if (safeIntervals.TryGetValue(startId, out var existingIntervals) && existingIntervals.Count > 0)
+                if (safeIntervals.TryGetValue(startCellKey, out var existingIntervals) && existingIntervals.Count > 0)
                 {
                     // Extend the first (earliest) interval backward to startTime
                     var earliest = existingIntervals[0];
@@ -366,9 +350,9 @@ namespace PathPlanning
                 {
                     // No intervals at all — create an open-ended one
                     initialInterval = new SafeInterval(startTime, float.MaxValue);
-                    safeIntervals[startId] = new List<SafeInterval> { initialInterval };
+                    safeIntervals[startCellKey] = new List<SafeInterval> { initialInterval };
                 }
-                Debug.LogWarning($"Robot {robotId}: No safe interval at start {startId} at time {startTime}, extended earliest interval to [{startTime}, {initialInterval.End}]");
+                Debug.LogWarning($"Robot {robotId}: No safe interval at start {startCellKey} at time {startTime}, extended earliest interval to [{startTime}, {initialInterval.End}]");
             }
 
             // Calculate the initial heuristic value
@@ -573,14 +557,24 @@ namespace PathPlanning
             {
                 // 2-2: remove s with the smallest f(s) from OPEN
                 SIPPState current = openSet.Dequeue();
-                
+
                 SIPPStateKey stateKey = current.GetStateKey();
-                
+
+                // Stale-pop guard: skip if allStates has a better state for this key.
+                // When a successor with a lower g-score is found, allStates is updated
+                // and the new state is enqueued, but the old (worse) entry remains in
+                // the heap. This guard discards those stale entries on dequeue.
+                if (allStates.TryGetValue(stateKey, out var bestKnown) && bestKnown != current)
+                {
+                    continue;
+                }
+
+                // Defense-in-depth: skip states already expanded in this iteration
                 if (closedSet.Contains(stateKey))
                 {
                     continue;
                 }
-                
+
                 // 2-3: CLOSED = CLOSED ∪ {s}
                 closedSet.Add(stateKey);
                 
@@ -691,12 +685,15 @@ namespace PathPlanning
             // Process each neighbor (direct movement + wait-then-move via A2 analytical computation)
             foreach (var (nextRoutePoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
             {
-                // Get all safe intervals at the destination
-                List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextRoutePoint.ConnectionPoint.Id);
-                
+                // Resolve successor CP to its containing CellSpace key for interval lookup
+                string nextCellKey = GetCellKeyForConnectionPoint(nextRoutePoint.ConnectionPoint.Id, indoorSpace);
+
+                // Get all safe intervals at the destination (keyed by CellSpace ID)
+                List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextCellKey);
+
                 if (intervals == null || intervals.Count == 0)
                 {
-                    Debug.LogWarning($"Robot {robotId}: Cannot find safe interval at {nextRoutePoint.ConnectionPoint.Id}");
+                    Debug.LogWarning($"Robot {robotId}: Cannot find safe interval at {nextCellKey} (CP: {nextRoutePoint.ConnectionPoint.Id})");
                     continue;
                 }
                 
@@ -762,13 +759,29 @@ namespace PathPlanning
                             verticalConnectorId);
 
                         successors.Add(newState);
+
+                        // Update vertical connection info with actual departure time
+                        // (GetNeighbors recorded currentTime, but requiredDepart may be later due to waiting)
+                        if (isVertical && !string.IsNullOrEmpty(verticalConnectorId))
+                        {
+                            string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{verticalConnectorId}";
+                            lock (verticalConnectionInfo)
+                            {
+                                if (verticalConnectionInfo.TryGetValue(connectionKey, out var info))
+                                {
+                                    info.StartTime = requiredDepart;
+                                }
+                            }
+                        }
                     }
                 }
             }
             
             // 2. Motion Type: Wait at current location until next safe interval
+            // Resolve current CP to its containing CellSpace key for interval lookup
+            string currentCellKey = GetCellKeyForConnectionPoint(currentNodeId, indoorSpace);
             // Check if there's a next safe interval at the current location
-            List<SafeInterval> currentIntervals = GetSafeIntervals(safeIntervals, currentNodeId);
+            List<SafeInterval> currentIntervals = GetSafeIntervals(safeIntervals, currentCellKey);
             if (currentIntervals != null && current.IntervalIndex < currentIntervals.Count - 1)
             {
                 // Get the next safe interval
@@ -887,14 +900,16 @@ namespace PathPlanning
                     travelCost = travelTime;
                     speedForMove = adjustedSpeed;
                     
-                    verticalConnectorId = childConnection.Id;
-                    
-                    string connectionKey = $"{state.RoutePoint.ConnectionPoint.Id}_to_{childConnection.Id}";
+                    // Resolve vertical connector to its CellSpace key (consistent with safe-interval keying)
+                    string verticalCellKey = GetCellKeyForConnectionPoint(childConnection.Id, indoorSpace);
+                    verticalConnectorId = verticalCellKey;
+
+                    string connectionKey = $"{state.RoutePoint.ConnectionPoint.Id}_to_{verticalCellKey}";
                     lock (verticalConnectionInfo)
                     {
                         verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
                         {
-                            CellSpaceId = verticalConnectorId,
+                            CellSpaceId = verticalCellKey,
                             FromFloor = currentFloor,
                             ToFloor = childFloor,
                             StartTime = currentTime,
@@ -982,6 +997,25 @@ namespace PathPlanning
         #region Helper
 
         /// <summary>
+        /// Resolve a ConnectionPoint ID to its containing CellSpace ID.
+        /// The occupancy layer stores data by CellSpace ID, so all safe-interval
+        /// lookups must use CellSpace ID as key. Falls back to cpId if the
+        /// ConnectionPoint cannot be resolved (e.g., orphaned boundary).
+        /// </summary>
+        private static string GetCellKeyForConnectionPoint(string cpId, IndoorSpace indoorSpace)
+        {
+            if (indoorSpace == null || string.IsNullOrEmpty(cpId))
+                return cpId;
+
+            ConnectionPoint cp = indoorSpace.GetConnectionPointFromId(cpId);
+            if (cp == null)
+                return cpId;
+
+            CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(cp, true);
+            return cell?.Id ?? cpId;
+        }
+
+        /// <summary>
         /// Build safe intervals from occupancy data
         /// </summary>
         private static Dictionary<string, List<SafeInterval>> BuildSafeIntervals(
@@ -992,21 +1026,25 @@ namespace PathPlanning
             float horizonSeconds)
         {
             Dictionary<string, List<SafeInterval>> safeIntervals = new Dictionary<string, List<SafeInterval>>();
-            
+
             var allConnectionPoints = indoorSpace.GetAllConnectionPoints().ToList();
             float endTime = startTime + horizonSeconds;
-            
+
             foreach (var connectionPoint in allConnectionPoints)
             {
-                string connectionPointId = connectionPoint.Id;
-
-                // A0 fix: Resolve ConnectionPoint to its containing CellSpace ID before querying
-                // DynamicOccupancyLayer stores data by CellSpace ID, not ConnectionPoint ID
+                // Resolve ConnectionPoint to its containing CellSpace ID.
+                // DynamicOccupancyLayer stores data by CellSpace ID, not ConnectionPoint ID.
+                // Multiple ConnectionPoints can share the same CellSpace (entry and exit
+                // boundaries of one aisle cell), so we skip duplicate builds.
                 CellSpace containingCell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
-                string queryId = containingCell?.Id ?? connectionPointId; // fallback to CP ID if cell not found
+                string cellKey = containingCell?.Id ?? connectionPoint.Id;
+
+                // Skip if we already built intervals for this CellSpace
+                if (safeIntervals.ContainsKey(cellKey))
+                    continue;
 
                 List<TimeOccupancy> allOccupancies = occupancyLayer != null ?
-                    occupancyLayer.GetOccupancies(queryId, startTime, endTime) :
+                    occupancyLayer.GetOccupancies(cellKey, startTime, endTime) :
                     new List<TimeOccupancy>();
 
                 // Filter out Intent occupancies — they are soft constraints (cost penalty only),
@@ -1048,7 +1086,7 @@ namespace PathPlanning
                     intervals.Add(new SafeInterval(lastEndTime, float.MaxValue));
                 }
 
-                safeIntervals[connectionPointId] = intervals;
+                safeIntervals[cellKey] = intervals;
             }
             
             return safeIntervals;
@@ -1073,7 +1111,7 @@ namespace PathPlanning
             int startLevel = ParseFloorLevel(start.ConnectionPoint.FloorLevel);
             int goalLevel = ParseFloorLevel(goal.ConnectionPoint.FloorLevel);
             int floorDiff = Math.Abs(goalLevel - startLevel);
-            float verticalCost = floorDiff > 0 ? ELEVATOR_BASE_TIME + floorDiff * ELEVATOR_FLOOR_TIME : 0f;
+            float verticalCost = floorDiff > 0 ? Math.Min(ELEVATOR_BASE_TIME + floorDiff * ELEVATOR_FLOOR_TIME, STAIR_FLOOR_TIME * floorDiff) : 0f;
 
             float travelTime = horizontalDistance / Mathf.Max(defaultSpeed, 0.1f) + verticalCost;
             float buffer = Mathf.Max(20f, travelTime * 1.5f);
@@ -1174,7 +1212,9 @@ namespace PathPlanning
                 int goalLevel = ParseFloorLevel(goalFloor);
                 int floorDifference = Math.Abs(goalLevel - currentLevel);
                 
-                verticalCost = ELEVATOR_BASE_TIME + floorDifference * ELEVATOR_FLOOR_TIME;
+                verticalCost = Math.Min(
+                    ELEVATOR_BASE_TIME + floorDifference * ELEVATOR_FLOOR_TIME,
+                    STAIR_FLOOR_TIME * floorDifference);
             }
             
             return horizontalDistance / defaultSpeed + verticalCost;

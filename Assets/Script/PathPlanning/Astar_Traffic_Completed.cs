@@ -123,7 +123,10 @@ namespace PathPlanning
         #endregion
 
         #region constants
-        
+
+        /// <summary>Time budget for A* search in seconds. Configurable for different map sizes.</summary>
+        private const float TIME_BUDGET_SEC = 5.0f;
+
         private const float ELEVATOR_BASE_TIME = 3.0f;
         private const float ELEVATOR_FLOOR_TIME = 0.5f;
         private const float STAIR_FLOOR_TIME = 2.0f;
@@ -194,26 +197,9 @@ namespace PathPlanning
                 verticalConnectionInfo,
                 metrics);
             
-            // Check if the path is found, if yes, set the occupancy layer for vertical connectors
-            if (result.success && globalOccupancyLayer != null)
-            {
-                foreach (var info in verticalConnectionInfo.Values)
-                {
-                    if (!string.IsNullOrEmpty(info.CellSpaceId))
-                    {
-                        globalOccupancyLayer.SetDynamicOccupancy(
-                            info.CellSpaceId,
-                            info.StartTime,
-                            info.EndTime,
-                            robotId,
-                            newPlanId,
-                            false,
-                            false
-                        );
-                    }
-                }
-            }
-            
+            // Vertical connection occupancy flows through normal path commit (AtomicSwapPath),
+            // not written directly by the planner.
+
             return (result.path, result.times, result.speeds, newPlanId, metrics);
         }
         
@@ -270,10 +256,20 @@ namespace PathPlanning
             allStates[initialStateKey] = initialState;
             
             TSAStarState goalState = null;
-            
+            const int MAX_EXPANSIONS = 50000;
+            int expansionCount = 0;
+
             // Main search loop
             while (openSet.Count > 0)
             {
+                // Time and expansion budget guard (TIME_BUDGET_SEC defined at class level)
+                if (stopwatch.ElapsedMilliseconds >= (long)(TIME_BUDGET_SEC * 1000) || expansionCount >= MAX_EXPANSIONS)
+                {
+                    Debug.LogWarning($"TimeSpaceAStar: Search budget exhausted (time={stopwatch.ElapsedMilliseconds}ms, expansions={expansionCount})");
+                    break;
+                }
+                expansionCount++;
+
                 // Get the state with lowest f-score
                 TSAStarState current = openSet.Dequeue();
                 TSAStarStateKey currentStateKey = current.GetStateKey();
@@ -823,7 +819,9 @@ namespace PathPlanning
                 int goalLevel = ParseFloorLevel(goalFloor);
                 int floorDifference = Math.Abs(goalLevel - currentLevel);
                 
-                verticalCost = ELEVATOR_BASE_TIME + floorDifference * ELEVATOR_FLOOR_TIME;
+                verticalCost = Math.Min(
+                    ELEVATOR_BASE_TIME + floorDifference * ELEVATOR_FLOOR_TIME,
+                    STAIR_FLOOR_TIME * floorDifference);
             }
             
             return horizontalDistance / defaultSpeed + verticalCost;
