@@ -45,6 +45,24 @@ namespace PathPlanning
         {
             this.cellSpaceGraph = graph;
         }
+
+        /// <summary>
+        /// Switches the active search algorithm at runtime.
+        /// Used by ExperimentRunner to reconfigure robots between trials.
+        /// </summary>
+        public void SetAlgorithm(SearchAlgorithm algorithm)
+        {
+            this.searchAlgorithm = algorithm;
+        }
+
+        /// <summary>
+        /// Updates acceleration/deceleration parameters at runtime.
+        /// </summary>
+        public void SetDynamics(float accel, float decel)
+        {
+            this.maxAcceleration = accel;
+            this.maxDeceleration = decel;
+        }
         
         public PathPlanner(
             Graph graph, 
@@ -131,8 +149,21 @@ namespace PathPlanning
                         t += d / speed;
                         basicTimes.Add(t);
                     }
+                    // Compute metrics for Basic A*
+                    float basicActualLength = 0f;
+                    for (int j = 1; j < basicResult.path.Count; j++)
+                    {
+                        basicActualLength += (float)basicResult.path[j - 1].Point.Distance(basicResult.path[j].Point);
+                    }
+                    float basicIdealLength = basicResult.path.Count >= 2
+                        ? (float)basicResult.path[0].Point.Distance(basicResult.path[basicResult.path.Count - 1].Point)
+                        : 0f;
+
                     string basicPlanId = $"BasicPlan_{robotId}_{System.DateTime.Now.Ticks}";
                     var basicMetrics = new PathPlanningMetrics(robotId, basicPlanId);
+                    basicMetrics.ActualPathLength = basicActualLength;
+                    basicMetrics.TravelTime = t - startTime;
+                    basicMetrics.IdealPathLength = basicIdealLength;
                     return (basicResult.path, basicTimes, basicResult.speeds, basicPlanId, basicMetrics);
 
                 default:

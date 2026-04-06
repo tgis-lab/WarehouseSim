@@ -15,8 +15,16 @@ namespace PathPlanning
         public float WaitTime { get; set; }
         public bool IsReplan { get; set; }
         
-        public float PathEfficiency => IdealPathLength > 0 && ActualPathLength > 0 
-            ? IdealPathLength / ActualPathLength 
+        public float PathEfficiency => IdealPathLength > 0 && ActualPathLength > 0
+            ? IdealPathLength / ActualPathLength
+            : 0f;
+
+        /// <summary>
+        /// Distance Relative Error: (actual - ideal) / ideal.
+        /// Measures how much longer the actual path is compared to the optimal.
+        /// </summary>
+        public float DistanceRelativeError => IdealPathLength > 0
+            ? (ActualPathLength - IdealPathLength) / IdealPathLength
             : 0f;
         
         public PathPlanningMetrics(string robotId, string planId, bool isReplan = false)

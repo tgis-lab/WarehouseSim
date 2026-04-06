@@ -284,6 +284,15 @@ namespace Map
             var metrics = new PathPlanning.PathPlanningMetrics(robotId, planId);
             metrics.PlanningTime = (float)sw.Elapsed.TotalSeconds;
             metrics.ActualPathLength = totalLength;
+            metrics.TravelTime = currentTime - startTime;
+
+            // IdealPathLength: straight-line distance between start and goal CPs
+            float idealDist = 0f;
+            if (startPoint.ConnectionPoint.Point != null && endPoint.ConnectionPoint.Point != null)
+            {
+                idealDist = (float)startPoint.ConnectionPoint.Point.Distance(endPoint.ConnectionPoint.Point);
+            }
+            metrics.IdealPathLength = idealDist;
 
             return (cpPath, times, speeds, planId, metrics);
         }
