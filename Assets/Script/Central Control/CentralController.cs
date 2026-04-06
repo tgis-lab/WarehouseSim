@@ -240,8 +240,13 @@ namespace CentralControl
                 }
             }
 
-            // Mount experiment metrics collector
-            var metricsCollector = gameObject.AddComponent<ExperimentMetricsCollector>();
+            // Mount experiment metrics collector only if not already managed by ExperimentRunner
+            if (GetComponentInParent<ExperimentRunner>() == null &&
+                FindObjectOfType<ExperimentRunner>() == null &&
+                GetComponent<ExperimentMetricsCollector>() == null)
+            {
+                gameObject.AddComponent<ExperimentMetricsCollector>();
+            }
 
             // Initialize picker manager
             InitializePickerManager();
@@ -707,6 +712,11 @@ namespace CentralControl
         public DynamicOccupancyLayer GetGlobalOccupancyLayer()
         {
             return globalOccupancyLayer;
+        }
+
+        public CellSpaceGraph GetCellSpaceGraph()
+        {
+            return cellSpaceGraph;
         }
         #endregion
         
