@@ -222,8 +222,10 @@ namespace Map {
                 return FindNearestConnectionPoint(position, floorLevel, sequence);
             }
 
-            Debug.LogWarning($"Position {position} is not inside any navigable CellSpace on floor {floorLevel}");
-            return null;
+            // Fallback: position is outside all CellSpaces (e.g. collision pushed robot out of bounds)
+            // Find nearest valid ConnectionPoint on the same floor
+            Debug.LogWarning($"Position {position} is not inside any navigable CellSpace on floor {floorLevel}, finding nearest...");
+            return FindNearestConnectionPoint(position, floorLevel, sequence);
         }
 
         /// <summary>
