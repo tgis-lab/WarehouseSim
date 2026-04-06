@@ -30,6 +30,10 @@ namespace CentralControl
         [Tooltip("Trial number within this scenario")]
         public int trialId = 1;
 
+        [Header("Output")]
+        [Tooltip("Output directory. Empty = Application.persistentDataPath/ExperimentResults")]
+        public string outputDirectory = "";
+
         [Header("Breakdown Detection")]
         [Tooltip("Fraction of robots that must be EmergencyStopped to declare system breakdown")]
         [Range(0.5f, 1.0f)]
@@ -39,15 +43,24 @@ namespace CentralControl
         private int totalCollisions = 0;
         private int totalDeadlocks = 0;
         private int tasksCompleted = 0;
+        private int totalOrdersGenerated = 0;
         private float experimentStartTime;
         private float firstSystemBreakdownTime = -1f;
         private bool hasSystemBreakdown = false;
         private int totalRobots = 0;
 
+        // Path planning aggregation (for Average Velocity, DRE, Replan Rate)
+        private int totalPlans = 0;
+        private int totalReplans = 0;
+        private float sumVelocity = 0f;
+        private int velocityCount = 0;
+        private float sumDistanceRelativeError = 0f;
+        private int dreCount = 0;
+
         // Per-interval tracking for time series
         private List<MetricSnapshot> snapshots = new List<MetricSnapshot>();
         private float lastSnapshotTime = 0f;
-        private const float SNAPSHOT_INTERVAL = 5f; // Every 5 seconds
+        public float snapshotInterval = 5f;
 
         private struct MetricSnapshot
         {
@@ -87,6 +100,8 @@ namespace CentralControl
                 EventManager.Instance.OnRobotCollisionDetected += OnCollision;
                 EventManager.Instance.OnDeadlockDetected += OnDeadlock;
                 EventManager.Instance.OnOrderCompleted += OnTaskCompleted;
+                EventManager.Instance.OnOrderGenerated += OnOrderGeneratedHandler;
+                EventManager.Instance.OnPathPlanningMetricsRecorded += OnPathMetrics;
             }
             else
             {
@@ -97,7 +112,7 @@ namespace CentralControl
 
         void Update()
         {
-            if (Time.time - lastSnapshotTime >= SNAPSHOT_INTERVAL)
+            if (Time.time - lastSnapshotTime >= snapshotInterval)
             {
                 TakeSnapshot();
                 lastSnapshotTime = Time.time;
@@ -113,6 +128,8 @@ namespace CentralControl
                 EventManager.Instance.OnRobotCollisionDetected -= OnCollision;
                 EventManager.Instance.OnDeadlockDetected -= OnDeadlock;
                 EventManager.Instance.OnOrderCompleted -= OnTaskCompleted;
+                EventManager.Instance.OnOrderGenerated -= OnOrderGeneratedHandler;
+                EventManager.Instance.OnPathPlanningMetricsRecorded -= OnPathMetrics;
             }
 
             SaveResults();
@@ -136,6 +153,32 @@ namespace CentralControl
         private void OnTaskCompleted(string orderId, string robotId)
         {
             tasksCompleted++;
+        }
+
+        private void OnOrderGeneratedHandler(string orderId)
+        {
+            totalOrdersGenerated++;
+        }
+
+        private void OnPathMetrics(object sender, PathPlanningMetricsEventArgs args)
+        {
+            var m = args.Metrics;
+            if (m == null) return;
+
+            totalPlans++;
+            if (m.IsReplan) totalReplans++;
+
+            if (m.TravelTime > 0 && m.ActualPathLength > 0)
+            {
+                sumVelocity += m.ActualPathLength / m.TravelTime;
+                velocityCount++;
+            }
+
+            if (m.IdealPathLength > 0 && m.ActualPathLength > 0)
+            {
+                sumDistanceRelativeError += m.DistanceRelativeError;
+                dreCount++;
+            }
         }
 
         #endregion
@@ -241,7 +284,9 @@ namespace CentralControl
             float durationMinutes = duration / 60f;
 
             // Ensure output directory exists
-            string outputDir = Path.Combine(Application.persistentDataPath, "ExperimentResults");
+            string outputDir = string.IsNullOrEmpty(outputDirectory)
+                ? Path.Combine(Application.persistentDataPath, "ExperimentResults")
+                : outputDirectory;
             if (!Directory.Exists(outputDir))
             {
                 Directory.CreateDirectory(outputDir);
@@ -291,6 +336,21 @@ namespace CentralControl
                     writer.WriteLine($"TaskThroughput,{taskThroughput:F4}");
 
                     writer.WriteLine($"SystemBreakdown,{hasSystemBreakdown}");
+
+                    // === Unified 7 metrics ===
+                    float taskCompletionRate = totalOrdersGenerated > 0
+                        ? tasksCompleted / (float)totalOrdersGenerated
+                        : 0f;
+                    writer.WriteLine($"TaskCompletionRate,{taskCompletionRate:F4}");
+
+                    float avgVelocity = velocityCount > 0 ? sumVelocity / velocityCount : 0f;
+                    writer.WriteLine($"AverageVelocity,{avgVelocity:F4}");
+
+                    float avgDRE = dreCount > 0 ? sumDistanceRelativeError / dreCount : 0f;
+                    writer.WriteLine($"DistanceRelativeError,{avgDRE:F4}");
+
+                    float replanRate = totalPlans > 0 ? totalReplans / (float)totalPlans : 0f;
+                    writer.WriteLine($"ReplanRate,{replanRate:F4}");
                 }
 
                 Debug.Log($"[ExperimentMetrics] Summary saved: {summaryPath}");

@@ -68,6 +68,7 @@ namespace CentralControl.OrderAssignment
                 allOrders[order.Id] = order;
             }
             Debug.Log($"Added new order: {order.Id} at {order.Destination} on floor {order.FloorLevel}");
+            EventManager.Instance?.TriggerOrderGenerated(order.Id);
         }
 
         public List<Order> GetAllOrders()

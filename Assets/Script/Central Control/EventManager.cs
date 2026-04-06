@@ -337,6 +337,7 @@ namespace CentralControl
         public event EventHandler<GlobalMapUpdateRequestEventArgs> OnRequestGlobalMapUpdate;
 
         // Order-related events
+        public event Action<string> OnOrderGenerated;
         public event Action<string, string> OnOrderCompleted;
         public event Action<string, string, string> OnOrderFailed;
         public event EventHandler<OrderAssignedEventArgs> OnOrderAssigned;
@@ -607,6 +608,18 @@ namespace CentralControl
             SafeEventInvoker.SafeInvoke(OnRequestGlobalMapUpdate, this, new GlobalMapUpdateRequestEventArgs(robotIds, Time.time));
         }
 
+        public void TriggerOrderGenerated(string orderId)
+        {
+            try
+            {
+                OnOrderGenerated?.Invoke(orderId);
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[EventManager] Error invoking OnOrderGenerated: {e.Message}");
+            }
+        }
+
         public void TriggerOrderCompleted(string orderId, string robotId)
         {
             Debug.Log($"EventManager: Order {orderId} completed by Robot {robotId}");
@@ -690,7 +703,7 @@ namespace CentralControl
         }
 
         // Path planning metrics
-        public void ReportPathPlanningMetrics(string robotId, string planId, float planningTime, float plannedPathLength, float estimatedTravelTime, float idealPathLength)
+        public void ReportPathPlanningMetrics(string robotId, string planId, float planningTime, float plannedPathLength, float estimatedTravelTime, float idealPathLength, bool isReplan = false)
         {
             string metricsId = $"{robotId}_plan_{planId}";
 
@@ -699,11 +712,12 @@ namespace CentralControl
                 return;
             }
 
-            Debug.Log($"EventManager: Reported path planning metrics for Robot {robotId}, Plan {planId}, Path Length: {plannedPathLength:F2}");
+            Debug.Log($"EventManager: Reported path planning metrics for Robot {robotId}, Plan {planId}, Path Length: {plannedPathLength:F2}, IsReplan: {isReplan}");
 
             PathPlanningMetrics metrics = new PathPlanningMetrics(
                 robotId,
-                planId
+                planId,
+                isReplan
             )
             {
                 PlanningTime = planningTime,
@@ -714,6 +728,21 @@ namespace CentralControl
 
             pathPlanningMetrics[metricsId] = metrics;
 
+            SafeEventInvoker.SafeInvoke(OnPathPlanningMetricsRecorded, this, new PathPlanningMetricsEventArgs(metrics));
+        }
+
+        /// <summary>
+        /// Reports a pre-built PathPlanningMetrics object (preserving IsReplan and all fields).
+        /// Preferred over the field-by-field overload when the caller already has a complete metrics object.
+        /// </summary>
+        public void ReportPathPlanningMetrics(PathPlanningMetrics metrics)
+        {
+            if (metrics == null) return;
+
+            string metricsId = $"{metrics.RobotId}_plan_{metrics.PlanId}";
+            if (pathPlanningMetrics.ContainsKey(metricsId)) return;
+
+            pathPlanningMetrics[metricsId] = metrics;
             SafeEventInvoker.SafeInvoke(OnPathPlanningMetricsRecorded, this, new PathPlanningMetricsEventArgs(metrics));
         }
 
