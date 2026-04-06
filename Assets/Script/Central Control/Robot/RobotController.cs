@@ -48,6 +48,16 @@ namespace CentralControl.RobotControl
         public bool IsBaselineMode =>
             selectedAlgorithm == SearchAlgorithm.Astar_Basic ||
             selectedAlgorithm == SearchAlgorithm.CellSpaceAStar;
+
+        [Tooltip("When false, passes null occupancy layers to temporal-aware algorithms (IST-A*, IASIPP), disabling temporal deconfliction while keeping traffic rules active.")]
+        public bool temporalEnabled = true;
+
+        /// <summary>
+        /// Whether temporal planning (occupancy layers) should be bypassed for this robot.
+        /// True when baseline algorithm or temporal explicitly disabled.
+        /// </summary>
+        private bool ShouldBypassTemporal => IsBaselineMode || !temporalEnabled;
+
         public float baseDetectionRadius = 1.0f;
         public float emergencyStopDistance = 0.5f;
         public float defaultSpeed = 2.0f;
@@ -423,7 +433,7 @@ namespace CentralControl.RobotControl
             CreateInteractionTrigger();
             obstacleCarvingCoroutine = StartCoroutine(ManageObstacleCarving());
 
-            if (!IsBaselineMode)
+            if (!ShouldBypassTemporal)
             {
                 personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
             }
@@ -750,7 +760,7 @@ namespace CentralControl.RobotControl
             return new Vector3((float)point.X, y, (float)point.Y);
         }
 
-        private (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) PlanPath(Vector3 targetPosition, string targetFloorLevel = null)
+        private (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) PlanPath(Vector3 targetPosition, string targetFloorLevel = null, bool isReplan = false)
         {
             pathExecutionGuard = false;
             currentPath.Clear();
@@ -763,6 +773,24 @@ namespace CentralControl.RobotControl
 
             RoutePoint startPoint = graph.GetRoutePointFromCoordinate(transform.position, true);
             RoutePoint endPoint = graph.GetRoutePointFromCoordinate(targetPosition, false);
+
+            // Out-of-bounds recovery: if start RoutePoint was found via fallback
+            // (robot outside all CellSpaces), teleport robot to the nearest valid position
+            if (startPoint != null)
+            {
+                Vector3 startCoords = graph.GetCoordinatesFromConnectionPoint(startPoint.ConnectionPoint);
+                float distFromStart = Vector3.Distance(
+                    new Vector3(transform.position.x, 0, transform.position.z),
+                    new Vector3(startCoords.x, 0, startCoords.z));
+
+                // If robot is more than 1.5m from the start RoutePoint, it's likely out of bounds
+                if (distFromStart > 1.5f)
+                {
+                    Debug.LogWarning($"Robot {Id}: Out-of-bounds detected ({distFromStart:F1}m from nearest RoutePoint). " +
+                        $"Teleporting from {transform.position} to {startCoords}");
+                    transform.position = startCoords;
+                }
+            }
 
             Debug.Log($"Robot {Id}: Planning path from {transform.position} (Floor {CurrentFloor}) to {targetPosition} (Floor {targetFloorLevel})");
 
@@ -783,8 +811,8 @@ namespace CentralControl.RobotControl
             }
             
             var result = pathPlanner.FindPathWithDynamicObstacles(
-                IsBaselineMode ? null : personalOccupancyLayer,
-                IsBaselineMode ? null : globalOccupancyLayer,
+                ShouldBypassTemporal ? null : personalOccupancyLayer,
+                ShouldBypassTemporal ? null : globalOccupancyLayer,
                 startPoint,
                 endPoint,
                 Id.ToString(),
@@ -792,7 +820,19 @@ namespace CentralControl.RobotControl
                 Time.time,
                 defaultSpeed
             );
-            
+
+            if (isReplan && result.metrics != null)
+            {
+                result.metrics.IsReplan = true;
+            }
+
+            // Fire metrics event for ALL algorithms (GAP 1+3 fix)
+            // This is the single point of metrics reporting, preserving IsReplan flag
+            if (result.metrics != null && EventManager.Instance != null)
+            {
+                EventManager.Instance.ReportPathPlanningMetrics(result.metrics);
+            }
+
             return result;
         }
 
@@ -1173,7 +1213,7 @@ namespace CentralControl.RobotControl
         private void CorrectPlannedTimesAtCheckpoint(int reachedWaypointIndex)
         {
             if (pathTimes == null || reachedWaypointIndex >= pathTimes.Count) return;
-            if (IsBaselineMode || personalOccupancyLayer == null) return;
+            if (ShouldBypassTemporal || personalOccupancyLayer == null) return;
 
             float actualArrival = Time.time;
             float plannedArrival = pathTimes[reachedWaypointIndex];
@@ -1469,7 +1509,7 @@ namespace CentralControl.RobotControl
             {
                 Debug.LogWarning($"Robot {Id}: No current order to replan path for");
                 isReplanning = false;
-                if (!IsBaselineMode && personalOccupancyLayer != null)
+                if (!ShouldBypassTemporal && personalOccupancyLayer != null)
                 {
                     personalOccupancyLayer.ClearIntent(Id.ToString());
                     CentralController.Instance?.GetGlobalOccupancyLayer()?.ClearIntent(Id.ToString());
@@ -1479,7 +1519,7 @@ namespace CentralControl.RobotControl
             }
 
             // Register intent for target area
-            if (!IsBaselineMode && personalOccupancyLayer != null && currentOrder != null)
+            if (!ShouldBypassTemporal && personalOccupancyLayer != null && currentOrder != null)
             {
                 ConnectionPoint targetCP = graph.GetConnectionPointFromCoordinates(finalDestination, false);
                 if (targetCP != null)
@@ -1507,7 +1547,7 @@ namespace CentralControl.RobotControl
                 Debug.LogWarning($"Robot {Id}: Order became null during replan wait");
                 isReplanning = false;
                 navigationEnabled = wasNavigationEnabled;
-                if (!IsBaselineMode && personalOccupancyLayer != null)
+                if (!ShouldBypassTemporal && personalOccupancyLayer != null)
                 {
                     personalOccupancyLayer.ClearIntent(Id.ToString());
                     CentralController.Instance?.GetGlobalOccupancyLayer()?.ClearIntent(Id.ToString());
@@ -1528,8 +1568,8 @@ namespace CentralControl.RobotControl
             while (attempts < MAX_RECOVERY_ATTEMPTS && !pathReplanned)
             {
                 Debug.Log($"Robot {Id}: Attempting to replan path to {finalTarget} (Attempt {attempts + 1})");
-                
-                var result = PlanPath(finalTarget, targetFloorLevel);
+
+                var result = PlanPath(finalTarget, targetFloorLevel, isReplan: true);
                 
                 if (result.path != null && result.path.Count > 0)
                 {
@@ -1555,7 +1595,7 @@ namespace CentralControl.RobotControl
             if (!pathReplanned)
             {
                 Debug.LogError($"Robot {Id}: Failed to replan path after {attempts} attempts");
-                if (!IsBaselineMode && personalOccupancyLayer != null)
+                if (!ShouldBypassTemporal && personalOccupancyLayer != null)
                 {
                     personalOccupancyLayer.ClearIntent(Id.ToString());
                     CentralController.Instance?.GetGlobalOccupancyLayer()?.ClearIntent(Id.ToString());
@@ -1572,13 +1612,13 @@ namespace CentralControl.RobotControl
 
         public DynamicOccupancyLayer GetPersonalOccupancyLayer()
         {
-            return IsBaselineMode ? null : personalOccupancyLayer;
+            return ShouldBypassTemporal ? null : personalOccupancyLayer;
         }
 
         public void UpdatePersonalLayer()
         {
             // Skip occupancy tracking in baseline mode (no personalOccupancyLayer)
-            if (IsBaselineMode) return;
+            if (ShouldBypassTemporal) return;
 
             // Defensive null check - indoorSpace might be null during scene transitions or if initialization failed
             if (indoorSpace == null)
@@ -1666,7 +1706,7 @@ namespace CentralControl.RobotControl
 
         private void SavePathToPersonalLayer(List<ConnectionPoint> path, List<float> times, string planId)
         {
-            if (IsBaselineMode) return;
+            if (ShouldBypassTemporal) return;
 
             // Create an occupancy identifier
             var occupier = new OccupancyIdentifier(Id.ToString(), planId, OccupancyType.Planned);
@@ -1677,7 +1717,7 @@ namespace CentralControl.RobotControl
 
         public void ClearPathReservations()
         {
-            if (!IsBaselineMode && !string.IsNullOrEmpty(activeConfirmedPlanId))
+            if (!ShouldBypassTemporal && !string.IsNullOrEmpty(activeConfirmedPlanId))
             {
                 foreach (var cellSpace in indoorSpace.CellSpaces)
                 {
@@ -3074,7 +3114,7 @@ namespace CentralControl.RobotControl
             Debug.Log($"Robot {Id}: Applying time shift modification: {shift}s, new path length: {path.Count}");
 
             // AtomicSwap: replace old confirmed reservations with modified path
-            if (!IsBaselineMode && personalOccupancyLayer != null)
+            if (!ShouldBypassTemporal && personalOccupancyLayer != null)
             {
                 var cellIds = new List<string>();
                 var startTimes = new List<float>();
@@ -3146,7 +3186,7 @@ namespace CentralControl.RobotControl
             UpdatePathSegmentsWithSpeed(path, newTimes, newSpeeds);
 
             // AtomicSwap: replace old confirmed reservations with modified path
-            if (!IsBaselineMode && personalOccupancyLayer != null)
+            if (!ShouldBypassTemporal && personalOccupancyLayer != null)
             {
                 var cellIds = new List<string>();
                 var startTimes = new List<float>();
@@ -3325,7 +3365,7 @@ namespace CentralControl.RobotControl
             UpdateCurrentMovementInfo(e.Path, e.Times, e.Speeds);
 
             // AtomicSwap: replace old confirmed reservations with new accepted path
-            if (!IsBaselineMode && personalOccupancyLayer != null)
+            if (!ShouldBypassTemporal && personalOccupancyLayer != null)
             {
                 var cellIds = new List<string>();
                 var startTimes = new List<float>();

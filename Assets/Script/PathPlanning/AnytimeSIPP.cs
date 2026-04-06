@@ -511,14 +511,7 @@ namespace PathPlanning
 
             if (EventManager.Instance != null)
             {
-                EventManager.Instance.ReportPathPlanningMetrics(
-                    robotId,
-                    metrics.PlanId,
-                    metrics.PlanningTime,
-                    metrics.ActualPathLength,
-                    metrics.TravelTime,
-                    metrics.IdealPathLength
-                );
+                // Metrics event is now fired from RobotController.PlanPath() to preserve IsReplan flag
             }
 
             return (foundSolution, bestPath, bestTimes, bestSpeeds, bestEpsilon);

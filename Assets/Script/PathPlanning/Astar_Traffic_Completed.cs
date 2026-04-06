@@ -364,14 +364,7 @@ namespace PathPlanning
             
             if (EventManager.Instance != null)
             {
-                EventManager.Instance.ReportPathPlanningMetrics(
-                    robotId,
-                    metrics.PlanId,
-                    metrics.PlanningTime,
-                    metrics.ActualPathLength,
-                    metrics.TravelTime,
-                    metrics.IdealPathLength
-                );
+                // Metrics event is now fired from RobotController.PlanPath() to preserve IsReplan flag
             }
             
             Debug.Log($"Robot {robotId}: TimeSpaceAStar found a path with {pathResult.path.Count} points. Time: {stopwatch.ElapsedMilliseconds}ms");
