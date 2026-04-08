@@ -26,169 +26,112 @@ namespace EditModeTests
         }
 
         // ===================================================================
-        //  Graph / RoutePoint helper methods for Astar_Basic tests
+        //  NavigationGraph helpers for BasicAStarPathFinder tests
         // ===================================================================
 
         /// <summary>
-        /// Creates a ConnectionPoint at the given (x, y) coordinates with a horizontal boundary.
+        /// Builds a NavigationGraph with 4 Waypoints in a bidirectional chain:
+        ///   A(0,0) ↔ B(1,0) ↔ C(2,0) ↔ D(3,0)
+        /// Uses CellSpace waypoints for simplicity.
         /// </summary>
-        private ConnectionPoint MakeConnectionPoint(string id, double x, double y)
+        private NavigationGraph BuildLinearNavGraph()
         {
-            Geometry point = gf.CreatePoint(new Coordinate(x, y));
-            var boundary = new CellBoundary(
-                "cb_" + id,
-                new Dictionary<string, object>(),
-                "src_" + id, "tgt_" + id,
-                point, null, "horizontal");
-            return new ConnectionPoint(id, boundary, point, "1F", false, false);
+            var indoorSpace = new IndoorSpace();
+            indoorSpace.CellSpaces.Add(TestIndoorSpaceFactory.MakeNavigableCell("A", 0, 0));
+            indoorSpace.CellSpaces.Add(TestIndoorSpaceFactory.MakeNavigableCell("B", 1, 0));
+            indoorSpace.CellSpaces.Add(TestIndoorSpaceFactory.MakeNavigableCell("C", 2, 0));
+            indoorSpace.CellSpaces.Add(TestIndoorSpaceFactory.MakeNavigableCell("D", 3, 0));
+
+            // Bidirectional boundaries
+            indoorSpace.CellBoundaries.Add(TestIndoorSpaceFactory.MakeHorizontalBoundary("cb_AB", "A", "B", 0.5, 0));
+            indoorSpace.CellBoundaries.Add(TestIndoorSpaceFactory.MakeHorizontalBoundary("cb_BA", "B", "A", 0.5, 0));
+            indoorSpace.CellBoundaries.Add(TestIndoorSpaceFactory.MakeHorizontalBoundary("cb_BC", "B", "C", 1.5, 0));
+            indoorSpace.CellBoundaries.Add(TestIndoorSpaceFactory.MakeHorizontalBoundary("cb_CB", "C", "B", 1.5, 0));
+            indoorSpace.CellBoundaries.Add(TestIndoorSpaceFactory.MakeHorizontalBoundary("cb_CD", "C", "D", 2.5, 0));
+            indoorSpace.CellBoundaries.Add(TestIndoorSpaceFactory.MakeHorizontalBoundary("cb_DC", "D", "C", 2.5, 0));
+
+            return NavigationGraphBuilder.FromCellSpaces(indoorSpace, 3.0f, 0.05f);
         }
 
         /// <summary>
-        /// Builds a small test Graph with RoutePoints connected in a chain:
-        ///   A(0,0) -> B(1,0) -> C(2,0) -> D(3,0)
-        /// Returns the graph and the RoutePoints for direct reference.
+        /// Builds a disconnected graph where node E has no edges to A.
         /// </summary>
-        private (Graph graph, RoutePoint rpA, RoutePoint rpB, RoutePoint rpC, RoutePoint rpD) BuildLinearRouteGraph()
+        private NavigationGraph BuildDisconnectedNavGraph()
         {
             var indoorSpace = new IndoorSpace();
-            var graph = new Graph(indoorSpace);
-
-            var cpA = MakeConnectionPoint("A", 0, 0);
-            var cpB = MakeConnectionPoint("B", 1, 0);
-            var cpC = MakeConnectionPoint("C", 2, 0);
-            var cpD = MakeConnectionPoint("D", 3, 0);
-
-            var rpA = new RoutePoint(cpA);
-            var rpB = new RoutePoint(cpB);
-            var rpC = new RoutePoint(cpC);
-            var rpD = new RoutePoint(cpD);
-
-            // Wire up Children (forward edges) used by Astar_Basic
-            rpA.AddChild(cpB);
-            rpB.AddChild(cpC);
-            rpC.AddChild(cpD);
-
-            // Also add reverse edges so the graph is bidirectional
-            rpB.AddChild(cpA);
-            rpC.AddChild(cpB);
-            rpD.AddChild(cpC);
-
-            graph.AddNode(rpA);
-            graph.AddNode(rpB);
-            graph.AddNode(rpC);
-            graph.AddNode(rpD);
-
-            return (graph, rpA, rpB, rpC, rpD);
-        }
-
-        /// <summary>
-        /// Builds a disconnected graph where node E has no edges to the A-B-C-D chain.
-        /// </summary>
-        private (Graph graph, RoutePoint rpA, RoutePoint rpE) BuildDisconnectedGraph()
-        {
-            var indoorSpace = new IndoorSpace();
-            var graph = new Graph(indoorSpace);
-
-            var cpA = MakeConnectionPoint("A", 0, 0);
-            var cpE = MakeConnectionPoint("E", 100, 100);
-
-            var rpA = new RoutePoint(cpA);
-            var rpE = new RoutePoint(cpE);
-            // No children linking A to E
-
-            graph.AddNode(rpA);
-            graph.AddNode(rpE);
-
-            return (graph, rpA, rpE);
+            indoorSpace.CellSpaces.Add(TestIndoorSpaceFactory.MakeNavigableCell("A", 0, 0));
+            indoorSpace.CellSpaces.Add(TestIndoorSpaceFactory.MakeNavigableCell("E", 100, 100));
+            // No boundaries = no edges
+            return NavigationGraphBuilder.FromCellSpaces(indoorSpace, 3.0f, 0.05f);
         }
 
         // ===================================================================
-        //  Astar_Basic tests
+        //  BasicAStarPathFinder tests (replaces old Astar_Basic tests)
         // ===================================================================
 
         [Test]
         public void AstarBasic_FindsPath_BetweenConnectedNodes()
         {
-            var (graph, rpA, rpB, rpC, rpD) = BuildLinearRouteGraph();
+            var graph = BuildLinearNavGraph();
+            var finder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
 
-            var (path, speeds) = Astar_Basic.AstarAlgorithm(
-                graph, rpA, rpD, 1.0f, SearchMethod.Euclidean_Distance);
+            var result = finder.FindPath(graph, graph.GetNode("A"), graph.GetNode("D"),
+                null, null, "R1", null, 0f, 1f, 2f, 5f);
 
-            Assert.IsNotNull(path);
-            Assert.IsTrue(path.Count > 0, "Path should contain at least one ConnectionPoint");
-            Assert.AreEqual("A", path[0].Id, "Path should start at A");
-            Assert.AreEqual("D", path[path.Count - 1].Id, "Path should end at D");
-            Assert.AreEqual(path.Count, speeds.Count, "Speeds list should match path length");
+            Assert.IsNotNull(result);
+            Assert.IsTrue(result.Path.Count > 0, "Path should contain at least one Waypoint");
+            Assert.AreEqual("A", result.Path[0].Id, "Path should start at A");
+            Assert.AreEqual("D", result.Path[result.Path.Count - 1].Id, "Path should end at D");
+            Assert.AreEqual(result.Path.Count, result.Speeds.Count, "Speeds list should match path length");
         }
 
         [Test]
-        public void AstarBasic_ReturnsEmptyPath_ForDisconnectedNodes()
+        public void AstarBasic_ReturnsNull_ForDisconnectedNodes()
         {
-            var (graph, rpA, rpE) = BuildDisconnectedGraph();
+            var graph = BuildDisconnectedNavGraph();
+            var finder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
 
-            var (path, speeds) = Astar_Basic.AstarAlgorithm(
-                graph, rpA, rpE, 1.0f, SearchMethod.Euclidean_Distance);
+            var result = finder.FindPath(graph, graph.GetNode("A"), graph.GetNode("E"),
+                null, null, "R1", null, 0f, 1f, 2f, 5f);
 
-            Assert.IsNotNull(path);
-            Assert.AreEqual(0, path.Count, "Path should be empty when nodes are disconnected");
-            Assert.AreEqual(0, speeds.Count);
+            Assert.IsNull(result, "Should return null when nodes are disconnected");
         }
 
         [Test]
-        public void AstarBasic_ReturnsEmptyPath_ForNullInputs()
+        public void AstarBasic_ReturnsNull_ForNullInputs()
         {
-            var (graph, rpA, _, _, _) = BuildLinearRouteGraph();
+            var graph = BuildLinearNavGraph();
+            var finder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
 
-            // Expect the error logs that A* emits for invalid inputs
-            LogAssert.Expect(UnityEngine.LogType.Error, "Invalid input parameters for A* algorithm");
-            LogAssert.Expect(UnityEngine.LogType.Error, "Invalid input parameters for A* algorithm");
-            LogAssert.Expect(UnityEngine.LogType.Error, "Invalid input parameters for A* algorithm");
-
-            // Null graph
-            var (path1, speeds1) = Astar_Basic.AstarAlgorithm(
-                null, rpA, rpA, 1.0f, SearchMethod.Euclidean_Distance);
-            Assert.AreEqual(0, path1.Count, "Null graph should return empty path");
-
-            // Null start
-            var (path2, speeds2) = Astar_Basic.AstarAlgorithm(
-                graph, null, rpA, 1.0f, SearchMethod.Euclidean_Distance);
-            Assert.AreEqual(0, path2.Count, "Null start should return empty path");
-
-            // Null end
-            var (path3, speeds3) = Astar_Basic.AstarAlgorithm(
-                graph, rpA, null, 1.0f, SearchMethod.Euclidean_Distance);
-            Assert.AreEqual(0, path3.Count, "Null end should return empty path");
+            Assert.IsNull(finder.FindPath(null, graph.GetNode("A"), graph.GetNode("A"),
+                null, null, "R1", null, 0f, 1f, 2f, 5f), "Null graph should return null");
+            Assert.IsNull(finder.FindPath(graph, null, graph.GetNode("A"),
+                null, null, "R1", null, 0f, 1f, 2f, 5f), "Null start should return null");
+            Assert.IsNull(finder.FindPath(graph, graph.GetNode("A"), null,
+                null, null, "R1", null, 0f, 1f, 2f, 5f), "Null end should return null");
         }
 
         [Test]
         public void AstarBasic_HeuristicCalculation_IsCorrect()
         {
-            // Verify indirectly by comparing Euclidean vs Manhattan on the same graph.
-            // For a straight horizontal line, both heuristics produce identical paths.
-            var (graph, rpA, rpB, rpC, rpD) = BuildLinearRouteGraph();
+            var graph = BuildLinearNavGraph();
+            var finderEuclid = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
+            var finderManhattan = new BasicAStarPathFinder(SearchMethod.Manhattan_Distance);
 
-            var (pathEuclid, _) = Astar_Basic.AstarAlgorithm(
-                graph, rpA, rpD, 1.0f, SearchMethod.Euclidean_Distance);
-            var (pathManhattan, _) = Astar_Basic.AstarAlgorithm(
-                graph, rpA, rpD, 1.0f, SearchMethod.Manhattan_Distance);
+            var resultEuclid = finderEuclid.FindPath(graph, graph.GetNode("A"), graph.GetNode("D"),
+                null, null, "R1", null, 0f, 1f, 2f, 5f);
+            var resultManhattan = finderManhattan.FindPath(graph, graph.GetNode("A"), graph.GetNode("D"),
+                null, null, "R1", null, 0f, 1f, 2f, 5f);
 
-            Assert.AreEqual(pathEuclid.Count, pathManhattan.Count,
+            Assert.AreEqual(resultEuclid.Path.Count, resultManhattan.Path.Count,
                 "Both heuristics should find a path of the same length on a linear graph");
 
-            // For the linear A(0,0)->D(3,0) graph, Euclidean distance = 3.0, Manhattan = 3.0
-            // Verify both arrive at the same start/end
-            Assert.AreEqual("A", pathEuclid[0].Id);
-            Assert.AreEqual("D", pathEuclid[pathEuclid.Count - 1].Id);
-            Assert.AreEqual("A", pathManhattan[0].Id);
-            Assert.AreEqual("D", pathManhattan[pathManhattan.Count - 1].Id);
+            Assert.AreEqual("A", resultEuclid.Path[0].Id);
+            Assert.AreEqual("D", resultEuclid.Path[resultEuclid.Path.Count - 1].Id);
 
-            // Additionally, on a straight line the heuristic values should be equal:
-            // Euclidean(0,0 -> 3,0) = sqrt(9) = 3
-            // Manhattan(0,0 -> 3,0) = |0-3| + |0-0| = 3
-            // Both yield 3, so path costs are identical and path lengths must match.
-            for (int i = 0; i < pathEuclid.Count; i++)
+            for (int i = 0; i < resultEuclid.Path.Count; i++)
             {
-                Assert.AreEqual(pathEuclid[i].Id, pathManhattan[i].Id,
+                Assert.AreEqual(resultEuclid.Path[i].Id, resultManhattan.Path[i].Id,
                     $"Path nodes should match at index {i}");
             }
         }

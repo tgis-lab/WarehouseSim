@@ -87,13 +87,9 @@ namespace EditModeTests
         }
 
         /// <summary>
-        /// Builds a 4-cell directed CP graph with a one-way constraint:
-        ///   c1 (0,0) -&gt; c2 (2,0) -&gt; c3 (4,0) -&gt; c4 (6,0)
-        /// Edges are directed: c1-&gt;c2-&gt;c3-&gt;c4.
-        /// Also adds reverse edges c2-&gt;c1, c3-&gt;c2, c4-&gt;c3 to allow bidirectional travel
-        /// EXCEPT c3-&gt;c2 is omitted to simulate a one-way restriction.
+        /// Builds the IndoorSpace with 4 cells and 3 directed boundaries.
         /// </summary>
-        private (IndoorSpace space, Graph graph) BuildDirectedCPGraph()
+        private IndoorSpace BuildIndoorSpace()
         {
             var space = new IndoorSpace();
 
@@ -109,35 +105,34 @@ namespace EditModeTests
             space.CellBoundaries.Add(cb23);
             space.CellBoundaries.Add(cb34);
 
-            var graph = new Graph(space, 3.0f);
+            return space;
+        }
 
-            // Create ConnectionPoints from boundaries
-            var cp12 = space.GetConnectionPointFromCellBoundary("cb12");
-            var cp23 = space.GetConnectionPointFromCellBoundary("cb23");
-            var cp34 = space.GetConnectionPointFromCellBoundary("cb34");
+        /// <summary>
+        /// Builds NavigationGraph (CP-based) and NavigationQueryService from the 4-cell space.
+        /// Edges are directed: cb12 -> cb23 -> cb34 (forward).
+        /// Reverse edge cb23 -> cb12 is added (allowed).
+        /// NO reverse edge cb34 -> cb23 (one-way restriction at intersection).
+        /// </summary>
+        private (IndoorSpace space, NavigationGraph cpGraph, NavigationGraph cellGraph, NavigationQueryService cpQueries) BuildNavigationGraphs()
+        {
+            var space = BuildIndoorSpace();
+            var hypergraph = space.GetHypergraph();
+            var cpGraph = NavigationGraphBuilder.FromHypergraph(hypergraph, space, 3.0f, 0.05f);
 
-            var rp12 = new RoutePoint(cp12);
-            var rp23 = new RoutePoint(cp23);
-            var rp34 = new RoutePoint(cp34);
+            // Manually wire edges since test fixture has no Containers
+            // Forward edges: cb12 -> cb23 -> cb34
+            cpGraph.AddEdge("cb12", "cb23");
+            cpGraph.AddEdge("cb23", "cb34");
 
-            graph.AddNode(rp12);
-            graph.AddNode(rp23);
-            graph.AddNode(rp34);
+            // Reverse edge: cb23 -> cb12 (allowed)
+            cpGraph.AddEdge("cb23", "cb12");
 
-            // Forward edges: cp12 -> cp23 -> cp34
-            rp12.AddChild(cp23);
-            rp23.AddParent(cp12);
+            // NO reverse edge cb34 -> cb23 (one-way restriction at intersection)
 
-            rp23.AddChild(cp34);
-            rp34.AddParent(cp23);
-
-            // Reverse edge: cp23 -> cp12 (allowed)
-            rp23.AddChild(cp12);
-            rp12.AddParent(cp23);
-
-            // NO reverse edge cp34 -> cp23 (one-way restriction at intersection)
-
-            return (space, graph);
+            var cellGraph = NavigationGraphBuilder.FromCellSpaces(space, 3.0f, 0.05f);
+            var cpQueries = new NavigationQueryService(space, cpGraph, 3.0f, 0.05f);
+            return (space, cpGraph, cellGraph, cpQueries);
         }
 
         // =====================================================================
@@ -157,56 +152,58 @@ namespace EditModeTests
         [Test]
         public void C2_BasicAStar_OnCPGraph_FindsForwardPath()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
-            var (path, speeds) = Astar_Basic.AstarAlgorithm(
-                graph, rp12, rp34, 1.5f, SearchMethod.Euclidean_Distance);
+            var pathFinder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
+            var result = pathFinder.FindPath(
+                cpGraph, wp12, wp34, null, null,
+                "test_robot", null, 0f, 1.5f, 1.0f, 1.0f);
 
-            Assert.IsNotNull(path, "Forward path should be found");
-            Assert.IsTrue(path.Count >= 2, "Path should have at least start and end");
-            Assert.AreEqual("cb12", path[0].Id);
-            Assert.AreEqual("cb34", path[path.Count - 1].Id);
+            Assert.IsNotNull(result, "Forward path should be found");
+            Assert.IsNotNull(result.Path);
+            Assert.IsTrue(result.Path.Count >= 2, "Path should have at least start and end");
+            Assert.AreEqual("cb12", result.Path[0].Id);
+            Assert.AreEqual("cb34", result.Path[result.Path.Count - 1].Id);
         }
 
         [Test]
         public void C2_BasicAStar_OnCPGraph_RespectsOneWayRestriction()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            // Try reverse: cp34 -> cp12
-            // cp34 has NO child edge to cp23, so it should fail
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
+            // Try reverse: cb34 -> cb12
+            // cb34 has NO outgoing edge to cb23, so it should fail
+            var wp34 = cpGraph.GetNode("cb34");
+            var wp12 = cpGraph.GetNode("cb12");
 
-            var (path, speeds) = Astar_Basic.AstarAlgorithm(
-                graph, rp34, rp12, 1.5f, SearchMethod.Euclidean_Distance);
+            var pathFinder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
+            var result = pathFinder.FindPath(
+                cpGraph, wp34, wp12, null, null,
+                "test_robot", null, 0f, 1.5f, 1.0f, 1.0f);
 
-            Assert.IsTrue(path == null || path.Count == 0,
-                "Reverse path should NOT be found due to one-way restriction at cp34");
+            Assert.IsTrue(result == null || result.Path == null || result.Path.Count == 0,
+                "Reverse path should NOT be found due to one-way restriction at cb34");
         }
 
         [Test]
         public void C2_BasicAStar_OnCPGraph_UsesConstantSpeed()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
-            var (path, speeds) = Astar_Basic.AstarAlgorithm(
-                graph, rp12, rp34, 1.5f, SearchMethod.Euclidean_Distance);
+            var pathFinder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
+            var result = pathFinder.FindPath(
+                cpGraph, wp12, wp34, null, null,
+                "test_robot", null, 0f, 1.5f, 1.0f, 1.0f);
 
-            Assert.IsNotNull(speeds);
-            foreach (float speed in speeds)
+            Assert.IsNotNull(result);
+            Assert.IsNotNull(result.Speeds);
+            foreach (float speed in result.Speeds)
             {
                 Assert.AreEqual(1.5f, speed, 0.001f,
                     "Basic A* should use constant default speed (no TrafficRulesKnowledge)");
@@ -218,17 +215,17 @@ namespace EditModeTests
         {
             // Basic A* signature does not take occupancy layers at all.
             // This test just confirms the API contract.
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
             // Call without any occupancy - should work fine
             Assert.DoesNotThrow(() =>
             {
-                Astar_Basic.AstarAlgorithm(graph, rp12, rp34, 1.5f, SearchMethod.Euclidean_Distance);
+                var pathFinder = new BasicAStarPathFinder(SearchMethod.Euclidean_Distance);
+                pathFinder.FindPath(cpGraph, wp12, wp34, null, null,
+                    "test_robot", null, 0f, 1.5f, 1.0f, 1.0f);
             }, "Basic A* must not depend on any occupancy layer");
         }
 
@@ -239,98 +236,92 @@ namespace EditModeTests
         [Test]
         public void C3_TimeSpaceAStar_WithNullOccupancy_DoesNotCrash()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
             // Pass null for both occupancy layers - should not throw
             Assert.DoesNotThrow(() =>
             {
-                TimeSpaceAStar.TimeSpaceAStarAlgorithm(
-                    graph,
-                    space,
+                var pathFinder = new TimeSpaceAStarPathFinder(space, SearchMethod.Euclidean_Distance);
+                pathFinder.FindPath(
+                    cpGraph,
+                    wp12,
+                    wp34,
                     null,  // personalOccupancyLayer = null
                     null,  // globalOccupancyLayer = null
-                    rp12,
-                    rp34,
                     "test_robot",
                     "test_plan",
                     0f,    // startTime
                     1.5f,  // speed
                     1.0f,  // maxAcceleration
-                    1.0f,  // maxDeceleration
-                    SearchMethod.Euclidean_Distance);
+                    1.0f); // maxDeceleration
             }, "IST-A* with null occupancy layers should not crash");
         }
 
         [Test]
         public void C3_TimeSpaceAStar_WithNullOccupancy_FindsPath()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
-            var (path, times, speeds, planId, metrics) = TimeSpaceAStar.TimeSpaceAStarAlgorithm(
-                graph,
-                space,
+            var pathFinder = new TimeSpaceAStarPathFinder(space, SearchMethod.Euclidean_Distance);
+            var result = pathFinder.FindPath(
+                cpGraph,
+                wp12,
+                wp34,
                 null,  // no personal occupancy
                 null,  // no global occupancy
-                rp12,
-                rp34,
                 "test_robot",
                 "test_plan",
                 0f,
                 1.5f,
                 1.0f,
-                1.0f,
-                SearchMethod.Euclidean_Distance);
+                1.0f);
 
-            Assert.IsNotNull(path, "IST-A* should find a path even without occupancy data");
-            Assert.IsTrue(path.Count >= 2, "Path should have at least start and end");
-            Assert.AreEqual("cb34", path[path.Count - 1].Id,
+            Assert.IsNotNull(result, "IST-A* should find a path even without occupancy data");
+            Assert.IsNotNull(result.Path);
+            Assert.IsTrue(result.Path.Count >= 2, "Path should have at least start and end");
+            Assert.AreEqual("cb34", result.Path[result.Path.Count - 1].Id,
                 "IST-A* should reach the goal node");
         }
 
         [Test]
         public void C3_TimeSpaceAStar_WithNullOccupancy_TreatsAllNodesAsAvailable()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
             // Run with null occupancy
-            var (pathNoOcc, timesNoOcc, _, _, _) = TimeSpaceAStar.TimeSpaceAStarAlgorithm(
-                graph, space, null, null, rp12, rp34,
-                "test_robot", "test_plan", 0f, 1.5f, 1.0f, 1.0f,
-                SearchMethod.Euclidean_Distance);
+            var pathFinder = new TimeSpaceAStarPathFinder(space, SearchMethod.Euclidean_Distance);
+            var result = pathFinder.FindPath(
+                cpGraph, wp12, wp34, null, null,
+                "test_robot", "test_plan", 0f, 1.5f, 1.0f, 1.0f);
 
-            Assert.IsNotNull(pathNoOcc);
-            Assert.IsNotNull(timesNoOcc);
+            Assert.IsNotNull(result);
+            Assert.IsNotNull(result.Path);
+            Assert.IsNotNull(result.Times);
 
             // With null occupancy, times should be non-decreasing.
             // Note: ReconstructPath may insert wait-state entries (same node, slightly later time),
-            // so we check strictly increasing only across DISTINCT ConnectionPoint IDs.
-            if (timesNoOcc != null && pathNoOcc != null && timesNoOcc.Count > 1)
+            // so we check strictly increasing only across DISTINCT Waypoint IDs.
+            if (result.Times != null && result.Path != null && result.Times.Count > 1)
             {
-                for (int i = 1; i < timesNoOcc.Count; i++)
+                for (int i = 1; i < result.Times.Count; i++)
                 {
-                    Assert.IsTrue(timesNoOcc[i] >= timesNoOcc[i - 1],
-                        $"Times should be non-decreasing: t[{i}]={timesNoOcc[i]} < t[{i - 1}]={timesNoOcc[i - 1]}");
+                    Assert.IsTrue(result.Times[i] >= result.Times[i - 1],
+                        $"Times should be non-decreasing: t[{i}]={result.Times[i]} < t[{i - 1}]={result.Times[i - 1]}");
 
-                    if (pathNoOcc[i].Id != pathNoOcc[i - 1].Id)
+                    if (result.Path[i].Id != result.Path[i - 1].Id)
                     {
-                        Assert.IsTrue(timesNoOcc[i] > timesNoOcc[i - 1],
+                        Assert.IsTrue(result.Times[i] > result.Times[i - 1],
                             $"Arrival at different nodes should be strictly increasing: " +
-                            $"{pathNoOcc[i].Id} t={timesNoOcc[i]} vs {pathNoOcc[i - 1].Id} t={timesNoOcc[i - 1]}");
+                            $"{result.Path[i].Id} t={result.Times[i]} vs {result.Path[i - 1].Id} t={result.Times[i - 1]}");
                     }
                 }
             }
@@ -343,10 +334,12 @@ namespace EditModeTests
         [Test]
         public void GAP2_PathPlanner_SetAlgorithm_SwitchesAlgorithm()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
+            var cellQueries = new NavigationQueryService(space, cellGraph, 3.0f, 0.05f);
 
             var planner = new PathPlanner(
-                graph, space,
+                cpGraph, cellGraph, cpQueries, cellQueries,
+                space,
                 SearchAlgorithm.AnytimeSIPP,
                 SearchMethod.Euclidean_Distance,
                 "robot1", 1.0f, 1.0f);
@@ -354,17 +347,16 @@ namespace EditModeTests
             // Switch algorithm at runtime — this method must exist
             planner.SetAlgorithm(SearchAlgorithm.Astar_Basic);
 
-            var rp12 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb12"));
-            var rp34 = graph.GetRoutePointFromConnectionPoint(
-                space.GetConnectionPointFromCellBoundary("cb34"));
+            var wp12 = cpGraph.GetNode("cb12");
+            var wp34 = cpGraph.GetNode("cb34");
 
             // Should use Basic A* (no occupancy params needed) and find a path
-            var (path, times, speeds, planId, metrics) = planner.FindPathWithDynamicObstacles(
-                null, null, rp12, rp34, "robot1", null, 0f, 1.5f);
+            var result = planner.FindPathWithDynamicObstacles(
+                null, null, wp12, wp34, "robot1", null, 0f, 1.5f);
 
-            Assert.IsNotNull(path, "After SetAlgorithm to Astar_Basic, should find path");
-            Assert.IsTrue(path.Count >= 2);
+            Assert.IsNotNull(result, "After SetAlgorithm to Astar_Basic, should find path");
+            Assert.IsNotNull(result.Path);
+            Assert.IsTrue(result.Path.Count >= 2);
         }
 
         // =====================================================================
@@ -422,10 +414,12 @@ namespace EditModeTests
         [Test]
         public void R2_PathPlanner_SetDynamics_UpdatesValues()
         {
-            var (space, graph) = BuildDirectedCPGraph();
+            var (space, cpGraph, cellGraph, cpQueries) = BuildNavigationGraphs();
+            var cellQueries = new NavigationQueryService(space, cellGraph, 3.0f, 0.05f);
 
             var planner = new PathPlanner(
-                graph, space,
+                cpGraph, cellGraph, cpQueries, cellQueries,
+                space,
                 SearchAlgorithm.Astar_Basic,
                 SearchMethod.Euclidean_Distance,
                 "robot1", 1.0f, 1.0f);
@@ -497,7 +491,7 @@ namespace EditModeTests
         }
 
         // =====================================================================
-        //  OOB Recovery: Graph finds nearest RoutePoint when position outside CellSpace
+        //  OOB Recovery: NavigationQueryService finds nearest Waypoint when position outside CellSpace
         // =====================================================================
 
         [Test]
@@ -511,18 +505,20 @@ namespace EditModeTests
             var cb = MakeHorizontalBoundary("cb12", "c1", "c2", 1, 0);
             space.CellBoundaries.Add(cb);
 
-            var graph = new Graph(space, 3.0f);
-            ConnectionPoint cp12 = space.GetConnectionPointFromCellBoundary("cb12");
-            graph.AddNode(new RoutePoint(cp12));
+            var hypergraph = space.GetHypergraph();
+            var cpGraph = NavigationGraphBuilder.FromHypergraph(hypergraph, space, 3.0f, 0.05f);
+            // Manually wire edge since test fixture has no Containers
+            cpGraph.AddEdge("cb12", "cb12"); // self-edge just to ensure node exists
+            var cpQueries = new NavigationQueryService(space, cpGraph, 3.0f, 0.05f);
 
             // Position FAR outside any CellSpace — simulates collision pushing robot out
             var outsidePosition = new UnityEngine.Vector3(99f, 0.05f, 99f);
 
-            // Before fix: returns null. After fix: should return nearest RoutePoint
-            RoutePoint result = graph.GetRoutePointFromCoordinate(outsidePosition, true);
+            // Before fix: returns null. After fix: should return nearest Waypoint
+            Waypoint result = cpQueries.ResolveWaypointFromWorldPosition(outsidePosition, TraversalDirection.Outbound);
 
             Assert.IsNotNull(result,
-                "When position is outside all CellSpaces, should fall back to nearest RoutePoint");
+                "When position is outside all CellSpaces, should fall back to nearest Waypoint");
         }
 
         [Test]
@@ -536,17 +532,18 @@ namespace EditModeTests
             var cb = MakeHorizontalBoundary("cb12", "c1", "c2", 1, 0);
             space.CellBoundaries.Add(cb);
 
-            var graph = new Graph(space, 3.0f);
-            ConnectionPoint cp12 = space.GetConnectionPointFromCellBoundary("cb12");
-            graph.AddNode(new RoutePoint(cp12));
+            var hypergraph = space.GetHypergraph();
+            var cpGraph = NavigationGraphBuilder.FromHypergraph(hypergraph, space, 3.0f, 0.05f);
+            cpGraph.AddEdge("cb12", "cb12"); // self-edge just to ensure node exists
+            var cpQueries = new NavigationQueryService(space, cpGraph, 3.0f, 0.05f);
 
             // Just outside c1's polygon (0.6, 0) — 0.1 beyond the edge
             var nearbyOutside = new UnityEngine.Vector3(0.6f, 0.05f, 0f);
 
-            RoutePoint result = graph.GetRoutePointFromCoordinate(nearbyOutside, true);
+            Waypoint result = cpQueries.ResolveWaypointFromWorldPosition(nearbyOutside, TraversalDirection.Outbound);
 
             Assert.IsNotNull(result,
-                "Position slightly outside CellSpace should still find nearest RoutePoint");
+                "Position slightly outside CellSpace should still find nearest Waypoint");
         }
     }
 }

@@ -386,23 +386,23 @@ namespace EditModeTests
         // ====================================================================
 
         /// <summary>
-        /// Creates RoutePoints at specific coordinates to control the turn angle.
+        /// Creates Waypoints at specific coordinates to control the turn angle.
         /// prev -> current -> next defines two direction vectors, and the angle
         /// between them determines the turn speed factor.
         /// </summary>
-        private RoutePoint MakeRoutePoint(double x, double y)
+        private Waypoint MakeWaypoint(double x, double y)
         {
             var cb = MakeBoundary($"cb_{x}_{y}", "dummy_s", "dummy_t", x, y);
             var cp = MakeConnectionPoint(cb, x, y);
-            return new RoutePoint(cp);
+            return Waypoint.FromConnectionPoint(cp, new IndoorSpace(), 3.0f, 0.05f);
         }
 
         /// <summary>
-        /// Builds a minimal IndoorSpace + Graph with layers that correctly
+        /// Builds a minimal IndoorSpace with layers that correctly
         /// report IsAisle() / IsIntersection() for TrafficRuleKnowledge.
-        /// Returns (indoorSpace, graph) where all boundary CPs are in "aisle" layer.
+        /// Returns indoorSpace where all boundary CPs are in "aisle" layer.
         /// </summary>
-        private (IndoorSpace indoorSpace, Graph graph) BuildTrafficGraph()
+        private IndoorSpace BuildTrafficGraph()
         {
             var indoorSpace = new IndoorSpace();
 
@@ -425,29 +425,16 @@ namespace EditModeTests
             indoorSpace.CellBoundaries.Add(cbAB);
             indoorSpace.CellBoundaries.Add(cbBC);
 
-            var graph = new Graph(indoorSpace);
-
-            // Build RoutePoints and register them in the graph
-            var cpAB = MakeConnectionPoint(cbAB, 0.5, 0);
-            var cpBC = MakeConnectionPoint(cbBC, 1.5, 0);
-
-            var rpAB = new RoutePoint(cpAB);
-            var rpBC = new RoutePoint(cpBC);
-            rpAB.AddChild(cpBC);
-            rpBC.AddParent(cpAB);
-
-            graph.AddNode(rpAB);
-            graph.AddNode(rpBC);
-
-            return (indoorSpace, graph);
+            return indoorSpace;
         }
 
         /// <summary>
-        /// Builds an IndoorSpace + Graph where cell "I" is in an intersection layer.
+        /// Builds an IndoorSpace where cell "I" is in an intersection layer.
         /// Layout: A (aisle) -- I (intersection) -- B (aisle).
+        /// Returns waypoints for the two boundaries (A-I and I-B).
         /// </summary>
-        private (IndoorSpace indoorSpace, Graph graph,
-                 RoutePoint rpAI, RoutePoint rpIB) BuildIntersectionGraph()
+        private (IndoorSpace indoorSpace,
+                 Waypoint wpAI, Waypoint wpIB) BuildIntersectionGraph()
         {
             var indoorSpace = new IndoorSpace();
 
@@ -476,20 +463,13 @@ namespace EditModeTests
             indoorSpace.CellBoundaries.Add(cbAI);
             indoorSpace.CellBoundaries.Add(cbIB);
 
-            var graph = new Graph(indoorSpace);
-
             var cpAI = MakeConnectionPoint(cbAI, 0.5, 0);
             var cpIB = MakeConnectionPoint(cbIB, 1.5, 0);
 
-            var rpAI = new RoutePoint(cpAI);
-            var rpIB = new RoutePoint(cpIB);
-            rpAI.AddChild(cpIB);
-            rpIB.AddParent(cpAI);
+            var wpAI = Waypoint.FromConnectionPoint(cpAI, indoorSpace, 3.0f, 0.05f);
+            var wpIB = Waypoint.FromConnectionPoint(cpIB, indoorSpace, 3.0f, 0.05f);
 
-            graph.AddNode(rpAI);
-            graph.AddNode(rpIB);
-
-            return (indoorSpace, graph, rpAI, rpIB);
+            return (indoorSpace, wpAI, wpIB);
         }
 
         // ====================================================================
@@ -499,18 +479,18 @@ namespace EditModeTests
         [Test]
         public void TrafficRuleKnowledge_ModifySpeed_ReturnsIntersectionSpeedLimit()
         {
-            var (indoorSpace, graph, rpAI, rpIB) = BuildIntersectionGraph();
-            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace, graph);
+            var (indoorSpace, wpAI, wpIB) = BuildIntersectionGraph();
+            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace);
 
-            // ModifySpeed from rpAI to rpIB, approaching intersection.
-            // GetSpeedLimit should detect rpAI -> rpIB crosses into intersection
+            // ModifySpeed from wpAI to wpIB, approaching intersection.
+            // GetSpeedLimit should detect wpAI -> wpIB crosses into intersection
             // and return 0.7 speed limit.
             float distance = 1.0f;
             float defaultSpeed = 1.0f;
             float currentSpeed = 1.0f;
 
             var (modifiedSpeed, modifiedTime) = traffic.ModifySpeed(
-                rpAI, rpIB, currentSpeed, defaultSpeed, distance,
+                wpAI, wpIB, currentSpeed, defaultSpeed, distance,
                 maxAcceleration: 2.0f, maxDeceleration: 2.0f);
 
             // The speed limit for intersection approach is 0.7.
@@ -528,16 +508,16 @@ namespace EditModeTests
         [Test]
         public void TrafficRuleKnowledge_ModifySpeed_ReturnsCorrectSpeedForTurn()
         {
-            var (indoorSpace, graph) = BuildTrafficGraph();
-            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace, graph);
+            var indoorSpace = BuildTrafficGraph();
+            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace);
 
             // Create a 90-degree turn: prev=(0,0), current=(1,0), next=(1,1)
             // Direction in:  (1,0)-(0,0) = (1,0,0)
             // Direction out: (1,1)-(1,0) = (0,0,1) [in Unity XZ plane]
             // Angle = 90 degrees -> turnSpeedFactor = 0.5
-            var prev = MakeRoutePoint(0, 0);
-            var current = MakeRoutePoint(1, 0);
-            var next = MakeRoutePoint(1, 1);
+            var prev = MakeWaypoint(0, 0);
+            var current = MakeWaypoint(1, 0);
+            var next = MakeWaypoint(1, 1);
 
             float distance = 1.0f;
             float defaultSpeed = 1.0f;
@@ -563,17 +543,17 @@ namespace EditModeTests
         [Test]
         public void TrafficRuleKnowledge_GetTurnSpeedFactor_ReturnsCorrectFactorForAngleRanges()
         {
-            var (indoorSpace, graph) = BuildTrafficGraph();
-            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace, graph);
+            var indoorSpace = BuildTrafficGraph();
+            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace);
 
             // Test small angle (< 30 deg): prev=(0,0), current=(5,0), next=(10,1)
             // Direction in:  (5,0)-(0,0) = (5,0,0) -> normalized (1,0,0)
             // Direction out: (10,1)-(5,0) = (5,0,1) -> angle ~ 11.3 deg
             // 11.3 <= 30 -> factor = 0.9
             {
-                var prev = MakeRoutePoint(0, 0);
-                var current = MakeRoutePoint(5, 0);
-                var next = MakeRoutePoint(10, 1);
+                var prev = MakeWaypoint(0, 0);
+                var current = MakeWaypoint(5, 0);
+                var next = MakeWaypoint(10, 1);
 
                 float factor = traffic.GetTurnSpeedFactor(prev, current, next);
                 Assert.AreEqual(0.9f, factor, 0.01f,
@@ -585,9 +565,9 @@ namespace EditModeTests
             // Direction out: (1,0,1) -> angle = 45 deg
             // 30 < 45 <= 60 -> factor = 0.7
             {
-                var prev = MakeRoutePoint(0, 0);
-                var current = MakeRoutePoint(1, 0);
-                var next = MakeRoutePoint(2, 1);
+                var prev = MakeWaypoint(0, 0);
+                var current = MakeWaypoint(1, 0);
+                var next = MakeWaypoint(2, 1);
 
                 float factor = traffic.GetTurnSpeedFactor(prev, current, next);
                 Assert.AreEqual(0.7f, factor, 0.01f,
@@ -597,9 +577,9 @@ namespace EditModeTests
             // Test right angle (90 deg): prev=(0,0), current=(1,0), next=(1,1)
             // angle = 90 deg -> factor = 0.5
             {
-                var prev = MakeRoutePoint(0, 0);
-                var current = MakeRoutePoint(1, 0);
-                var next = MakeRoutePoint(1, 1);
+                var prev = MakeWaypoint(0, 0);
+                var current = MakeWaypoint(1, 0);
+                var next = MakeWaypoint(1, 1);
 
                 float factor = traffic.GetTurnSpeedFactor(prev, current, next);
                 Assert.AreEqual(0.5f, factor, 0.01f,
@@ -611,9 +591,9 @@ namespace EditModeTests
             // Direction out: (-0.5,0,0) -> angle = 180 deg
             // 120 < 180 <= 180 -> factor = 0.3
             {
-                var prev = MakeRoutePoint(0, 0);
-                var current = MakeRoutePoint(1, 0);
-                var next = MakeRoutePoint(0, 0.001);  // near-reversal
+                var prev = MakeWaypoint(0, 0);
+                var current = MakeWaypoint(1, 0);
+                var next = MakeWaypoint(0, 0.001);  // near-reversal
 
                 float factor = traffic.GetTurnSpeedFactor(prev, current, next);
                 Assert.LessOrEqual(factor, 0.4f,
@@ -628,11 +608,11 @@ namespace EditModeTests
         [Test]
         public void TrafficRuleKnowledge_ModifySpeed_HandlesZeroCurrentSpeed_WithoutNaN()
         {
-            var (indoorSpace, graph) = BuildTrafficGraph();
-            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace, graph);
+            var indoorSpace = BuildTrafficGraph();
+            var traffic = new PathPlanning.TrafficRuleKnowledge(indoorSpace);
 
-            var current = MakeRoutePoint(0.5, 0);
-            var next = MakeRoutePoint(1.5, 0);
+            var current = MakeWaypoint(0.5, 0);
+            var next = MakeWaypoint(1.5, 0);
 
             float distance = 1.0f;
             float defaultSpeed = 1.0f;
