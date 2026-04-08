@@ -1,11 +1,9 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
 using UnityEngine;
 using Map;
-using NetTopologySuite.Geometries;
 using Debug = UnityEngine.Debug;
 using CentralControl;
 
@@ -57,7 +55,7 @@ namespace PathPlanning
         /// </summary>
         private class SIPPState : IComparable<SIPPState>
         {
-            public RoutePoint RoutePoint { get; private set; }
+            public Waypoint Waypoint { get; private set; }
             public int IntervalIndex { get; private set; }
             public float ArrivalTime { get; private set; }
             public float DepartureTime { get; private set; }
@@ -66,20 +64,20 @@ namespace PathPlanning
             public SIPPState Parent { get; private set; }
             public SafeInterval SafeInterval { get; private set; }
             public float Speed { get; private set; }
-            
+
             // 3D related properties
             public string FloorLevel { get; private set; }
             public bool IsVerticalTransition { get; private set; }
             public string VerticalConnectorId { get; private set; }
-            
+
             // waiting related properties
             public bool HasWait { get; private set; }
             public float WaitTime { get; private set; }
-            
+
             public bool IsOptimal { get; private set; }
 
             public SIPPState(
-                RoutePoint routePoint,
+                Waypoint waypoint,
                 int intervalIndex,
                 float arrivalTime,
                 float departureTime,
@@ -93,7 +91,7 @@ namespace PathPlanning
                 string verticalConnectorId = null,
                 bool isOptimal = false)
             {
-                this.RoutePoint = routePoint;
+                this.Waypoint = waypoint;
                 this.IntervalIndex = intervalIndex;
                 this.ArrivalTime = arrivalTime;
                 this.DepartureTime = departureTime;
@@ -106,7 +104,7 @@ namespace PathPlanning
                 this.IsVerticalTransition = isVerticalTransition;
                 this.VerticalConnectorId = verticalConnectorId;
                 this.IsOptimal = isOptimal;
-                
+
                 this.WaitTime = departureTime - arrivalTime;
                 this.HasWait = WaitTime > 0.001f;
             }
@@ -125,7 +123,7 @@ namespace PathPlanning
             
             public SIPPStateKey GetStateKey()
             {
-                return new SIPPStateKey(RoutePoint.ConnectionPoint.Id, IntervalIndex, FloorLevel);
+                return new SIPPStateKey(Waypoint.Id, IntervalIndex, FloorLevel);
             }
         }
 
@@ -184,13 +182,13 @@ namespace PathPlanning
         /// <summary>
         /// Anytime SIPP Algorithm Entry Point
         /// </summary>
-        public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) SIPPAlgorithm(
-            Graph graph,
+        public static (List<Waypoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) SIPPAlgorithm(
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer personalOccupancyLayer,
             DynamicOccupancyLayer globalOccupancyLayer,
-            RoutePoint startPosition,
-            RoutePoint endPosition,
+            Waypoint startPosition,
+            Waypoint endPosition,
             string robotId,
             string currentPlanId,
             float startTime,
@@ -202,24 +200,24 @@ namespace PathPlanning
             if (graph == null || indoorSpace == null || startPosition == null || endPosition == null)
             {
                 Debug.LogError($"Robot {robotId}: SIPP parameters are invalid");
-                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null, null);
+                return (new List<Waypoint>(), new List<float>(), new List<float>(), null, null);
             }
 
             // Early return for trivial case: start and end are the same position
-            if (startPosition.ConnectionPoint.Id == endPosition.ConnectionPoint.Id)
+            if (startPosition.Id == endPosition.Id)
             {
                 string trivialPlanId = $"SIPPPlan_{robotId}_{DateTime.Now.Ticks}";
-                var trivialPath = new List<ConnectionPoint> { startPosition.ConnectionPoint };
+                var trivialPath = new List<Waypoint> { startPosition };
                 var trivialTimes = new List<float> { startTime };
                 var trivialSpeeds = new List<float> { defaultSpeed };
                 var trivialMetrics = new PathPlanningMetrics(robotId, trivialPlanId);
                 trivialMetrics.PlanningTime = 0f;
-                Debug.Log($"Robot {robotId}: Start == End ({startPosition.ConnectionPoint.Id}), returning trivial path");
+                Debug.Log($"Robot {robotId}: Start == End ({startPosition.Id}), returning trivial path");
                 return (trivialPath, trivialTimes, trivialSpeeds, trivialPlanId, trivialMetrics);
             }
 
             // Initialize
-            TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
+            TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace);
 
             string newPlanId = $"SIPPPlan_{robotId}_{DateTime.Now.Ticks}";
 
@@ -234,9 +232,9 @@ namespace PathPlanning
             Dictionary<string, List<SafeInterval>> safeIntervals = BuildSafeIntervals(
                 indoorSpace, globalOccupancyLayer, robotId, startTime, CalculateSafeIntervalHorizon(indoorSpace, startPosition, endPosition, defaultSpeed));
 
-            string startFloor = startPosition.ConnectionPoint.FloorLevel;
-            string endFloor = endPosition.ConnectionPoint.FloorLevel;
-            Debug.Log($"Robot {robotId}: startPoint {startPosition.ConnectionPoint.Id}: {startPosition.ConnectionPoint.ToJson()}, endPoint {endPosition.ConnectionPoint.Id}: {endPosition.ConnectionPoint.ToJson()}");
+            string startFloor = startPosition.FloorLevel;
+            string endFloor = endPosition.FloorLevel;
+            Debug.Log($"Robot {robotId}: startPoint {startPosition.Id}, endPoint {endPosition.Id}");
 
             PathPlanningMetrics metrics = new PathPlanningMetrics(robotId, newPlanId ?? "unknown");
             Debug.Log($"Robot {robotId}: Start 3D path planning，from Floor {startFloor} to Floor {endFloor}");
@@ -279,12 +277,12 @@ namespace PathPlanning
         /// <summary>
         /// Run Anytime SIPP Algorithm
         /// </summary>
-        private static (bool success, List<ConnectionPoint> path, List<float> times, List<float> speeds, float epsilon) RunAnytimeSIPP(
-            Graph graph,
+        private static (bool success, List<Waypoint> path, List<float> times, List<float> speeds, float epsilon) RunAnytimeSIPP(
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             Dictionary<string, List<SafeInterval>> safeIntervals,
-            RoutePoint startPosition,
-            RoutePoint endPosition,
+            Waypoint startPosition,
+            Waypoint endPosition,
             string robotId,
             float startTime,
             float defaultSpeed,
@@ -305,17 +303,19 @@ namespace PathPlanning
 
             // Initialize variables
             bool foundSolution = false;
-            List<ConnectionPoint> bestPath = null;
+            List<Waypoint> bestPath = null;
             List<float> bestTimes = null;
             List<float> bestSpeeds = null;
             float currentEpsilon = initialEpsilon;
             float bestEpsilon = initialEpsilon;
 
-            string startFloor = startPosition.ConnectionPoint.FloorLevel;
-            string endFloor = endPosition.ConnectionPoint.FloorLevel;
+            string startFloor = startPosition.FloorLevel;
+            string endFloor = endPosition.FloorLevel;
 
-            // Calculate the ideal path length
-            float idealPathLength = CalculateHeuristicDistance(startPosition, endPosition, searchMethod);
+            // Calculate the ideal path length as shortest graph distance (no occupancy)
+            float idealPathLength = graph.ComputeShortestDistance(startPosition.Id, endPosition.Id);
+            if (idealPathLength < 0)
+                idealPathLength = CalculateHeuristicDistance(startPosition, endPosition, searchMethod);
             metrics.IdealPathLength = idealPathLength;
 
             // 1-3: OPEN = CLOSED = INCONS = ∅
@@ -327,7 +327,7 @@ namespace PathPlanning
 
             // 1-4: insert s_start into OPEN with ε * h(s_start)
             // Get the initial safe interval for the start position (using CellSpace key)
-            string startCellKey = GetCellKeyForConnectionPoint(startPosition.ConnectionPoint.Id, indoorSpace);
+            string startCellKey = GetCellKeyForWaypoint(startPosition, indoorSpace);
             SafeInterval initialInterval = GetSafeIntervalContainingTime(
                 safeIntervals, startCellKey, startTime);
 
@@ -412,12 +412,12 @@ namespace PathPlanning
                         if (!state.IsOptimal)
                         {
                             float newHeuristic = CalculateHeuristic(
-                                state.RoutePoint, endPosition, searchMethod, defaultSpeed, state.FloorLevel, endFloor);
+                                state.Waypoint, endPosition, searchMethod, defaultSpeed, state.FloorLevel, endFloor);
 
                             float newFScore = state.GScore + newHeuristic * currentEpsilon;
 
                             SIPPState updatedState = new SIPPState(
-                                state.RoutePoint,
+                                state.Waypoint,
                                 state.IntervalIndex,
                                 state.ArrivalTime,
                                 state.DepartureTime,
@@ -521,10 +521,10 @@ namespace PathPlanning
         /// ImprovePath function - Improves the path using the specified epsilon value
         /// </summary>
         private static SIPPState ImprovePath(
-            Graph graph,
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             Dictionary<string, List<SafeInterval>> safeIntervals,
-            RoutePoint endPosition,
+            Waypoint endPosition,
             string robotId,
             float defaultSpeed,
             float maxAcceleration,
@@ -543,7 +543,7 @@ namespace PathPlanning
             SIPPState goalState = null;
             float goalFValue = float.MaxValue;
             
-            string goalLocationId = endPosition.ConnectionPoint.Id;
+            string goalLocationId = endPosition.Id;
             
             // 2-1: while f(s_goal) > min_{s ∈ OPEN} {f(s)} do
             while (openSet.Count > 0 && (goalState == null || goalFValue > openSet.Peek().FScore))
@@ -572,7 +572,7 @@ namespace PathPlanning
                 closedSet.Add(stateKey);
                 
                 // Check if we've reached the goal
-                if (current.RoutePoint.ConnectionPoint.Id == goalLocationId && 
+                if (current.Waypoint.Id == goalLocationId &&
                     current.FloorLevel == goalFloor)
                 {
                     if (goalState == null || current.GScore < goalState.GScore)
@@ -641,11 +641,11 @@ namespace PathPlanning
         /// This handles both movement to neighboring nodes and waiting actions
         /// </summary>
         private static List<SIPPState> GenerateSuccessors(
-            Graph graph,
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             Dictionary<string, List<SafeInterval>> safeIntervals,
             SIPPState current,
-            RoutePoint endPosition,
+            Waypoint endPosition,
             string robotId,
             float defaultSpeed,
             float maxAcceleration,
@@ -658,7 +658,7 @@ namespace PathPlanning
             string goalFloor)
         {
             List<SIPPState> successors = new List<SIPPState>();
-            string currentNodeId = current.RoutePoint.ConnectionPoint.Id;
+            string currentNodeId = current.Waypoint.Id;
             string currentFloor = current.FloorLevel;
             
             // 1. Motion Type: Move to neighboring nodes
@@ -676,17 +676,17 @@ namespace PathPlanning
                 verticalConnectionInfo);
             
             // Process each neighbor (direct movement + wait-then-move via A2 analytical computation)
-            foreach (var (nextRoutePoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
+            foreach (var (nextWaypoint, travelTime, travelCost, nextFloor, isVertical, verticalConnectorId) in neighbors)
             {
-                // Resolve successor CP to its containing CellSpace key for interval lookup
-                string nextCellKey = GetCellKeyForConnectionPoint(nextRoutePoint.ConnectionPoint.Id, indoorSpace);
+                // Resolve successor waypoint to its containing CellSpace key for interval lookup
+                string nextCellKey = GetCellKeyForWaypoint(nextWaypoint, indoorSpace);
 
                 // Get all safe intervals at the destination (keyed by CellSpace ID)
                 List<SafeInterval> intervals = GetSafeIntervals(safeIntervals, nextCellKey);
 
                 if (intervals == null || intervals.Count == 0)
                 {
-                    Debug.LogWarning($"Robot {robotId}: Cannot find safe interval at {nextCellKey} (CP: {nextRoutePoint.ConnectionPoint.Id})");
+                    Debug.LogWarning($"Robot {robotId}: Cannot find safe interval at {nextCellKey} (Waypoint: {nextWaypoint.Id})");
                     continue;
                 }
                 
@@ -718,16 +718,16 @@ namespace PathPlanning
                         float intentBonus = 0f;
                         if (globalOccupancyLayer != null)
                         {
-                            CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(nextRoutePoint.ConnectionPoint, true);
-                            if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
-                                neighborCell.Id, analyticalArriveTime, OccupancyType.Intent, robotId))
+                            string neighborCellId = nextWaypoint.PrimaryCellId;
+                            if (!string.IsNullOrEmpty(neighborCellId) && globalOccupancyLayer.HasOccupancyOfType(
+                                neighborCellId, analyticalArriveTime, OccupancyType.Intent, robotId))
                             {
                                 intentBonus = travelCost * (INTENT_COST_FACTOR - 1.0f);
                             }
                         }
 
                         float heuristic = CalculateHeuristic(
-                            nextRoutePoint,
+                            nextWaypoint,
                             endPosition,
                             searchMethod,
                             defaultSpeed,
@@ -738,7 +738,7 @@ namespace PathPlanning
 
                         // Create successor state for movement (with optional wait)
                         SIPPState newState = new SIPPState(
-                            nextRoutePoint,
+                            nextWaypoint,
                             i,
                             analyticalArriveTime,
                             departureTime,
@@ -757,7 +757,7 @@ namespace PathPlanning
                         // (GetNeighbors recorded currentTime, but requiredDepart may be later due to waiting)
                         if (isVertical && !string.IsNullOrEmpty(verticalConnectorId))
                         {
-                            string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{verticalConnectorId}";
+                            string connectionKey = $"{current.Waypoint.Id}_to_{verticalConnectorId}";
                             lock (verticalConnectionInfo)
                             {
                                 if (verticalConnectionInfo.TryGetValue(connectionKey, out var info))
@@ -771,8 +771,8 @@ namespace PathPlanning
             }
             
             // 2. Motion Type: Wait at current location until next safe interval
-            // Resolve current CP to its containing CellSpace key for interval lookup
-            string currentCellKey = GetCellKeyForConnectionPoint(currentNodeId, indoorSpace);
+            // Resolve current waypoint to its containing CellSpace key for interval lookup
+            string currentCellKey = GetCellKeyForWaypoint(current.Waypoint, indoorSpace);
             // Check if there's a next safe interval at the current location
             List<SafeInterval> currentIntervals = GetSafeIntervals(safeIntervals, currentCellKey);
             if (currentIntervals != null && current.IntervalIndex < currentIntervals.Count - 1)
@@ -791,18 +791,18 @@ namespace PathPlanning
                     float newGScore = current.GScore + waitTime;
                     
                     float heuristic = CalculateHeuristic(
-                        current.RoutePoint, 
-                        endPosition, 
-                        searchMethod, 
-                        defaultSpeed, 
-                        currentFloor, 
+                        current.Waypoint,
+                        endPosition,
+                        searchMethod,
+                        defaultSpeed,
+                        currentFloor,
                         goalFloor);
                     
                     float newFScore = newGScore + heuristic * epsilon;
                     
                     // Create successor state for waiting until next interval
                     SIPPState waitSuccessor = new SIPPState(
-                        current.RoutePoint,
+                        current.Waypoint,
                         current.IntervalIndex + 1,
                         newArrivalTime,
                         newDepartureTime,
@@ -826,9 +826,9 @@ namespace PathPlanning
         /// <summary>
         /// Get neighbors for a given state, including vertical connections
         /// </summary>
-        private static List<(RoutePoint routePoint, float time, float cost, string floor, bool isVertical, string verticalConnectorId)> GetNeighbors(
+        private static List<(Waypoint waypoint, float time, float cost, string floor, bool isVertical, string verticalConnectorId)> GetNeighbors(
             SIPPState state,
-            Graph graph,
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             string robotId,
             float currentTime,
@@ -838,24 +838,15 @@ namespace PathPlanning
             TrafficRuleKnowledge trafficRules,
             Dictionary<string, VerticalConnectionInfo> verticalConnectionInfo)
         {
-            var neighbors = new List<(RoutePoint, float, float, string, bool, string)>();
-            
+            var neighbors = new List<(Waypoint, float, float, string, bool, string)>();
+
             string currentFloor = state.FloorLevel;
-            
-            var childConnections = new List<ConnectionPoint>(state.RoutePoint.Children);
-            
-            foreach (var childConnection in childConnections)
+
+            var neighborWaypoints = graph.GetNeighbors(state.Waypoint.Id);
+
+            foreach (var neighborWaypoint in neighborWaypoints)
             {
-                RoutePoint childRoutePoint = graph.GetRoutePointFromConnectionPoint(childConnection);
-                if (childRoutePoint == null) continue;
-
-                string childFloor = childConnection.FloorLevel;
-
-                // Defensive: if FloorLevel is somehow null, resolve from CellBoundary
-                if (string.IsNullOrEmpty(childFloor) && childConnection.IsVertical() && indoorSpace != null)
-                {
-                    childFloor = indoorSpace.GetConnectionPointFloorLevel(childConnection.CellBoundary);
-                }
+                string childFloor = neighborWaypoint.FloorLevel;
 
                 bool isVertical = !string.IsNullOrEmpty(childFloor)
                                   && !string.IsNullOrEmpty(currentFloor)
@@ -869,7 +860,7 @@ namespace PathPlanning
                 {
                     int floorDifference = Math.Abs(ParseFloorLevel(childFloor) - ParseFloorLevel(currentFloor));
                     float baseTime;
-                    if (childConnection.IsStair)
+                    if (neighborWaypoint.IsStair)
                     {
                         baseTime = STAIR_FLOOR_TIME * floorDifference;
                     }
@@ -877,27 +868,27 @@ namespace PathPlanning
                     {
                         baseTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
                     }
-                    
-                    float distance = CalculateDistance(state.RoutePoint.ConnectionPoint, childConnection);
-                    
+
+                    float distance = CalculateDistance(state.Waypoint, neighborWaypoint);
+
                     var (adjustedSpeed, adjustedTime) = trafficRules.ModifySpeed(
-                        state.RoutePoint,
-                        childRoutePoint,
+                        state.Waypoint,
+                        neighborWaypoint,
                         state.Speed,
                         defaultSpeed,
                         distance,
                         maxAcceleration,
                         maxDeceleration);
-                    
+
                     travelTime = Math.Max(baseTime, adjustedTime);
                     travelCost = travelTime;
                     speedForMove = adjustedSpeed;
-                    
+
                     // Resolve vertical connector to its CellSpace key (consistent with safe-interval keying)
-                    string verticalCellKey = GetCellKeyForConnectionPoint(childConnection.Id, indoorSpace);
+                    string verticalCellKey = GetCellKeyForWaypoint(neighborWaypoint, indoorSpace);
                     verticalConnectorId = verticalCellKey;
 
-                    string connectionKey = $"{state.RoutePoint.ConnectionPoint.Id}_to_{verticalCellKey}";
+                    string connectionKey = $"{state.Waypoint.Id}_to_{verticalCellKey}";
                     lock (verticalConnectionInfo)
                     {
                         verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
@@ -912,76 +903,76 @@ namespace PathPlanning
                 }
                 else
                 {
-                    float distance = CalculateDistance(state.RoutePoint.ConnectionPoint, childConnection);
-                    
+                    float distance = CalculateDistance(state.Waypoint, neighborWaypoint);
+
                     var (adjustedSpeed, adjustedTime) = trafficRules.ModifySpeed(
-                        state.RoutePoint,
-                        childRoutePoint,
+                        state.Waypoint,
+                        neighborWaypoint,
                         state.Speed,
                         defaultSpeed,
                         distance,
                         maxAcceleration,
                         maxDeceleration);
-                    
+
                     travelTime = adjustedTime;
                     travelCost = travelTime;
                     speedForMove = adjustedSpeed;
                 }
-                
-                neighbors.Add((childRoutePoint, travelTime, travelCost, childFloor, isVertical, verticalConnectorId));
+
+                neighbors.Add((neighborWaypoint, travelTime, travelCost, childFloor, isVertical, verticalConnectorId));
             }
-            
+
             return neighbors;
         }
 
         /// <summary>
         /// Reconstruct the complete path from the goal state
         /// </summary>
-        private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ReconstructPath(
+        private static (List<Waypoint> path, List<float> times, List<float> speeds) ReconstructPath(
             SIPPState goalState,
             float defaultSpeed)
         {
             List<SIPPState> statesReversed = new List<SIPPState>();
-            
+
             SIPPState current = goalState;
             while (current != null)
             {
                 statesReversed.Add(current);
                 current = current.Parent;
             }
-            
+
             List<SIPPState> states = new List<SIPPState>(statesReversed);
             states.Reverse();
-            
-            List<ConnectionPoint> path = new List<ConnectionPoint>();
+
+            List<Waypoint> path = new List<Waypoint>();
             List<float> times = new List<float>();
             List<float> speeds = new List<float>();
-            
+
             if (states.Count > 0)
             {
-                path.Add(states[0].RoutePoint.ConnectionPoint);
+                path.Add(states[0].Waypoint);
                 times.Add(states[0].ArrivalTime);
                 speeds.Add(states[0].Speed);
             }
-            
+
             for (int i = 1; i < states.Count; i++)
             {
                 SIPPState state = states[i];
                 SIPPState prevState = states[i-1];
-                
+
                 // If previous state had waiting, add a point at the departure time
                 if (prevState.HasWait && prevState.WaitTime > 0.01f)
                 {
-                    path.Add(prevState.RoutePoint.ConnectionPoint);
+                    path.Add(prevState.Waypoint);
                     times.Add(prevState.DepartureTime);
                     speeds.Add(0); // Speed is zero when waiting
                 }
-                
-                path.Add(state.RoutePoint.ConnectionPoint);
+
+                path.Add(state.Waypoint);
                 times.Add(state.ArrivalTime);
                 speeds.Add(state.Speed);
             }
-            
+
             return (path, times, speeds);
         }
         
@@ -990,22 +981,34 @@ namespace PathPlanning
         #region Helper
 
         /// <summary>
-        /// Resolve a ConnectionPoint ID to its containing CellSpace ID.
+        /// Resolve a Waypoint to its containing CellSpace ID.
         /// The occupancy layer stores data by CellSpace ID, so all safe-interval
-        /// lookups must use CellSpace ID as key. Falls back to cpId if the
-        /// ConnectionPoint cannot be resolved (e.g., orphaned boundary).
+        /// lookups must use CellSpace ID as key. For CP-backed waypoints, uses
+        /// PrimaryCellId. For CellSpace-backed waypoints, uses the waypoint's own Id.
+        /// Falls back to waypoint Id if the CellSpace cannot be resolved.
         /// </summary>
-        private static string GetCellKeyForConnectionPoint(string cpId, IndoorSpace indoorSpace)
+        private static string GetCellKeyForWaypoint(Waypoint waypoint, IndoorSpace indoorSpace)
         {
-            if (indoorSpace == null || string.IsNullOrEmpty(cpId))
-                return cpId;
+            if (waypoint == null)
+                return null;
 
-            ConnectionPoint cp = indoorSpace.GetConnectionPointFromId(cpId);
-            if (cp == null)
-                return cpId;
+            // CellSpace-backed waypoints already are the cell
+            if (waypoint.Kind == WaypointKind.CellSpace)
+                return waypoint.Id;
 
-            CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(cp, true);
-            return cell?.Id ?? cpId;
+            // CP-backed waypoints: use PrimaryCellId (the source cell of the boundary)
+            if (!string.IsNullOrEmpty(waypoint.PrimaryCellId))
+                return waypoint.PrimaryCellId;
+
+            // Fallback: try to resolve via IndoorSpace
+            if (indoorSpace != null && waypoint.ConnectionPointSource != null)
+            {
+                CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(waypoint.ConnectionPointSource, true);
+                if (cell != null)
+                    return cell.Id;
+            }
+
+            return waypoint.Id;
         }
 
         /// <summary>
@@ -1087,8 +1090,8 @@ namespace PathPlanning
 
         private static float CalculateSafeIntervalHorizon(
             IndoorSpace indoorSpace,
-            RoutePoint start,
-            RoutePoint goal,
+            Waypoint start,
+            Waypoint goal,
             float defaultSpeed)
         {
             if (indoorSpace == null || start == null || goal == null)
@@ -1101,8 +1104,8 @@ namespace PathPlanning
                 goal,
                 SearchMethod.Euclidean_Distance);
 
-            int startLevel = ParseFloorLevel(start.ConnectionPoint.FloorLevel);
-            int goalLevel = ParseFloorLevel(goal.ConnectionPoint.FloorLevel);
+            int startLevel = ParseFloorLevel(start.FloorLevel);
+            int goalLevel = ParseFloorLevel(goal.FloorLevel);
             int floorDiff = Math.Abs(goalLevel - startLevel);
             float verticalCost = floorDiff > 0 ? Math.Min(ELEVATOR_BASE_TIME + floorDiff * ELEVATOR_FLOOR_TIME, STAIR_FLOOR_TIME * floorDiff) : 0f;
 
@@ -1170,31 +1173,29 @@ namespace PathPlanning
         /// Calculate the heuristic value, considering 3D distance
         /// </summary>
         private static float CalculateHeuristic(
-            RoutePoint current,
-            RoutePoint goal,
+            Waypoint current,
+            Waypoint goal,
             SearchMethod searchMethod,
             float defaultSpeed,
             string currentFloor,
             string goalFloor)
         {
             float horizontalDistance = 0;
-            
+
             switch (searchMethod)
             {
                 case SearchMethod.Euclidean_Distance:
                     horizontalDistance = Vector3.Distance(
-                        GetPointVector(current.ConnectionPoint),
-                        GetPointVector(goal.ConnectionPoint));
+                        current.Position,
+                        goal.Position);
                     break;
                 case SearchMethod.Manhattan_Distance:
-                    Vector3 currentPos = GetPointVector(current.ConnectionPoint);
-                    Vector3 goalPos = GetPointVector(goal.ConnectionPoint);
-                    horizontalDistance = Math.Abs(currentPos.x - goalPos.x) + Math.Abs(currentPos.z - goalPos.z);
+                    horizontalDistance = Math.Abs(current.Position.x - goal.Position.x) + Math.Abs(current.Position.z - goal.Position.z);
                     break;
                 default:
                     horizontalDistance = Vector3.Distance(
-                        GetPointVector(current.ConnectionPoint),
-                        GetPointVector(goal.ConnectionPoint));
+                        current.Position,
+                        goal.Position);
                     break;
             }
             
@@ -1217,8 +1218,8 @@ namespace PathPlanning
         /// Calculate the heuristic distance between two connection points
         /// </summary>
         private static float CalculateHeuristicDistance(
-            RoutePoint from,
-            RoutePoint to,
+            Waypoint from,
+            Waypoint to,
             SearchMethod searchMethod)
         {
             float horizontalDistance = 0;
@@ -1226,44 +1227,30 @@ namespace PathPlanning
             switch (searchMethod)
             {
                 case SearchMethod.Euclidean_Distance:
-                    horizontalDistance = Vector3.Distance(
-                        GetPointVector(from.ConnectionPoint),
-                        GetPointVector(to.ConnectionPoint));
+                    horizontalDistance = Vector3.Distance(from.Position, to.Position);
                     break;
                 case SearchMethod.Manhattan_Distance:
-                    Vector3 fromPos = GetPointVector(from.ConnectionPoint);
-                    Vector3 toPos = GetPointVector(to.ConnectionPoint);
-                    horizontalDistance = Math.Abs(fromPos.x - toPos.x) + Math.Abs(fromPos.z - toPos.z);
+                    horizontalDistance = Math.Abs(from.Position.x - to.Position.x) + Math.Abs(from.Position.z - to.Position.z);
                     break;
                 default:
-                    horizontalDistance = Vector3.Distance(
-                        GetPointVector(from.ConnectionPoint),
-                        GetPointVector(to.ConnectionPoint));
+                    horizontalDistance = Vector3.Distance(from.Position, to.Position);
                     break;
             }
             return horizontalDistance;
         }
 
         /// <summary>
-        /// Calculate distance between two connection points
+        /// Calculate distance between two waypoints
         /// </summary>
-        private static float CalculateDistance(ConnectionPoint from, ConnectionPoint to)
+        private static float CalculateDistance(Waypoint from, Waypoint to)
         {
-            Vector3 fromPos = GetPointVector(from);
-            Vector3 toPos = GetPointVector(to);
-
-            return Vector3.Distance(fromPos, toPos);
-        }
-        
-        private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
-        {
-            return connectionPoint.Position;
+            return Vector3.Distance(from.Position, to.Position);
         }
         
         /// <summary>
         /// Calculate the length of a path
         /// </summary>
-        private static float CalculatePathLength(List<ConnectionPoint> path)
+        private static float CalculatePathLength(List<Waypoint> path)
         {
             float length = 0f;
             

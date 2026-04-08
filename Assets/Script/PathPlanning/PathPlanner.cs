@@ -3,8 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Map;
-using NetTopologySuite.Geometries;
-using NetTopologySuite.IO;
 using CentralControl;
 
 namespace PathPlanning
@@ -27,148 +25,162 @@ namespace PathPlanning
 
     public class PathPlanner
     {
-        private Graph graph;
+        // Navigation graph fields
+        private NavigationGraph cpGraph;
+        private NavigationGraph cellSpaceNavGraph;
+        private NavigationQueryService cpQueries;
+        private NavigationQueryService cellQueries;
+
         private IndoorSpace indoorSpace;
-        private DynamicOccupancyLayer personalOccupancyLayer;
-        private DynamicOccupancyLayer globalOccupancyLayer;
         private SearchMethod searchMethod;
         private SearchAlgorithm searchAlgorithm;
         private string robotId;
         private float maxAcceleration;
         private float maxDeceleration;
-        private Map.CellSpaceGraph cellSpaceGraph;
-        public RoutePoint startPoint;
-        public RoutePoint endPoint;
-        public float speed;
 
-        public void SetCellSpaceGraph(Map.CellSpaceGraph graph)
-        {
-            this.cellSpaceGraph = graph;
-        }
+        // Non-temporal path finders
+        private BfsPathFinder bfsPathFinder;
+        private BasicAStarPathFinder basicAStarPathFinder;
+        private CellSpaceAStarPathFinder cellSpaceAStarPathFinder;
 
-        /// <summary>
-        /// Switches the active search algorithm at runtime.
-        /// Used by ExperimentRunner to reconfigure robots between trials.
-        /// </summary>
-        public void SetAlgorithm(SearchAlgorithm algorithm)
-        {
-            this.searchAlgorithm = algorithm;
-        }
+        // Temporal path finders (adapters wrapping ported algorithms)
+        private IPathFinder timeSpaceAStarPathFinder;
+        private IPathFinder anytimeSippPathFinder;
 
-        /// <summary>
-        /// Updates acceleration/deceleration parameters at runtime.
-        /// </summary>
-        public void SetDynamics(float accel, float decel)
-        {
-            this.maxAcceleration = accel;
-            this.maxDeceleration = decel;
-        }
-        
         public PathPlanner(
-            Graph graph, 
+            NavigationGraph cpGraph,
+            NavigationGraph cellSpaceNavGraph,
+            NavigationQueryService cpQueries,
+            NavigationQueryService cellQueries,
             IndoorSpace indoorSpace,
-            SearchAlgorithm algorithm, 
-            SearchMethod method, 
-            string robotId, 
-            float maxAcceleration, 
+            SearchAlgorithm algorithm,
+            SearchMethod method,
+            string robotId,
+            float maxAcceleration,
             float maxDeceleration)
         {
-            this.graph = graph;
+            this.cpGraph = cpGraph;
+            this.cellSpaceNavGraph = cellSpaceNavGraph;
+            this.cpQueries = cpQueries;
+            this.cellQueries = cellQueries;
             this.indoorSpace = indoorSpace;
             this.searchAlgorithm = algorithm;
             this.searchMethod = method;
             this.robotId = robotId;
             this.maxAcceleration = maxAcceleration;
             this.maxDeceleration = maxDeceleration;
+
+            this.bfsPathFinder = new BfsPathFinder();
+            this.basicAStarPathFinder = new BasicAStarPathFinder(method);
+            this.cellSpaceAStarPathFinder = new CellSpaceAStarPathFinder();
+
+            // Create temporal path finders
+            this.timeSpaceAStarPathFinder = new TimeSpaceAStarPathFinder(indoorSpace, method);
+            this.anytimeSippPathFinder = new AnytimeSippPathFinder(indoorSpace, method);
         }
 
-        public (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) FindPathWithDynamicObstacles(
-            DynamicOccupancyLayer personalOccupancyLayer, 
+        public void SetCellSpaceNavigationGraph(NavigationGraph graph) { this.cellSpaceNavGraph = graph; }
+        public void SetAlgorithm(SearchAlgorithm algorithm) { this.searchAlgorithm = algorithm; }
+        public SearchAlgorithm GetAlgorithm() { return searchAlgorithm; }
+        public void SetDynamics(float accel, float decel) { this.maxAcceleration = accel; this.maxDeceleration = decel; }
+
+        /// <summary>
+        /// Registers temporal path finders (adapters wrapping ported algorithms).
+        /// Must be called after construction, before first path planning with temporal algorithms.
+        /// </summary>
+        public void SetTemporalPathFinders(IPathFinder timeSpaceAStar, IPathFinder anytimeSipp)
+        {
+            this.timeSpaceAStarPathFinder = timeSpaceAStar;
+            this.anytimeSippPathFinder = anytimeSipp;
+        }
+
+        /// <summary>
+        /// Waypoint-based path finding. Returns NavigationPathResult.
+        /// </summary>
+        public NavigationPathResult FindPathWithDynamicObstacles(
+            DynamicOccupancyLayer personalOccupancyLayer,
             DynamicOccupancyLayer globalOccupancyLayer,
-            RoutePoint startPoint, 
-            RoutePoint endPoint, 
+            Waypoint startPoint,
+            Waypoint endPoint,
             string robotId,
             string currentPlanId,
-            float startTime, 
+            float startTime,
             float speed)
         {
             switch (this.searchAlgorithm)
             {
-                case SearchAlgorithm.TimeSpaceAStar:
-                    return TimeSpaceAStar.TimeSpaceAStarAlgorithm(
-                        this.graph, 
-                        this.indoorSpace,
-                        personalOccupancyLayer,
-                        globalOccupancyLayer, 
-                        startPoint, 
-                        endPoint, 
-                        robotId, 
-                        currentPlanId,
-                        startTime, 
-                        speed, 
-                        this.maxAcceleration, 
-                        this.maxDeceleration, 
-                        this.searchMethod);
-                
-                case SearchAlgorithm.AnytimeSIPP:
-                    return AnytimeSIPP.SIPPAlgorithm(
-                        this.graph, 
-                        this.indoorSpace,
-                        personalOccupancyLayer,
-                        globalOccupancyLayer, 
-                        startPoint, 
-                        endPoint, 
-                        robotId, 
-                        currentPlanId,
-                        startTime, 
-                        speed, 
-                        this.maxAcceleration, 
-                        this.maxDeceleration, 
-                        this.searchMethod);
-                
-                case SearchAlgorithm.CellSpaceAStar:
-                    if (cellSpaceGraph == null)
-                    {
-                        Debug.LogError("CellSpaceGraph not set for CellSpaceAStar algorithm");
-                        return (null, null, null, null, null);
-                    }
-                    return cellSpaceGraph.FindPathForRobot(
-                        startPoint, endPoint, robotId, startTime, speed);
+                case SearchAlgorithm.BFS:
+                    return bfsPathFinder.FindPath(cpGraph, startPoint, endPoint,
+                        personalOccupancyLayer, globalOccupancyLayer, robotId, currentPlanId,
+                        startTime, speed, maxAcceleration, maxDeceleration);
 
                 case SearchAlgorithm.Astar_Basic:
-                    var basicResult = Astar_Basic.AstarAlgorithm(
-                        this.graph, startPoint, endPoint, speed, this.searchMethod);
-                    if (basicResult.path == null || basicResult.path.Count == 0)
-                        return (null, null, null, null, null);
-                    var basicTimes = new List<float>();
-                    float t = startTime;
-                    basicTimes.Add(t);
-                    for (int i = 1; i < basicResult.path.Count; i++)
-                    {
-                        float d = (float)basicResult.path[i - 1].Point.Distance(basicResult.path[i].Point);
-                        t += d / speed;
-                        basicTimes.Add(t);
-                    }
-                    // Compute metrics for Basic A*
-                    float basicActualLength = 0f;
-                    for (int j = 1; j < basicResult.path.Count; j++)
-                    {
-                        basicActualLength += (float)basicResult.path[j - 1].Point.Distance(basicResult.path[j].Point);
-                    }
-                    float basicIdealLength = basicResult.path.Count >= 2
-                        ? (float)basicResult.path[0].Point.Distance(basicResult.path[basicResult.path.Count - 1].Point)
-                        : 0f;
+                    return basicAStarPathFinder.FindPath(cpGraph, startPoint, endPoint,
+                        personalOccupancyLayer, globalOccupancyLayer, robotId, currentPlanId,
+                        startTime, speed, maxAcceleration, maxDeceleration);
 
-                    string basicPlanId = $"BasicPlan_{robotId}_{System.DateTime.Now.Ticks}";
-                    var basicMetrics = new PathPlanningMetrics(robotId, basicPlanId);
-                    basicMetrics.ActualPathLength = basicActualLength;
-                    basicMetrics.TravelTime = t - startTime;
-                    basicMetrics.IdealPathLength = basicIdealLength;
-                    return (basicResult.path, basicTimes, basicResult.speeds, basicPlanId, basicMetrics);
+                case SearchAlgorithm.CellSpaceAStar:
+                    // CellSpaceAStar uses cellSpaceNavGraph with CellSpace nodes.
+                    // If start/end are CP waypoints, remap to the corresponding CellSpace nodes.
+                    if (cellSpaceNavGraph == null)
+                    {
+                        Debug.LogError($"CellSpaceAStar: cellSpaceNavGraph is null");
+                        return null;
+                    }
+                    Waypoint cellStart = startPoint;
+                    Waypoint cellEnd = endPoint;
+                    if (startPoint.Kind == WaypointKind.ConnectionPoint)
+                    {
+                        cellStart = cellSpaceNavGraph.GetNode(startPoint.PrimaryCellId);
+                        if (cellStart == null)
+                        {
+                            Debug.LogWarning($"CellSpaceAStar: PrimaryCellId '{startPoint.PrimaryCellId}' not found in cellSpaceNavGraph, trying SecondaryCellId '{startPoint.SecondaryCellId}'");
+                            cellStart = cellSpaceNavGraph.GetNode(startPoint.SecondaryCellId);
+                        }
+                    }
+                    if (endPoint.Kind == WaypointKind.ConnectionPoint)
+                    {
+                        cellEnd = cellSpaceNavGraph.GetNode(endPoint.SecondaryCellId ?? endPoint.PrimaryCellId);
+                        if (cellEnd == null)
+                        {
+                            Debug.LogWarning($"CellSpaceAStar: SecondaryCellId '{endPoint.SecondaryCellId}' not found in cellSpaceNavGraph, trying PrimaryCellId '{endPoint.PrimaryCellId}'");
+                            cellEnd = cellSpaceNavGraph.GetNode(endPoint.PrimaryCellId);
+                        }
+                    }
+                    if (cellStart == null || cellEnd == null)
+                    {
+                        Debug.LogError($"CellSpaceAStar: Could not remap CP waypoints to CellSpace nodes. start={startPoint.Id}→{cellStart?.Id ?? "null"}, end={endPoint.Id}→{cellEnd?.Id ?? "null"}, cellSpaceNavGraph nodes={cellSpaceNavGraph.NodeCount}");
+                        return null;
+                    }
+                    Debug.Log($"CellSpaceAStar: Remapped {startPoint.Id}→{cellStart.Id}, {endPoint.Id}→{cellEnd.Id}. " +
+                              $"cellSpaceNavGraph nodes={cellSpaceNavGraph.NodeCount} edges={cellSpaceNavGraph.EdgeCount}. " +
+                              $"startNeighbors={cellSpaceNavGraph.GetNeighbors(cellStart.Id).Count}, endInEdges={cellSpaceNavGraph.GetInEdges(cellEnd.Id).Count}");
+                    var cellResult = cellSpaceAStarPathFinder.FindPath(cellSpaceNavGraph, cellStart, cellEnd,
+                        personalOccupancyLayer, globalOccupancyLayer, robotId, currentPlanId,
+                        startTime, speed, maxAcceleration, maxDeceleration);
+                    if (cellResult == null)
+                    {
+                        Debug.LogError($"CellSpaceAStar: A* returned null from {cellStart.Id} to {cellEnd.Id}. Graph is likely not strongly connected for this pair.");
+                    }
+                    return cellResult;
+
+                case SearchAlgorithm.TimeSpaceAStar:
+                    if (timeSpaceAStarPathFinder == null)
+                        throw new InvalidOperationException("TimeSpaceAStar path finder not set");
+                    return timeSpaceAStarPathFinder.FindPath(cpGraph, startPoint, endPoint,
+                        personalOccupancyLayer, globalOccupancyLayer, robotId, currentPlanId,
+                        startTime, speed, maxAcceleration, maxDeceleration);
+
+                case SearchAlgorithm.AnytimeSIPP:
+                    if (anytimeSippPathFinder == null)
+                        throw new InvalidOperationException("AnytimeSIPP path finder not set");
+                    return anytimeSippPathFinder.FindPath(cpGraph, startPoint, endPoint,
+                        personalOccupancyLayer, globalOccupancyLayer, robotId, currentPlanId,
+                        startTime, speed, maxAcceleration, maxDeceleration);
 
                 default:
                     Debug.LogError($"Unknown search algorithm: {this.searchAlgorithm}");
-                    return (null, null, null, null, null);
+                    return null;
             }
         }
     }

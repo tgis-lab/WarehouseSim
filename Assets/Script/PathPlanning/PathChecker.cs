@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -8,17 +7,17 @@ namespace PathPlanning
 {
     public class PathChecker
     {
-        private Graph graph;
+        private NavigationGraph graph;
 
-        public PathChecker(Graph graph)
+        public PathChecker(NavigationGraph graph)
         {
             this.graph = graph;
         }
 
         public bool ValidatePath(string startId, string endId)
         {
-            var start = graph.RoutePoints.FirstOrDefault(rp => rp.ConnectionPoint.Id == startId);
-            var end = graph.RoutePoints.FirstOrDefault(rp => rp.ConnectionPoint.Id == endId);
+            var start = graph.GetNode(startId);
+            var end = graph.GetNode(endId);
 
             if (start == null || end == null)
             {
@@ -26,42 +25,40 @@ namespace PathPlanning
                 return false;
             }
 
-            Debug.Log($"Start point: {startId}, Position: {start.ConnectionPoint.Point}");
-            Debug.Log($"End point: {endId}, Position: {end.ConnectionPoint.Point}");
+            Debug.Log($"Start point: {startId}, Position: {start.Position}");
+            Debug.Log($"End point: {endId}, Position: {end.Position}");
 
-            HashSet<RoutePoint> visited = new HashSet<RoutePoint>();
-            Queue<RoutePoint> queue = new Queue<RoutePoint>();
-            Dictionary<RoutePoint, RoutePoint> previous = new Dictionary<RoutePoint, RoutePoint>();
+            HashSet<string> visited = new HashSet<string>();
+            Queue<string> queue = new Queue<string>();
+            Dictionary<string, string> previous = new Dictionary<string, string>();
 
-            queue.Enqueue(start);
-            visited.Add(start);
+            queue.Enqueue(start.Id);
+            visited.Add(start.Id);
 
             while (queue.Count > 0)
             {
-                var current = queue.Dequeue();
-                if (current.ConnectionPoint.Id == endId)
+                var currentId = queue.Dequeue();
+                if (currentId == endId)
                 {
                     List<string> path = new List<string>();
-                    RoutePoint pathPoint = current;
-                    while (pathPoint != null)
+                    string pathId = currentId;
+                    while (pathId != null)
                     {
-                        path.Add(pathPoint.ConnectionPoint.Id);
-                        previous.TryGetValue(pathPoint, out pathPoint);
+                        path.Add(pathId);
+                        previous.TryGetValue(pathId, out pathId);
                     }
                     path.Reverse();
                     Debug.Log($"Path found: {string.Join(" -> ", path)}");
                     return true;
                 }
 
-                // Debug.Log($"Checking connections from {current.ConnectionPoint.Id}:");
-                foreach (var child in current.Children)
+                foreach (var neighbor in graph.GetNeighbors(currentId))
                 {
-                    var childRoutePoint = graph.RoutePoints.FirstOrDefault(rp => rp.ConnectionPoint.Id == child.Id);
-                    if (childRoutePoint != null && !visited.Contains(childRoutePoint))
+                    if (!visited.Contains(neighbor.Id))
                     {
-                        visited.Add(childRoutePoint);
-                        queue.Enqueue(childRoutePoint);
-                        previous[childRoutePoint] = current;
+                        visited.Add(neighbor.Id);
+                        queue.Enqueue(neighbor.Id);
+                        previous[neighbor.Id] = currentId;
                     }
                 }
             }
@@ -72,8 +69,8 @@ namespace PathPlanning
 
         public void AnalyzeFailedPath(string startId, string endId)
         {
-            var start = graph.RoutePoints.FirstOrDefault(rp => rp.ConnectionPoint.Id == startId);
-            var end = graph.RoutePoints.FirstOrDefault(rp => rp.ConnectionPoint.Id == endId);
+            var start = graph.GetNode(startId);
+            var end = graph.GetNode(endId);
 
             if (start == null || end == null)
             {
@@ -82,19 +79,18 @@ namespace PathPlanning
             }
 
             Debug.Log($"Analyzing failed path from {startId} to {endId}");
-            Debug.Log($"Start point: {startId}, Position: {start.ConnectionPoint.Point}");
-            Debug.Log($"End point: {endId}, Position: {end.ConnectionPoint.Point}");
+            Debug.Log($"Start point: {startId}, Position: {start.Position}");
+            Debug.Log($"End point: {endId}, Position: {end.Position}");
 
             Debug.Log("Outgoing connections from start point:");
-            foreach (var child in start.Children)
+            foreach (var neighbor in graph.GetNeighbors(startId))
             {
-                Debug.Log($"  -> {child.Id}");
+                Debug.Log($"  -> {neighbor.Id}");
             }
 
             Debug.Log("Incoming connections to end point:");
-            var incomingConnections = graph.RoutePoints
-                .Where(rp => rp.Children.Any(c => c.Id == endId))
-                .Select(rp => rp.ConnectionPoint.Id);
+            var incomingConnections = graph.GetInEdges(endId)
+                .Select(e => e.FromId);
             foreach (var incoming in incomingConnections)
             {
                 Debug.Log($"  {incoming} ->");

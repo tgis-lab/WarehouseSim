@@ -4,7 +4,6 @@ using System.Linq;
 using System.Diagnostics;
 using UnityEngine;
 using Map;
-using NetTopologySuite.Geometries;
 using Debug = UnityEngine.Debug;
 using CentralControl;
 
@@ -16,7 +15,7 @@ namespace PathPlanning
     public class TimeSpaceAStar
     {
         #region private fields
-        
+
         private readonly struct TSAStarStateKey : IEquatable<TSAStarStateKey>
         {
             public readonly string ConnectionPointId;
@@ -54,20 +53,20 @@ namespace PathPlanning
         /// </summary>
         private class TSAStarState : IComparable<TSAStarState>
         {
-            public RoutePoint RoutePoint { get; private set; }
+            public Waypoint Waypoint { get; private set; }
             public float ArrivalTime { get; private set; }
             public float GScore { get; private set; }
             public float FScore { get; private set; }
             public TSAStarState Parent { get; private set; }
             public float Speed { get; private set; }
-            
+
             // Cross-floor properties
             public string FloorLevel { get; private set; }
             public bool IsVerticalTransition { get; private set; }
             public string VerticalConnectorId { get; private set; }
 
             public TSAStarState(
-                RoutePoint routePoint,
+                Waypoint waypoint,
                 float arrivalTime,
                 float gScore,
                 float fScore,
@@ -77,7 +76,7 @@ namespace PathPlanning
                 bool isVerticalTransition = false,
                 string verticalConnectorId = null)
             {
-                RoutePoint = routePoint;
+                Waypoint = waypoint;
                 ArrivalTime = arrivalTime;
                 GScore = gScore;
                 FScore = fScore;
@@ -95,18 +94,21 @@ namespace PathPlanning
                 {
                     return fScoreComparison;
                 }
-                
+
                 // if f-score is equal, prefer the one with larger g-value
                 return -GScore.CompareTo(other.GScore);
             }
-            
+
             public TSAStarStateKey GetStateKey()
             {
-                int arrivalTimeKey = Mathf.RoundToInt(ArrivalTime * 10f);
-                return new TSAStarStateKey(RoutePoint.ConnectionPoint.Id, arrivalTimeKey, FloorLevel);
+                // State deduplication at 0.5s resolution. Two arrivals within 0.5s at the
+                // same node are considered the same state for expansion/closed-set purposes.
+                // (0.1s produced 10 keys/sec/node, exploding the 50k budget on cross-floor paths)
+                int arrivalTimeKey = Mathf.RoundToInt(ArrivalTime * 2f);
+                return new TSAStarStateKey(Waypoint.Id, arrivalTimeKey, FloorLevel);
             }
         }
-        
+
         /// <summary>
         /// Vertical connection information class, recording vertical movement information
         /// </summary>
@@ -119,7 +121,7 @@ namespace PathPlanning
             public float TravelTime { get; set; }
             public float EndTime => StartTime + TravelTime;
         }
-        
+
         #endregion
 
         #region constants
@@ -140,19 +142,19 @@ namespace PathPlanning
         private const float INTENT_COST_FACTOR = 1.3f;
 
         #endregion
-        
+
         #region main methods
-        
+
         /// <summary>
         /// Cross-floor Time-Space A* Algorithm Entry Point
         /// </summary>
-        public static (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) TimeSpaceAStarAlgorithm(
-            Graph graph,
+        public static (List<Waypoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) TimeSpaceAStarAlgorithm(
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer personalOccupancyLayer,
             DynamicOccupancyLayer globalOccupancyLayer,
-            RoutePoint startPosition,
-            RoutePoint endPosition,
+            Waypoint startPosition,
+            Waypoint endPosition,
             string robotId,
             string currentPlanId,
             float startTime,
@@ -164,18 +166,18 @@ namespace PathPlanning
             if (graph == null || indoorSpace == null || startPosition == null || endPosition == null)
             {
                 Debug.LogError($"Robot {robotId}: TimeSpaceAStar parameters are invalid");
-                return (new List<ConnectionPoint>(), new List<float>(), new List<float>(), null, null);
+                return (new List<Waypoint>(), new List<float>(), new List<float>(), null, null);
             }
 
             // Initialize
-            TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace, graph);
+            TrafficRuleKnowledge trafficRules = new TrafficRuleKnowledge(indoorSpace);
             string newPlanId = $"TimeSpaceAStarPlan_{robotId}_{DateTime.Now.Ticks}";
 
             var verticalConnectionInfo = new Dictionary<string, VerticalConnectionInfo>();
-            
-            string startFloor = startPosition.ConnectionPoint.FloorLevel;
-            string endFloor = endPosition.ConnectionPoint.FloorLevel;
-            
+
+            string startFloor = startPosition.FloorLevel;
+            string endFloor = endPosition.FloorLevel;
+
             Debug.Log($"Robot {robotId}: Starting TimeSpaceAStar path planning from Floor {startFloor} to Floor {endFloor}");
             PathPlanningMetrics metrics = new PathPlanningMetrics(robotId, newPlanId ?? "unknown");
 
@@ -196,23 +198,23 @@ namespace PathPlanning
                 trafficRules,
                 verticalConnectionInfo,
                 metrics);
-            
+
             // Vertical connection occupancy flows through normal path commit (AtomicSwapPath),
             // not written directly by the planner.
 
             return (result.path, result.times, result.speeds, newPlanId, metrics);
         }
-        
+
         /// <summary>
         /// Run Time-Space A* Algorithm
         /// </summary>
-        private static (bool success, List<ConnectionPoint> path, List<float> times, List<float> speeds) RunTimeSpaceAStar(
-            Graph graph,
+        private static (bool success, List<Waypoint> path, List<float> times, List<float> speeds) RunTimeSpaceAStar(
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer personalOccupancyLayer,
             DynamicOccupancyLayer globalOccupancyLayer,
-            RoutePoint startPosition,
-            RoutePoint endPosition,
+            Waypoint startPosition,
+            Waypoint endPosition,
             string robotId,
             float startTime,
             float defaultSpeed,
@@ -225,21 +227,23 @@ namespace PathPlanning
         {
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
-            
+
             PriorityQueue<TSAStarState> openSet = new PriorityQueue<TSAStarState>();
             HashSet<TSAStarStateKey> closedSet = new HashSet<TSAStarStateKey>();
             Dictionary<TSAStarStateKey, TSAStarState> allStates = new Dictionary<TSAStarStateKey, TSAStarState>();
-            
-            string startFloor = startPosition.ConnectionPoint.FloorLevel;
-            string endFloor = endPosition.ConnectionPoint.FloorLevel;
 
-            float idealPathLength = CalculateHeuristicDistance(startPosition, endPosition, searchMethod);
+            string startFloor = startPosition.FloorLevel;
+            string endFloor = endPosition.FloorLevel;
+
+            float idealPathLength = graph.ComputeShortestDistance(startPosition.Id, endPosition.Id);
+            if (idealPathLength < 0)
+                idealPathLength = CalculateHeuristicDistance(startPosition, endPosition, searchMethod);
             metrics.IdealPathLength = idealPathLength;
-            
+
             // Calculate initial heuristic
             float initialHeuristic = CalculateHeuristic(
                 startPosition, endPosition, searchMethod, defaultSpeed, startFloor, endFloor);
-            
+
             // Create initial state
             TSAStarState initialState = new TSAStarState(
                 startPosition,
@@ -249,14 +253,14 @@ namespace PathPlanning
                 null,
                 defaultSpeed,
                 startFloor);
-            
+
             // Add initial state to open set
             openSet.Enqueue(initialState, initialState.FScore);
             TSAStarStateKey initialStateKey = initialState.GetStateKey();
             allStates[initialStateKey] = initialState;
-            
+
             TSAStarState goalState = null;
-            const int MAX_EXPANSIONS = 50000;
+            const int MAX_EXPANSIONS = 200000;
             int expansionCount = 0;
 
             // Main search loop
@@ -265,7 +269,19 @@ namespace PathPlanning
                 // Time and expansion budget guard (TIME_BUDGET_SEC defined at class level)
                 if (stopwatch.ElapsedMilliseconds >= (long)(TIME_BUDGET_SEC * 1000) || expansionCount >= MAX_EXPANSIONS)
                 {
-                    Debug.LogWarning($"TimeSpaceAStar: Search budget exhausted (time={stopwatch.ElapsedMilliseconds}ms, expansions={expansionCount})");
+                    // Diagnostic: unique spatial nodes explored and time range
+                    var uniqueNodes = new HashSet<string>();
+                    float minTime = float.MaxValue, maxTime = float.MinValue;
+                    foreach (var key in closedSet)
+                    {
+                        uniqueNodes.Add(key.ConnectionPointId);
+                        float t = key.ArrivalTimeKey * 0.5f; // 0.5s resolution
+                        if (t < minTime) minTime = t;
+                        if (t > maxTime) maxTime = t;
+                    }
+                    Debug.LogWarning($"TimeSpaceAStar: Search budget exhausted (time={stopwatch.ElapsedMilliseconds}ms, " +
+                        $"expansions={expansionCount}, uniqueNodes={uniqueNodes.Count}/{graph.NodeCount}, " +
+                        $"timeRange=[{minTime:F1}s,{maxTime:F1}s], openSet={openSet.Count}, closedSet={closedSet.Count})");
                     break;
                 }
                 expansionCount++;
@@ -273,24 +289,24 @@ namespace PathPlanning
                 // Get the state with lowest f-score
                 TSAStarState current = openSet.Dequeue();
                 TSAStarStateKey currentStateKey = current.GetStateKey();
-                
+
                 // If we reached the goal
-                if (current.RoutePoint.ConnectionPoint.Id == endPosition.ConnectionPoint.Id &&
+                if (current.Waypoint.Id == endPosition.Id &&
                     current.FloorLevel == endFloor)
                 {
                     goalState = current;
                     break;
                 }
-                
+
                 // Skip if already processed
                 if (closedSet.Contains(currentStateKey))
                 {
                     continue;
                 }
-                
+
                 // Add to closed set
                 closedSet.Add(currentStateKey);
-                
+
                 // Generate successors
                 var successors = GenerateSuccessors(
                     graph,
@@ -308,30 +324,30 @@ namespace PathPlanning
                     verticalConnectionInfo,
                     endFloor
                 );
-                
+
                 // Process each successor
                 foreach (var successor in successors)
                 {
                     TSAStarStateKey successorKey = successor.GetStateKey();
-                    
+
                     if (closedSet.Contains(successorKey))
                     {
                         continue;
                     }
-                    
+
                     bool shouldUpdate = false;
-                    
+
                     // Check if this is a better path
                     if (!allStates.TryGetValue(successorKey, out TSAStarState existingState) ||
                         successor.GScore < existingState.GScore)
                     {
                         shouldUpdate = true;
                     }
-                    
+
                     if (shouldUpdate)
                     {
                         allStates[successorKey] = successor;
-                        
+
                         // Update or add to open set
                         if (openSet.Contains(successor))
                         {
@@ -344,16 +360,16 @@ namespace PathPlanning
                     }
                 }
             }
-            
+
             stopwatch.Stop();
-            
+
             // Check if we found a path
             if (goalState == null)
             {
                 Debug.LogWarning($"Robot {robotId}: TimeSpaceAStar failed to find a path. Time: {stopwatch.ElapsedMilliseconds}ms");
-                return (false, new List<ConnectionPoint>(), new List<float>(), new List<float>());
+                return (false, new List<Waypoint>(), new List<float>(), new List<float>());
             }
-            
+
             // Reconstruct the path
             var pathResult = ReconstructPath(goalState, defaultSpeed);
 
@@ -361,28 +377,28 @@ namespace PathPlanning
             metrics.ActualPathLength = actualPathLength;
             metrics.TravelTime = pathResult.times.Last() - pathResult.times.First();
             metrics.PlanningTime = stopwatch.ElapsedMilliseconds / 1000f;
-            
+
             if (EventManager.Instance != null)
             {
                 // Metrics event is now fired from RobotController.PlanPath() to preserve IsReplan flag
             }
-            
+
             Debug.Log($"Robot {robotId}: TimeSpaceAStar found a path with {pathResult.path.Count} points. Time: {stopwatch.ElapsedMilliseconds}ms");
             Debug.Log($"Robot {robotId}: Path: {string.Join(" -> ", pathResult.path.Select(p => p.Id))}");
-            
+
             return (true, pathResult.path, pathResult.times, pathResult.speeds);
         }
-        
+
         /// <summary>
         /// Generate successor states from the current state
         /// </summary>
         private static List<TSAStarState> GenerateSuccessors(
-            Graph graph,
+            NavigationGraph graph,
             IndoorSpace indoorSpace,
             DynamicOccupancyLayer personalOccupancyLayer,
             DynamicOccupancyLayer globalOccupancyLayer,
             TSAStarState current,
-            RoutePoint endPosition,
+            Waypoint endPosition,
             string robotId,
             float defaultSpeed,
             float maxAcceleration,
@@ -394,39 +410,38 @@ namespace PathPlanning
         {
             List<TSAStarState> successors = new List<TSAStarState>();
             string currentFloor = current.FloorLevel;
-            
-            var childConnections = new List<ConnectionPoint>(current.RoutePoint.Children);
-            
-            // Test for time-space occupancy at current node and time
-            ConnectionPoint currentCP = current.RoutePoint.ConnectionPoint;
-            if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentCP, current.ArrivalTime, robotId, indoorSpace))
-            {
-                // Current node is not available at this time, so no valid successors
-                return successors;
-            }
-            
-            // Process each neighbor
-            foreach (var childConnection in childConnections)
-            {
-                RoutePoint childRoutePoint = graph.GetRoutePointFromConnectionPoint(childConnection);
-                if (childRoutePoint == null) continue;
-                
-                string childFloor = childConnection.FloorLevel;
 
-                // Defensive: if FloorLevel is null for vertical CPs, resolve from CellBoundary
-                if (string.IsNullOrEmpty(childFloor) && childConnection.IsVertical() && indoorSpace != null)
+            var neighbors = graph.GetNeighbors(current.Waypoint.Id);
+
+            Waypoint currentWP = current.Waypoint;
+
+            // Check if current node is occupied at this time.
+            // If occupied: skip MOVEMENT successors but still allow WAIT (the robot
+            // must be able to wait at its position until neighbours become available).
+            bool currentNodeBlocked = current.Parent != null &&
+                !IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentWP, current.ArrivalTime, robotId, indoorSpace);
+
+            // Process each neighbor (skip entirely when current node is blocked — can't depart from a contested cell)
+            if (!currentNodeBlocked)
+            foreach (var childWaypoint in neighbors)
+            {
+                string childFloor = childWaypoint.FloorLevel;
+
+                // Defensive: if FloorLevel is null for vertical WPs, resolve from ConnectionPointSource
+                if (string.IsNullOrEmpty(childFloor) && childWaypoint.IsVertical && indoorSpace != null
+                    && childWaypoint.ConnectionPointSource != null)
                 {
-                    childFloor = indoorSpace.GetConnectionPointFloorLevel(childConnection.CellBoundary);
+                    childFloor = indoorSpace.GetConnectionPointFloorLevel(childWaypoint.ConnectionPointSource.CellBoundary);
                 }
 
                 bool isVertical = !string.IsNullOrEmpty(childFloor)
                                   && !string.IsNullOrEmpty(currentFloor)
                                   && childFloor != currentFloor;
                 string verticalConnectorId = null;
-                
+
                 float travelTime, travelCost;
                 float speedForMove = defaultSpeed;
-                
+
                 // Calculate travel time and cost
                 if (isVertical)
                 {
@@ -436,12 +451,12 @@ namespace PathPlanning
                     // A5 fix: Use stair constants for stairs, elevator constants for elevators
                     float baseTime;
                     float costFactor;
-                    if (childConnection.IsStair)
+                    if (childWaypoint.IsStair)
                     {
                         baseTime = STAIR_FLOOR_TIME * floorDifference;
                         costFactor = STAIR_COST_FACTOR;
                     }
-                    else if (childConnection.IsElevator)
+                    else if (childWaypoint.IsElevator)
                     {
                         baseTime = ELEVATOR_BASE_TIME + ELEVATOR_FLOOR_TIME * floorDifference;
                         costFactor = ELEVATOR_COST_FACTOR;
@@ -452,11 +467,11 @@ namespace PathPlanning
                         costFactor = DEFAULT_VERTICAL_COST_FACTOR;
                     }
 
-                    float distance = CalculateDistance(current.RoutePoint.ConnectionPoint, childConnection);
+                    float distance = CalculateDistance(current.Waypoint, childWaypoint);
 
                     var (adjustedSpeed, adjustedTime) = trafficRules.ModifySpeed(
-                        current.RoutePoint,
-                        childRoutePoint,
+                        current.Waypoint,
+                        childWaypoint,
                         current.Speed,
                         defaultSpeed,
                         distance,
@@ -467,10 +482,10 @@ namespace PathPlanning
                     travelCost = travelTime * costFactor;
                     speedForMove = adjustedSpeed;
 
-                    verticalConnectorId = childConnection.Id;
+                    verticalConnectorId = childWaypoint.Id;
 
                     // A6 fix: Check vertical cell occupancy over the FULL traversal interval
-                    CellSpace verticalCell = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection, true);
+                    CellSpace verticalCell = indoorSpace.GetCellSpaceFromId(childWaypoint.SecondaryCellId ?? childWaypoint.PrimaryCellId);
                     if (verticalCell != null && globalOccupancyLayer != null)
                     {
                         string vertCellId = verticalCell.Id;
@@ -486,10 +501,10 @@ namespace PathPlanning
                     }
 
                     // For vertical transitions, record the usage
-                    CellSpace cellSpace = verticalCell ?? indoorSpace.GetCellSpaceFromConnectionPoint(childConnection);
+                    CellSpace cellSpace = verticalCell ?? indoorSpace.GetCellSpaceFromId(childWaypoint.PrimaryCellId);
                     if (cellSpace != null)
                     {
-                        string connectionKey = $"{current.RoutePoint.ConnectionPoint.Id}_to_{childConnection.Id}";
+                        string connectionKey = $"{current.Waypoint.Id}_to_{childWaypoint.Id}";
                         verticalConnectionInfo[connectionKey] = new VerticalConnectionInfo
                         {
                             CellSpaceId = cellSpace.Id,
@@ -503,30 +518,32 @@ namespace PathPlanning
                 else
                 {
                     // Handle regular horizontal movement
-                    float distance = CalculateDistance(current.RoutePoint.ConnectionPoint, childConnection);
-                    
+                    float distance = CalculateDistance(current.Waypoint, childWaypoint);
+
                     var (adjustedSpeed, adjustedTime) = trafficRules.ModifySpeed(
-                        current.RoutePoint,
-                        childRoutePoint,
+                        current.Waypoint,
+                        childWaypoint,
                         current.Speed,
                         defaultSpeed,
                         distance,
                         maxAcceleration,
                         maxDeceleration);
-                    
+
                     travelTime = adjustedTime;
                     travelCost = travelTime;
                     speedForMove = adjustedSpeed;
                 }
-                
+
                 // Round the arrival time to the defined resolution
                 float arrivalTime = RoundTime(current.ArrivalTime + travelTime);
-                
+
                 // A0 fix: Check time-space availability using CellSpace ID
-                if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childConnection, arrivalTime, robotId, indoorSpace))
+                if (!IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, childWaypoint, arrivalTime, robotId, indoorSpace))
                 {
+                    // Use a generous lookahead: robot path reservations can span 20-30s,
+                    // so a short window permanently blocks cells. 60s covers most path durations.
                     float nextAvailableTime = GetNextAvailableTime(
-                        globalOccupancyLayer, personalOccupancyLayer, childConnection, arrivalTime, robotId, 3.0f, indoorSpace);
+                        globalOccupancyLayer, personalOccupancyLayer, childWaypoint, arrivalTime, robotId, 60.0f, indoorSpace);
 
                     if (nextAvailableTime < 0)
                     {
@@ -544,7 +561,7 @@ namespace PathPlanning
 
                 // Calculate heuristic
                 float heuristic = CalculateHeuristic(
-                    childRoutePoint,
+                    childWaypoint,
                     endPosition,
                     searchMethod,
                     speedForMove,
@@ -555,7 +572,7 @@ namespace PathPlanning
                 float intentBonus = 0f;
                 if (globalOccupancyLayer != null)
                 {
-                    CellSpace neighborCell = indoorSpace.GetCellSpaceFromConnectionPoint(childConnection, true);
+                    CellSpace neighborCell = indoorSpace.GetCellSpaceFromId(childWaypoint.SecondaryCellId ?? childWaypoint.PrimaryCellId);
                     if (neighborCell != null && globalOccupancyLayer.HasOccupancyOfType(
                         neighborCell.Id, arrivalTime, OccupancyType.Intent, robotId))
                     {
@@ -564,10 +581,10 @@ namespace PathPlanning
                 }
 
                 float newFScore = newGScore + heuristic + intentBonus;
-                
+
                 // Create successor state
                 TSAStarState successor = new TSAStarState(
-                    childRoutePoint,
+                    childWaypoint,
                     arrivalTime,
                     newGScore,
                     newFScore,
@@ -576,22 +593,26 @@ namespace PathPlanning
                     childFloor,
                     isVertical,
                     verticalConnectorId);
-                
+
                 successors.Add(successor);
             }
-            
-            // A4 fix: Always generate a wait successor unconditionally (not only when blocked)
-            // A9 fix: Use TIME_RESOLUTION (0.1s) instead of fixed 1.0s for finer-grained waiting
+
+            // Wait action: only useful when temporal occupancy is active.
+            // Without occupancy layers, waiting has no purpose and wastes the expansion budget
+            // (each node spawns an infinite chain of +0.5s wait states).
+            if (globalOccupancyLayer != null)
             {
-                float waitTime = TIME_RESOLUTION;
+                float waitTime = 0.5f;
                 float waitArrivalTime = RoundTime(current.ArrivalTime + waitTime);
 
-                if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, currentCP, waitArrivalTime, robotId, indoorSpace))
+                // Always allow waiting at the current node. The robot is physically there
+                // (or arrived via a valid prior move) and can hold position. Blocking
+                // the wait action leads to 0ms search failures when all neighbours are occupied.
                 {
                     float waitGScore = current.GScore + waitTime;
 
                     float waitHeuristic = CalculateHeuristic(
-                        current.RoutePoint,
+                        current.Waypoint,
                         endPosition,
                         searchMethod,
                         current.Speed,
@@ -601,7 +622,7 @@ namespace PathPlanning
                     float waitFScore = waitGScore + waitHeuristic;
 
                     TSAStarState waitSuccessor = new TSAStarState(
-                        current.RoutePoint,
+                        current.Waypoint,
                         waitArrivalTime,
                         waitGScore,
                         waitFScore,
@@ -611,30 +632,30 @@ namespace PathPlanning
 
                     successors.Add(waitSuccessor);
                 }
-            }
-            
+            } // end if (globalOccupancyLayer != null) — wait action
+
             return successors;
         }
-        
+
         /// <summary>
         /// Check if a node is available at a specific time.
-        /// Resolves ConnectionPoint to CellSpace ID for correct occupancy lookup.
+        /// Resolves Waypoint to CellSpace ID for correct occupancy lookup.
         /// </summary>
         private static bool IsNodeAvailableAtTime(
             DynamicOccupancyLayer globalOccupancyLayer,
             DynamicOccupancyLayer personalOccupancyLayer,
-            ConnectionPoint connectionPoint,
+            Waypoint waypoint,
             float time,
             string robotId,
             IndoorSpace indoorSpace,
             string overrideCellId = null)
         {
-            // A0 fix: Resolve ConnectionPoint to CellSpace ID for correct occupancy query
+            // A0 fix: Resolve Waypoint to CellSpace ID for correct occupancy query
             string cellId = overrideCellId;
             if (cellId == null)
             {
-                CellSpace containingCell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
-                cellId = containingCell?.Id ?? connectionPoint.Id;
+                CellSpace containingCell = indoorSpace.GetCellSpaceFromId(waypoint.SecondaryCellId ?? waypoint.PrimaryCellId);
+                cellId = containingCell?.Id ?? waypoint.Id;
             }
 
             // Check if the node is occupied by any other robot at the specified time
@@ -658,23 +679,23 @@ namespace PathPlanning
 
             return true;
         }
-        
+
         private static float GetNextAvailableTime(
             DynamicOccupancyLayer globalOccupancyLayer,
             DynamicOccupancyLayer personalOccupancyLayer,
-            ConnectionPoint connectionPoint,
+            Waypoint waypoint,
             float startTime,
             string robotId,
             float maxLookahead,
             IndoorSpace indoorSpace,
             string overrideCellId = null)
         {
-            // A0 fix: Resolve ConnectionPoint to CellSpace ID for correct occupancy query
+            // A0 fix: Resolve Waypoint to CellSpace ID for correct occupancy query
             string cellId = overrideCellId;
             if (cellId == null)
             {
-                CellSpace containingCell = indoorSpace.GetCellSpaceFromConnectionPoint(connectionPoint, true);
-                cellId = containingCell?.Id ?? connectionPoint.Id;
+                CellSpace containingCell = indoorSpace.GetCellSpaceFromId(waypoint.SecondaryCellId ?? waypoint.PrimaryCellId);
+                cellId = containingCell?.Id ?? waypoint.Id;
             }
 
             float endTime = startTime + maxLookahead;
@@ -705,66 +726,66 @@ namespace PathPlanning
                 return -1f;
             }
 
-            if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, connectionPoint, candidateTime, robotId, indoorSpace, cellId))
+            if (IsNodeAvailableAtTime(globalOccupancyLayer, personalOccupancyLayer, waypoint, candidateTime, robotId, indoorSpace, cellId))
             {
                 return candidateTime;
             }
 
             return -1f;
         }
-        
-        private static (List<ConnectionPoint> path, List<float> times, List<float> speeds) ReconstructPath(
+
+        private static (List<Waypoint> path, List<float> times, List<float> speeds) ReconstructPath(
             TSAStarState goalState,
             float defaultSpeed)
         {
             List<TSAStarState> statesReversed = new List<TSAStarState>();
-            
+
             TSAStarState current = goalState;
             while (current != null)
             {
                 statesReversed.Add(current);
                 current = current.Parent;
             }
-            
+
             List<TSAStarState> states = new List<TSAStarState>(statesReversed);
             states.Reverse();
-            
-            List<ConnectionPoint> path = new List<ConnectionPoint>();
+
+            List<Waypoint> path = new List<Waypoint>();
             List<float> times = new List<float>();
             List<float> speeds = new List<float>();
-            
+
             for (int i = 0; i < states.Count; i++)
             {
                 TSAStarState state = states[i];
-                
-                path.Add(state.RoutePoint.ConnectionPoint);
+
+                path.Add(state.Waypoint);
                 times.Add(state.ArrivalTime);
                 speeds.Add(state.Speed);
-                
+
                 // If this is not the last state, check if we need to add a waiting state
                 if (i < states.Count - 1)
                 {
                     TSAStarState nextState = states[i + 1];
-                    
+
                     // If we're on the same node but at a different time, this indicates waiting
-                    if (state.RoutePoint.ConnectionPoint.Id == nextState.RoutePoint.ConnectionPoint.Id &&
+                    if (state.Waypoint.Id == nextState.Waypoint.Id &&
                         Math.Abs(nextState.ArrivalTime - state.ArrivalTime) > TIME_EPSILON)
                     {
                         // Add a waiting point with zero speed
-                        path.Add(state.RoutePoint.ConnectionPoint);
+                        path.Add(state.Waypoint);
                         times.Add(nextState.ArrivalTime - TIME_EPSILON);
                         speeds.Add(0);
                     }
                 }
             }
-            
+
             return (path, times, speeds);
         }
-        
+
         #endregion
-        
+
         #region helper methods
-        
+
         /// <summary>
         /// Round time to the nearest time resolution unit
         /// </summary>
@@ -772,60 +793,60 @@ namespace PathPlanning
         {
             return (float)Math.Round(time / TIME_RESOLUTION) * TIME_RESOLUTION;
         }
-        
+
         /// <summary>
         /// Calculate the heuristic value, considering 3D distance
         /// </summary>
         private static float CalculateHeuristic(
-            RoutePoint current,
-            RoutePoint goal,
+            Waypoint current,
+            Waypoint goal,
             SearchMethod searchMethod,
             float defaultSpeed,
             string currentFloor,
             string goalFloor)
         {
             float horizontalDistance = 0;
-            
+
             switch (searchMethod)
             {
                 case SearchMethod.Euclidean_Distance:
                     horizontalDistance = Vector3.Distance(
-                        GetPointVector(current.ConnectionPoint),
-                        GetPointVector(goal.ConnectionPoint));
+                        current.Position,
+                        goal.Position);
                     break;
                 case SearchMethod.Manhattan_Distance:
-                    Vector3 currentPos = GetPointVector(current.ConnectionPoint);
-                    Vector3 goalPos = GetPointVector(goal.ConnectionPoint);
+                    Vector3 currentPos = current.Position;
+                    Vector3 goalPos = goal.Position;
                     horizontalDistance = Math.Abs(currentPos.x - goalPos.x) + Math.Abs(currentPos.z - goalPos.z);
                     break;
                 default:
                     horizontalDistance = Vector3.Distance(
-                        GetPointVector(current.ConnectionPoint),
-                        GetPointVector(goal.ConnectionPoint));
+                        current.Position,
+                        goal.Position);
                     break;
             }
-            
+
             float verticalCost = 0;
             if (currentFloor != goalFloor)
             {
                 int currentLevel = ParseFloorLevel(currentFloor);
                 int goalLevel = ParseFloorLevel(goalFloor);
                 int floorDifference = Math.Abs(goalLevel - currentLevel);
-                
+
                 verticalCost = Math.Min(
                     ELEVATOR_BASE_TIME + floorDifference * ELEVATOR_FLOOR_TIME,
                     STAIR_FLOOR_TIME * floorDifference);
             }
-            
+
             return horizontalDistance / defaultSpeed + verticalCost;
         }
-        
+
         /// <summary>
-        /// Calculate the heuristic distance between two connection points
+        /// Calculate the heuristic distance between two waypoints
         /// </summary>
         private static float CalculateHeuristicDistance(
-            RoutePoint from,
-            RoutePoint to,
+            Waypoint from,
+            Waypoint to,
             SearchMethod searchMethod)
         {
             float horizontalDistance = 0;
@@ -834,59 +855,51 @@ namespace PathPlanning
             {
                 case SearchMethod.Euclidean_Distance:
                     horizontalDistance = Vector3.Distance(
-                        GetPointVector(from.ConnectionPoint),
-                        GetPointVector(to.ConnectionPoint));
+                        from.Position,
+                        to.Position);
                     break;
                 case SearchMethod.Manhattan_Distance:
-                    Vector3 fromPos = GetPointVector(from.ConnectionPoint);
-                    Vector3 toPos = GetPointVector(to.ConnectionPoint);
+                    Vector3 fromPos = from.Position;
+                    Vector3 toPos = to.Position;
                     horizontalDistance = Math.Abs(fromPos.x - toPos.x) + Math.Abs(fromPos.z - toPos.z);
                     break;
                 default:
                     horizontalDistance = Vector3.Distance(
-                        GetPointVector(from.ConnectionPoint),
-                        GetPointVector(to.ConnectionPoint));
+                        from.Position,
+                        to.Position);
                     break;
             }
             return horizontalDistance;
         }
-        
-        /// <summary>
-        /// Calculate distance between two connection points
-        /// </summary>
-        private static float CalculateDistance(ConnectionPoint from, ConnectionPoint to)
-        {
-            Vector3 fromPos = GetPointVector(from);
-            Vector3 toPos = GetPointVector(to);
 
-            return Vector3.Distance(fromPos, toPos);
+        /// <summary>
+        /// Calculate distance between two waypoints
+        /// </summary>
+        private static float CalculateDistance(Waypoint from, Waypoint to)
+        {
+            return Vector3.Distance(from.Position, to.Position);
         }
-        
+
         /// <summary>
         /// Calculate the length of a path
         /// </summary>
-        private static float CalculatePathLength(List<ConnectionPoint> path)
+        private static float CalculatePathLength(List<Waypoint> path)
         {
             float length = 0f;
-            
+
             for (int i = 1; i < path.Count; i++)
             {
                 length += CalculateDistance(path[i - 1], path[i]);
             }
-            
+
             return length;
         }
-        
-        private static Vector3 GetPointVector(ConnectionPoint connectionPoint)
-        {
-            return connectionPoint.Position;
-        }
-        
+
         private static int ParseFloorLevel(string floorLevel)
         {
             return Map.FloorLevelUtils.Parse(floorLevel);
         }
-        
+
         #endregion
     }
 }

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Map;
-using NetTopologySuite.Geometries;
 
 namespace PathPlanning
 {
@@ -20,7 +19,7 @@ namespace PathPlanning
             { "picking_point", 0.5f },   // Picking point
             { "packing_point", 0.5f }    // Packing point
         };
-        
+
         // Speed adjustments for turns
         private readonly SortedDictionary<float, float> turnSpeedFactors = new SortedDictionary<float, float>
         {
@@ -30,51 +29,49 @@ namespace PathPlanning
             { 120f, 0.4f },  // Large angle turn speed reduced to 40%
             { 180f, 0.3f }   // U-turn speed reduced to 30%
         };
-        
+
         private IndoorSpace indoorSpace;
-        private Graph graph;
-        
-        public TrafficRuleKnowledge(IndoorSpace indoorSpace, Graph graph)
+
+        public TrafficRuleKnowledge(IndoorSpace indoorSpace)
         {
             this.indoorSpace = indoorSpace;
-            this.graph = graph;
         }
-        
+
         /// <summary>
         /// Modifies speed and time based on traffic rules
         /// </summary>
         public (float modifiedSpeed, float modifiedTime) ModifySpeed(
-            RoutePoint current, 
-            RoutePoint next,
-            float currentSpeed, 
-            float defaultSpeed, 
+            Waypoint current,
+            Waypoint next,
+            float currentSpeed,
+            float defaultSpeed,
             float distance,
-            float maxAcceleration, 
+            float maxAcceleration,
             float maxDeceleration,
-            RoutePoint prev = null)
+            Waypoint prev = null)
         {
             // Get speed limit influenced by traffic rules
             float speedLimit = GetSpeedLimit(current, next);
-            
+
             // Check turn influence
             float turnFactor = 1.0f;
             if (prev != null)
             {
                 turnFactor = GetTurnSpeedFactor(prev, current, next);
             }
-            
+
             // Apply turn and area speed limits
             float targetSpeed = defaultSpeed * Math.Min(speedLimit, turnFactor);
-            
+
             // Calculate time required for acceleration/deceleration
             float timeToReachTarget = 0;
-            
+
             if (targetSpeed > currentSpeed)
             {
                 // Accelerate
                 float accelerationTime = (targetSpeed - currentSpeed) / maxAcceleration;
                 float accelerationDistance = (currentSpeed + targetSpeed) * accelerationTime / 2;
-                
+
                 if (accelerationDistance > distance)
                 {
                     // Distance insufficient to reach target speed
@@ -96,7 +93,7 @@ namespace PathPlanning
                 // Decelerate
                 float decelerationTime = (currentSpeed - targetSpeed) / maxDeceleration;
                 float decelerationDistance = (currentSpeed + targetSpeed) * decelerationTime / 2;
-                
+
                 if (decelerationDistance > distance)
                 {
                     // Distance insufficient to decelerate to target speed
@@ -126,79 +123,79 @@ namespace PathPlanning
                     timeToReachTarget = targetSpeed > 0.001f ? distance / targetSpeed : distance / defaultSpeed;
                 }
             }
-            
+
             return (targetSpeed, timeToReachTarget);
         }
-        
+
         /// <summary>
         /// Gets the speed limit for an area
         /// </summary>
-        public float GetSpeedLimit(RoutePoint current, RoutePoint next)
+        public float GetSpeedLimit(Waypoint current, Waypoint next)
         {
             // Get relevant CellSpaces
-            CellSpace currentCell = indoorSpace.GetCellSpaceFromConnectionPoint(current.ConnectionPoint, false);
-            CellSpace nextCell = indoorSpace.GetCellSpaceFromConnectionPoint(next.ConnectionPoint, true);
-            
+            CellSpace currentCell = indoorSpace.GetCellSpaceFromId(current.PrimaryCellId);
+            CellSpace nextCell = indoorSpace.GetCellSpaceFromId(next.SecondaryCellId ?? next.PrimaryCellId);
+
             if (currentCell == null || nextCell == null)
                 return 1.0f;
-                
+
             // Check intersection
             bool isIntersection = IsIntersection(current, next);
             if (isIntersection)
                 return areaSpeedLimits["intersection"];
-                
+
             // Check picking point
             if (nextCell.IsPickingPoint())
                 return areaSpeedLimits["picking_point"];
-                
+
             // Check packing point
             if (nextCell.IsPackingPoint())
                 return areaSpeedLimits["packing_point"];
-                
+
             // Check queue area
             if (nextCell.IsQueue())
                 return areaSpeedLimits["queue"];
-                
+
             // Default to aisle speed
             return areaSpeedLimits["aisle"];
         }
-        
+
         /// <summary>
         /// Gets the turn speed factor
         /// </summary>
-        public float GetTurnSpeedFactor(RoutePoint prev, RoutePoint current, RoutePoint next)
+        public float GetTurnSpeedFactor(Waypoint prev, Waypoint current, Waypoint next)
         {
             // Calculate turn angle
             Vector3 prevPos = GetPointPosition(prev);
             Vector3 currentPos = GetPointPosition(current);
             Vector3 nextPos = GetPointPosition(next);
-            
+
             Vector3 inDirection = (currentPos - prevPos).normalized;
             Vector3 outDirection = (nextPos - currentPos).normalized;
-            
+
             float angle = Vector3.Angle(inDirection, outDirection);
-            
+
             // Apply turn speed factor
             foreach (var entry in turnSpeedFactors)
             {
                 if (angle <= entry.Key)
                     return entry.Value;
             }
-            
+
             return 0.3f; // Default value for extreme angles
         }
-        
+
         /// <summary>
         /// Determines if at an intersection
         /// </summary>
-        private bool IsIntersection(RoutePoint current, RoutePoint next)
+        private bool IsIntersection(Waypoint current, Waypoint next)
         {
             try
             {
-                // Use Graph's PointLocation enum to determine location type
-                var locationType = graph.GetPointLocation(current.ConnectionPoint);
-                return locationType == Graph.PointLocation.InIntersection || 
-                       locationType == Graph.PointLocation.ApproachingIntersection;
+                var pastLayer = indoorSpace.GetLayerFromCellSpaceId(current.PrimaryCellId);
+                var nextLayer = indoorSpace.GetLayerFromCellSpaceId(current.SecondaryCellId);
+                return (pastLayer != null && pastLayer.IsIntersection()) ||
+                       (nextLayer != null && nextLayer.IsIntersection());
             }
             catch
             {
@@ -206,7 +203,7 @@ namespace PathPlanning
                 return false;
             }
         }
-        
+
         /// <summary>
         /// Calculates max speed reachable under acceleration
         /// </summary>
@@ -215,7 +212,7 @@ namespace PathPlanning
             // v^2 = u^2 + 2as
             return Mathf.Sqrt(initialSpeed * initialSpeed + 2 * acceleration * distance);
         }
-        
+
         /// <summary>
         /// Calculates min speed reachable under deceleration
         /// </summary>
@@ -225,7 +222,7 @@ namespace PathPlanning
             float speedSquared = initialSpeed * initialSpeed - 2 * deceleration * distance;
             return speedSquared > 0 ? Mathf.Sqrt(speedSquared) : 0;
         }
-        
+
         /// <summary>
         /// Calculates time required to move specified distance
         /// </summary>
@@ -235,20 +232,19 @@ namespace PathPlanning
             // Therefore t = 2s / (u + v)
             if (Mathf.Approximately(initialSpeed + finalSpeed, 0))
                 return 0;
-                
+
             return 2 * distance / (initialSpeed + finalSpeed);
         }
-        
+
         /// <summary>
         /// Gets the position of a point
         /// </summary>
-        private Vector3 GetPointPosition(RoutePoint point)
+        private Vector3 GetPointPosition(Waypoint point)
         {
-            if (point == null || point.ConnectionPoint == null || point.ConnectionPoint.Point == null)
+            if (point == null)
                 return Vector3.zero;
-                
-            Point geometryPoint = (Point)point.ConnectionPoint.Point;
-            return new Vector3((float)geometryPoint.X, 0, (float)geometryPoint.Y);
+
+            return point.Position;
         }
     }
 }
