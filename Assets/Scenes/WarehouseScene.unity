@@ -381,16 +381,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee471ea0ea4664c34a5b6ccd49abe5cd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  configId: C1
-  scenarioId: 1
-  algorithm: 4
-  temporalEnabled: 0
-  robotsPerFloor: 3
+  configId: C4
+  scenarioId: 3
+  algorithm: 2
+  temporalEnabled: 1
+  robotsPerFloor: 10
   floorCount: 3
   defaultSpeed: 1.5
   maxAcceleration: 1
   maxDeceleration: 1
-  trialCount: 5
+  trialCount: 6
   trialDurationSeconds: 300
   breakdownThreshold: 0.8
   snapshotIntervalSeconds: 5
