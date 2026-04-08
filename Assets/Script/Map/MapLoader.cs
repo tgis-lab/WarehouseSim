@@ -10,7 +10,6 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
-using PathPlanning;
 using CentralControl;
 
 namespace Map {
@@ -36,7 +35,10 @@ namespace Map {
         
         public bool separateNavMeshPerFloor = true;
 
-        private Graph graph;
+        private NavigationGraph cpNavigationGraph;
+        private NavigationGraph cellSpaceNavigationGraph;
+        private NavigationQueryService cpQueryService;
+        private NavigationQueryService cellQueryService;
         private Dictionary<string, NavMeshSurface> navMeshSurfaces = new Dictionary<string, NavMeshSurface>();
         public bool IsNavMeshReady { get; private set; } = false;
 
@@ -67,7 +69,7 @@ namespace Map {
                 Debug.LogError("MapVisualizer not assigned!");
             }
             
-            this.graph = GenerateRouteGraph(indoorSpace);
+            BuildNavigationGraphs();
             
             this.mapGrid = SetMapGrid(width, floorHeight, length);
 
@@ -163,89 +165,6 @@ namespace Map {
         }
         # endregion
 
-        # region Graph Generation
-        public Graph GenerateRouteGraph(IndoorSpace indoorSpace)
-        {
-            if (indoorSpace == null)
-            {
-                throw new ArgumentNullException(nameof(indoorSpace), "IndoorSpace must not be null.");
-            }
-
-            Graph graph = new Graph(indoorSpace);
-            Hypergraph hypergraph = indoorSpace.GetHypergraph();
-
-            if (hypergraph == null || hypergraph.HyperNodes == null || hypergraph.HyperEdges == null)
-            {
-                throw new InvalidOperationException("Hypergraph or its components must not be null.");
-            }
-            
-            // Create RoutePoint for all connection points
-            Debug.Log($"Creating RoutePoints for {hypergraph.HyperNodes.Count} connection points");
-            foreach(var cpNode in hypergraph.HyperNodes)
-            {
-                RoutePoint rpNode = new RoutePoint(cpNode);
-                graph.AddNode(rpNode);
-            }
-            
-            // Create edges for all RLineGroups
-            int edgeCount = 0;
-            Debug.Log($"Processing {hypergraph.HyperEdges.Count} RLineGroups");
-            foreach(var rlineGroup in hypergraph.HyperEdges)
-            {
-                foreach(var innerEdge in rlineGroup.InnerEdges)
-                {
-                    if (innerEdge.Count < 2)
-                    {
-                        Debug.LogWarning($"Invalid inner edge in RLineGroup {rlineGroup.Id}: not enough points");
-                        continue;
-                    }
-                    
-                    string sourceId = innerEdge[0];
-                    string targetId = innerEdge[1];
-                    
-                    ConnectionPoint sourceCP = null;
-                    ConnectionPoint targetCP = null;
-                    
-                    // Find ConnectionPoint
-                    foreach (var cp in hypergraph.HyperNodes)
-                    {
-                        if (cp.Id == sourceId)
-                            sourceCP = cp;
-                        else if (cp.Id == targetId)
-                            targetCP = cp;
-                        
-                        if (sourceCP != null && targetCP != null)
-                            break;
-                    }
-                    
-                    if (sourceCP != null && targetCP != null)
-                    {
-                        RoutePoint sourceRP = graph.GetRoutePointFromConnectionPoint(sourceCP);
-                        RoutePoint targetRP = graph.GetRoutePointFromConnectionPoint(targetCP);
-                        
-                        if (sourceRP != null && targetRP != null)
-                        {
-                            sourceRP.AddChild(targetCP);
-                            targetRP.AddParent(sourceCP);
-                            edgeCount++;
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"Failed to find RoutePoint for ConnectionPoint {sourceId} or {targetId}");
-                        }
-                    }
-                    else
-                    {
-                        Debug.LogWarning($"Failed to find ConnectionPoint {sourceId} or {targetId}");
-                    }
-                }
-            }
-            
-            Debug.Log($"Created {edgeCount} graph edges");
-            return graph;
-        }
-        # endregion
-
         # region Map Boundary
         private void CreateMapBoundary()
         {
@@ -279,11 +198,25 @@ namespace Map {
         }
         # endregion
 
-        # region Getters
-        public Graph GetGraph()
+        # region Navigation Graph Building
+        private void BuildNavigationGraphs()
         {
-            return graph;
+            float baseHeight = 0.05f;
+            var hypergraph = indoorSpace.GetHypergraph();
+            cpNavigationGraph = NavigationGraphBuilder.FromHypergraph(hypergraph, indoorSpace, floorHeight, baseHeight);
+            cellSpaceNavigationGraph = NavigationGraphBuilder.FromCellSpaces(indoorSpace, floorHeight, baseHeight);
+            cpQueryService = new NavigationQueryService(indoorSpace, cpNavigationGraph, floorHeight, baseHeight);
+            cellQueryService = new NavigationQueryService(indoorSpace, cellSpaceNavigationGraph, floorHeight, baseHeight);
+            Debug.Log($"NavigationGraphs built: CP nodes={cpNavigationGraph.NodeCount}, edges={cpNavigationGraph.EdgeCount}; " +
+                      $"CellSpace nodes={cellSpaceNavigationGraph.NodeCount}, edges={cellSpaceNavigationGraph.EdgeCount}");
         }
+        # endregion
+
+        # region Getters
+        public NavigationGraph GetCpNavigationGraph() => cpNavigationGraph;
+        public NavigationGraph GetCellSpaceNavigationGraph() => cellSpaceNavigationGraph;
+        public NavigationQueryService GetCpQueryService() => cpQueryService;
+        public NavigationQueryService GetCellQueryService() => cellQueryService;
 
         public MapGrid GetMapGrid()
         {

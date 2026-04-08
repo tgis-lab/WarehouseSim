@@ -8,13 +8,17 @@ namespace Map
     public class IntersectionAreaManager : MonoBehaviour
     {
         public IndoorSpace indoorSpace;
-        
+
         private Dictionary<string, IntersectionArea> _intersectionAreas;
         private bool _isInitialized;
+        private float _floorHeight = 3.0f;
+        private float _baseHeight = 0.05f;
 
-        public void InitializeIntersectionAreas(IndoorSpace indoorSpace)
+        public void InitializeIntersectionAreas(IndoorSpace indoorSpace, float floorHeight = 3.0f, float baseHeight = 0.05f)
         {
             this.indoorSpace = indoorSpace;
+            this._floorHeight = floorHeight;
+            this._baseHeight = baseHeight;
 
             _intersectionAreas = new Dictionary<string, IntersectionArea>();
             var processedCells = new HashSet<string>();
@@ -127,13 +131,14 @@ namespace Map
                     var connectionPoint = indoorSpace.GetConnectionPointFromCellBoundary(boundary.Id);
                     if (connectionPoint != null)
                     {
+                        var waypoint = Waypoint.FromConnectionPoint(connectionPoint, indoorSpace, _floorHeight, _baseHeight);
                         if (boundary.Source == currentCellId)
                         {
-                            intersectionArea.AddExitPoint(connectionPoint);
+                            intersectionArea.AddExitPoint(waypoint);
                         }
                         else
                         {
-                            intersectionArea.AddEntryPoint(connectionPoint);
+                            intersectionArea.AddEntryPoint(waypoint);
                         }
                     }
                 }
