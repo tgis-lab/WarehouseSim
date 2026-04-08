@@ -70,7 +70,10 @@ namespace CentralControl.RobotControl
 
         #region Public Properties
         public int Id { get; private set; }
-        public Graph graph { get; private set; }
+        public NavigationGraph cpNavigationGraph { get; private set; }
+        public NavigationGraph cellSpaceNavigationGraph { get; private set; }
+        public NavigationQueryService cpQueryService { get; private set; }
+        public NavigationQueryService cellQueryService { get; private set; }
         public IndoorSpace indoorSpace { get; private set; }
         public MapGrid mapGrid { get; private set; }
         public bool lastReportedAvailability { get; set; } = false;
@@ -100,7 +103,7 @@ namespace CentralControl.RobotControl
         public Vector3 CurrentVelocity => currentVelocity;
         public bool IsActuallyMoving => currentVelocity.sqrMagnitude > 0.01f;
         public Vector3 TargetPosition => targetPosition;
-        public List<ConnectionPoint> CurrentPath => currentPath;
+        public List<Waypoint> CurrentPath => currentPath;
         public int CurrentPathIndex => currentPathIndex;
 
         public Vector3 GetLastOrderDestination()
@@ -139,7 +142,7 @@ namespace CentralControl.RobotControl
         private bool isWaitingForPicking = false;
         private bool isProcessingOrdersRunning = false;
         private int isProcessingOrder = 0;
-        private List<ConnectionPoint> currentPath = new List<ConnectionPoint>();
+        private List<Waypoint> currentPath = new List<Waypoint>();
         private List<PathSegment> currentMovement = new List<PathSegment>();
         private int currentPathIndex = 0;
         private bool pickingCompleted = false;
@@ -255,7 +258,7 @@ namespace CentralControl.RobotControl
 
         #region Event
         public event EventHandler<RobotPathEventArgs> OnPathPlanned;
-        protected virtual void RaisePathPlannedEvent(string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        protected virtual void RaisePathPlannedEvent(string planId, List<Waypoint> path, List<float> times, List<float> speeds)
         {
             OnPathPlanned?.Invoke(this, new RobotPathEventArgs(Id.ToString(), planId, path, times, speeds));
 
@@ -402,7 +405,10 @@ namespace CentralControl.RobotControl
         #endregion
 
         #region Initialization
-        public void InitializeRobot(int id, IndoorSpace indoorSpace, Graph graph, MapGrid mapGrid,
+        public void InitializeRobot(int id, IndoorSpace indoorSpace,
+                                    NavigationGraph cpNavGraph, NavigationGraph cellNavGraph,
+                                    NavigationQueryService cpQueries, NavigationQueryService cellQueries,
+                                    MapGrid mapGrid,
                                     DynamicOccupancyLayer globalOccupancyLayer,
                                     IntersectionAreaManager intersectionManager)
         {
@@ -412,15 +418,18 @@ namespace CentralControl.RobotControl
                 Debug.LogError($"Robot {id}: InitializeRobot called with null indoorSpace - initialization aborted");
                 return;
             }
-            if (graph == null)
+            if (cpNavGraph == null)
             {
-                Debug.LogError($"Robot {id}: InitializeRobot called with null graph - initialization aborted");
+                Debug.LogError($"Robot {id}: InitializeRobot called with null cpNavGraph - initialization aborted");
                 return;
             }
 
             this.Id = id;
             this.indoorSpace = indoorSpace;
-            this.graph = graph;
+            this.cpNavigationGraph = cpNavGraph;
+            this.cellSpaceNavigationGraph = cellNavGraph;
+            this.cpQueryService = cpQueries;
+            this.cellQueryService = cellQueries;
             this.mapGrid = mapGrid;
             this.globalOccupancyLayer = globalOccupancyLayer;
             this.intersectionManager = intersectionManager;
@@ -438,7 +447,8 @@ namespace CentralControl.RobotControl
                 personalOccupancyLayer = new DynamicOccupancyLayer(indoorSpace, 300f, Time.time);
             }
 
-            pathPlanner = new PathPlanner(graph, indoorSpace, selectedAlgorithm, selectedSearchMethod,
+            pathPlanner = new PathPlanner(cpNavGraph, cellNavGraph, cpQueries, cellQueries,
+                                          indoorSpace, selectedAlgorithm, selectedSearchMethod,
                                           id.ToString(), maxAcceleration, maxDeceleration);
 
             collisionRecoveryManager = new CollisionRecoveryManager(this);
@@ -760,7 +770,7 @@ namespace CentralControl.RobotControl
             return new Vector3((float)point.X, y, (float)point.Y);
         }
 
-        private (List<ConnectionPoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) PlanPath(Vector3 targetPosition, string targetFloorLevel = null, bool isReplan = false)
+        private (List<Waypoint> path, List<float> times, List<float> speeds, string planId, PathPlanningMetrics metrics) PlanPath(Vector3 targetPosition, string targetFloorLevel = null, bool isReplan = false)
         {
             pathExecutionGuard = false;
             currentPath.Clear();
@@ -771,69 +781,78 @@ namespace CentralControl.RobotControl
 
             // Old reservations stay until AtomicSwap in HandlePathAccepted/HandlePathModified
 
-            RoutePoint startPoint = graph.GetRoutePointFromCoordinate(transform.position, true);
-            RoutePoint endPoint = graph.GetRoutePointFromCoordinate(targetPosition, false);
+            // Use NavigationQueryService for start/goal resolution
+            // CellSpaceAStar operates on CellSpace centroids — use cellQueryService so
+            // start/end waypoints are already CellSpace nodes (avoids CP→CellSpace remap
+            // and ensures out-of-bounds recovery teleports to a centroid, not a boundary edge).
+            var queryService = selectedAlgorithm == SearchAlgorithm.CellSpaceAStar && cellQueryService != null
+                ? cellQueryService
+                : cpQueryService;
+            Waypoint startWaypoint = queryService.ResolveWaypointFromWorldPosition(transform.position, TraversalDirection.Outbound);
+            Waypoint endWaypoint = queryService.ResolveWaypointFromWorldPosition(targetPosition, TraversalDirection.Inbound);
 
-            // Out-of-bounds recovery: if start RoutePoint was found via fallback
-            // (robot outside all CellSpaces), teleport robot to the nearest valid position
-            if (startPoint != null)
+            // Out-of-bounds recovery: if start waypoint position is far from robot, teleport
+            if (startWaypoint != null)
             {
-                Vector3 startCoords = graph.GetCoordinatesFromConnectionPoint(startPoint.ConnectionPoint);
                 float distFromStart = Vector3.Distance(
                     new Vector3(transform.position.x, 0, transform.position.z),
-                    new Vector3(startCoords.x, 0, startCoords.z));
+                    new Vector3(startWaypoint.Position.x, 0, startWaypoint.Position.z));
 
-                // If robot is more than 1.5m from the start RoutePoint, it's likely out of bounds
                 if (distFromStart > 1.5f)
                 {
-                    Debug.LogWarning($"Robot {Id}: Out-of-bounds detected ({distFromStart:F1}m from nearest RoutePoint). " +
-                        $"Teleporting from {transform.position} to {startCoords}");
-                    transform.position = startCoords;
+                    Debug.LogWarning($"Robot {Id}: Out-of-bounds detected ({distFromStart:F1}m from nearest waypoint). " +
+                        $"Teleporting from {transform.position} to {startWaypoint.Position}");
+                    transform.position = startWaypoint.Position;
                 }
             }
 
             Debug.Log($"Robot {Id}: Planning path from {transform.position} (Floor {CurrentFloor}) to {targetPosition} (Floor {targetFloorLevel})");
 
-            if (startPoint == null || endPoint == null)
+            if (startWaypoint == null || endWaypoint == null)
             {
-                // Detailed diagnostic logging to identify which point failed
-                if (startPoint == null)
+                if (startWaypoint == null)
                 {
-                    Debug.LogError($"Robot {Id} cannot find start RoutePoint at position {transform.position} (Floor {CurrentFloor}). " +
+                    Debug.LogError($"Robot {Id} cannot find start waypoint at position {transform.position} (Floor {CurrentFloor}). " +
                         $"Check if robot is spawned inside a valid navigable CellSpace.");
                 }
-                if (endPoint == null)
+                if (endWaypoint == null)
                 {
-                    Debug.LogError($"Robot {Id} cannot find end RoutePoint at position {targetPosition} (Floor {targetFloorLevel}). " +
+                    Debug.LogError($"Robot {Id} cannot find end waypoint at position {targetPosition} (Floor {targetFloorLevel}). " +
                         $"Check if target PickingPoint has valid CellBoundary connections.");
                 }
                 return (null, null, null, null, null);
             }
-            
-            var result = pathPlanner.FindPathWithDynamicObstacles(
+
+            Debug.Log($"Robot {Id}: Resolved start={startWaypoint.Id} end={endWaypoint.Id}, cpGraph nodes={cpNavigationGraph?.NodeCount ?? -1} edges={cpNavigationGraph?.EdgeCount ?? -1}");
+
+            NavigationPathResult result = pathPlanner.FindPathWithDynamicObstacles(
                 ShouldBypassTemporal ? null : personalOccupancyLayer,
                 ShouldBypassTemporal ? null : globalOccupancyLayer,
-                startPoint,
-                endPoint,
+                startWaypoint,
+                endWaypoint,
                 Id.ToString(),
                 currentPlanId,
                 Time.time,
                 defaultSpeed
             );
 
-            if (isReplan && result.metrics != null)
+            if (result == null)
             {
-                result.metrics.IsReplan = true;
+                Debug.LogError($"Robot {Id}: PathPlanner returned null. Algorithm={pathPlanner.GetAlgorithm()}, start={startWaypoint.Id}, end={endWaypoint.Id}");
+                return (null, null, null, null, null);
             }
 
-            // Fire metrics event for ALL algorithms (GAP 1+3 fix)
-            // This is the single point of metrics reporting, preserving IsReplan flag
-            if (result.metrics != null && EventManager.Instance != null)
+            if (isReplan && result.Metrics != null)
             {
-                EventManager.Instance.ReportPathPlanningMetrics(result.metrics);
+                result.Metrics.IsReplan = true;
             }
 
-            return result;
+            if (result.Metrics != null && EventManager.Instance != null)
+            {
+                EventManager.Instance.ReportPathPlanningMetrics(result.Metrics);
+            }
+
+            return (result.Path, result.Times, result.Speeds, result.PlanId, result.Metrics);
         }
 
         private bool HasReachedFinalDestination()
@@ -929,7 +948,7 @@ namespace CentralControl.RobotControl
             }
         }
 
-        private void UpdateCurrentMovementInfo(List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        private void UpdateCurrentMovementInfo(List<Waypoint> path, List<float> times, List<float> speeds)
         {
             if (path == null || times == null || speeds == null)
             {
@@ -1020,9 +1039,9 @@ namespace CentralControl.RobotControl
             // Skip normal movement while executing vertical transport
             if (isExecutingVerticalTransport) return;
 
-            ConnectionPoint targetPoint = currentPath[currentPathIndex];
+            Waypoint targetPoint = currentPath[currentPathIndex];
 
-            Vector3 targetPos = GetConnectionPointPosition(targetPoint);
+            Vector3 targetPos = targetPoint.Position;
 
             targetPosition = targetPos;
 
@@ -1031,7 +1050,7 @@ namespace CentralControl.RobotControl
             // would never shrink below acceptance radius.
             float distanceToTarget;
             bool targetOnDifferentFloor = Mathf.Abs(targetPos.y - transform.position.y) > 0.5f;
-            if (targetOnDifferentFloor || targetPoint.IsVertical())
+            if (targetOnDifferentFloor || targetPoint.IsVertical)
             {
                 Vector3 pos2D = new Vector3(transform.position.x, 0, transform.position.z);
                 Vector3 tgt2D = new Vector3(targetPos.x, 0, targetPos.z);
@@ -1054,12 +1073,13 @@ namespace CentralControl.RobotControl
 
                     if (currentOrder != null && !hasFinalDestination && currentPath.Count > 0)
                     {
-                        ConnectionPoint lastPoint = currentPath[currentPath.Count - 1];
+                        Waypoint lastPoint = currentPath[currentPath.Count - 1];
 
-                        MoveFromConnectionPointToTargetCellSpace(lastPoint);
+                        MoveFromWaypointToTargetCellSpace(lastPoint);
 
                         currentPathIndex = 0;
-                        currentPath = new List<ConnectionPoint> { lastPoint };
+                        currentPath = new List<Waypoint> { lastPoint };
+                        currentMovement = new List<PathSegment> { new PathSegment(lastPoint, Time.time, 0f) };
                     }
                     else
                     {
@@ -1087,12 +1107,31 @@ namespace CentralControl.RobotControl
                 }
 
                 // Check if the NEXT waypoint is on a different floor — need vertical transport.
-                // The planner uses horizontal CPs on elevator/stair cells; the floor change is
-                // detected by comparing FloorLevel between consecutive CPs, not IsVertical().
-                ConnectionPoint reachedPoint = currentPath[reachedIndex];
-                ConnectionPoint nextPoint = currentPath[currentPathIndex];
+                // CP graph: both waypoints carry explicit FloorLevel from their CellBoundary.
+                // CellSpace graph: elevator/stair nodes may have null FloorLevel because
+                // they span multiple floors. Floor change is only triggered when the robot
+                // has physically reached a vertical transport node (IsVertical on reachedPoint)
+                // and the next waypoint is on a different floor. When the next point is the
+                // vertical node (null FloorLevel), we skip — the robot must walk there first.
+                Waypoint reachedPoint = currentPath[reachedIndex];
+                Waypoint nextPoint = currentPath[currentPathIndex];
                 string reachedFloor = reachedPoint.FloorLevel;
                 string nextFloor = nextPoint.FloorLevel;
+
+                // CellSpace vertical transport: reachedPoint is an elevator/stair with
+                // null FloorLevel. Resolve its effective floor from the previous waypoint
+                // (the floor the robot approached from).
+                if (string.IsNullOrEmpty(reachedFloor) && reachedPoint.IsVertical)
+                {
+                    for (int i = reachedIndex - 1; i >= 0; i--)
+                    {
+                        if (!string.IsNullOrEmpty(currentPath[i].FloorLevel))
+                        {
+                            reachedFloor = currentPath[i].FloorLevel;
+                            break;
+                        }
+                    }
+                }
 
                 bool floorChange = !string.IsNullOrEmpty(reachedFloor) &&
                                    !string.IsNullOrEmpty(nextFloor) &&
@@ -1243,7 +1282,8 @@ namespace CentralControl.RobotControl
 
             for (int i = currentPathIndex + 1; i < currentPath.Count; i++)
             {
-                CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(currentPath[i], true);
+                string cellId = currentPath[i].PrimaryCellId;
+                CellSpace cell = cellId != null ? indoorSpace.GetCellSpaceFromId(cellId) : null;
                 if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
                 {
                     float st = pathTimes[i];
@@ -1266,7 +1306,7 @@ namespace CentralControl.RobotControl
             }
         }
 
-        private void MoveFromConnectionPointToTargetCellSpace(ConnectionPoint targetPoint)
+        private void MoveFromWaypointToTargetCellSpace(Waypoint targetPoint)
         {
             if (targetPoint == null)
                 return;
@@ -1275,7 +1315,7 @@ namespace CentralControl.RobotControl
             if (indoorSpace == null)
                 return;
 
-            string targetCellSapceId = targetPoint.CellBoundary.Target;
+            string targetCellSapceId = targetPoint.SecondaryCellId ?? targetPoint.PrimaryCellId;
             CellSpace targetCellSpace = indoorSpace.GetCellSpaceFromId(targetCellSapceId);
             if (targetCellSpace == null) return;
 
@@ -1521,10 +1561,12 @@ namespace CentralControl.RobotControl
             // Register intent for target area
             if (!ShouldBypassTemporal && personalOccupancyLayer != null && currentOrder != null)
             {
-                ConnectionPoint targetCP = graph.GetConnectionPointFromCoordinates(finalDestination, false);
-                if (targetCP != null)
+                var replanQueryService = selectedAlgorithm == SearchAlgorithm.CellSpaceAStar && cellQueryService != null
+                    ? cellQueryService : cpQueryService;
+                Waypoint targetWp = replanQueryService?.ResolveWaypointFromWorldPosition(finalDestination, TraversalDirection.Inbound);
+                if (targetWp != null)
                 {
-                    CellSpace targetCell = indoorSpace.GetCellSpaceFromConnectionPoint(targetCP, true);
+                    CellSpace targetCell = indoorSpace.GetCellSpaceFromId(targetWp.PrimaryCellId);
                     if (targetCell != null)
                     {
                         personalOccupancyLayer.SetIntentOccupancy(
@@ -1874,7 +1916,7 @@ namespace CentralControl.RobotControl
             dwaPlanner.MaxAccel = maxAcceleration;
             dwaPlanner.MaxDecel = maxDeceleration;
 
-            Vector3 goalPos = GetConnectionPointPosition(currentPath[currentPathIndex]);
+            Vector3 goalPos = currentPath[currentPathIndex].Position;
             var result = dwaPlanner.CalculateVelocity(
                 transform.position, transform.rotation, currentSpeed, currentOmega,
                 goalPos, dwaObstacleBuffer);
@@ -1922,14 +1964,41 @@ namespace CentralControl.RobotControl
         private bool IsInsideReservedCorridor(Vector3 worldPos)
         {
             if (currentPath == null || currentPathIndex >= currentPath.Count) return false;
-            CellSpace corridorCell = indoorSpace?.GetCellSpaceFromConnectionPoint(currentPath[currentPathIndex], true);
-            if (corridorCell == null) return false;
-
-            string floor = GetFloorLevelFromPosition(worldPos);
-            if (corridorCell.GetLocatedFloor() != floor) return false;
 
             var point = new NetTopologySuite.Geometries.Point(worldPos.x, worldPos.z);
-            return corridorCell.Space.Contains(point);
+            string floor = GetFloorLevelFromPosition(worldPos);
+
+            // Check the current target cell
+            CellSpace corridorCell = currentPath[currentPathIndex].PrimaryCellId != null
+                ? indoorSpace?.GetCellSpaceFromId(currentPath[currentPathIndex].PrimaryCellId)
+                : null;
+            if (corridorCell != null && corridorCell.GetLocatedFloor() == floor &&
+                corridorCell.Space.Contains(point))
+                return true;
+
+            // For CellSpace paths the robot transitions between two adjacent 1x1 cells,
+            // so also accept the previous cell (the cell the robot is leaving).
+            if (currentPathIndex > 0)
+            {
+                CellSpace prevCell = currentPath[currentPathIndex - 1].PrimaryCellId != null
+                    ? indoorSpace?.GetCellSpaceFromId(currentPath[currentPathIndex - 1].PrimaryCellId)
+                    : null;
+                if (prevCell != null && prevCell.GetLocatedFloor() == floor &&
+                    prevCell.Space.Contains(point))
+                    return true;
+            }
+
+            // Also accept the SecondaryCellId of the current waypoint (relevant for CP waypoints)
+            string secId = currentPath[currentPathIndex].SecondaryCellId;
+            if (secId != null)
+            {
+                CellSpace secCell = indoorSpace?.GetCellSpaceFromId(secId);
+                if (secCell != null && secCell.GetLocatedFloor() == floor &&
+                    secCell.Space.Contains(point))
+                    return true;
+            }
+
+            return false;
         }
 
         private void RecordPathPosition()
@@ -1959,12 +2028,12 @@ namespace CentralControl.RobotControl
             {
                 var prevPoint = currentPath[currentPathIndex - 1];
                 return new Vector3(
-                    (float)prevPoint.Point.Coordinate.X,
+                    prevPoint.Position.x,
                     transform.position.y,
-                    (float)prevPoint.Point.Coordinate.Y
+                    prevPoint.Position.z
                 );
             }
-            
+
             return null;
         }
 
@@ -1990,9 +2059,9 @@ namespace CentralControl.RobotControl
                 {
                     var point = currentPath[i];
                     var pos = new Vector3(
-                        (float)point.Point.Coordinate.X,
+                        point.Position.x,
                         transform.position.y,
-                        (float)point.Point.Coordinate.Y
+                        point.Position.z
                     );
                     
                     // Avoid duplicates
@@ -2103,9 +2172,9 @@ namespace CentralControl.RobotControl
                     // Get the planned direction at current position
                     var currentTarget = currentPath[currentPathIndex];
                     Vector3 plannedDirection = new Vector3(
-                        (float)currentTarget.Point.Coordinate.X - transform.position.x,
+                        currentTarget.Position.x - transform.position.x,
                         0,
-                        (float)currentTarget.Point.Coordinate.Y - transform.position.z
+                        currentTarget.Position.z - transform.position.z
                     ).normalized;
                     
                     Vector3 backupDirection = (target - transform.position).normalized;
@@ -2143,9 +2212,9 @@ namespace CentralControl.RobotControl
                 // Get direction from previous path point to current position
                 var prevPoint = currentPath[currentPathIndex - 1];
                 Vector3 prevPos = new Vector3(
-                    (float)prevPoint.Point.Coordinate.X,
+                    prevPoint.Position.x,
                     transform.position.y,
-                    (float)prevPoint.Point.Coordinate.Y
+                    prevPoint.Position.z
                 );
                 
                 Vector3 trackDirection = (transform.position - prevPos).normalized;
@@ -2903,8 +2972,8 @@ namespace CentralControl.RobotControl
                 return false;
             }
             
-            ConnectionPoint currentPoint = currentPath[currentPathIndex];
-            Vector3 targetPos = GetConnectionPointPosition(currentPoint);
+            Waypoint currentPoint = currentPath[currentPathIndex];
+            Vector3 targetPos = currentPoint.Position;
             
             float distanceToTarget = Vector3.Distance(transform.position, targetPos);
             
@@ -3103,11 +3172,11 @@ namespace CentralControl.RobotControl
         #endregion
 
         #region Conflict Resolution
-        private void ApplyTimeShiftModification(List<ConnectionPoint> path, List<float> newTimes, string planId, float shift)
+        private void ApplyTimeShiftModification(List<Waypoint> path, List<float> newTimes, string planId, float shift)
         {
             // Update path and times — defensive copy to break shared reference with
             // result.path in ExecuteOrderCoroutine (which UpdateCurrentMovementInfo will Clear)
-            currentPath = new List<ConnectionPoint>(path);
+            currentPath = new List<Waypoint>(path);
             pathTimes = newTimes;
             dwaConsecutiveReplanCount = 0;
 
@@ -3122,7 +3191,7 @@ namespace CentralControl.RobotControl
 
                 for (int i = 0; i < path.Count; i++)
                 {
-                    CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(path[i], true);
+                    CellSpace cell = indoorSpace.GetCellSpaceFromId(path[i].PrimaryCellId);
                     if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
                     {
                         cellIds.Add(cell.Id);
@@ -3168,7 +3237,7 @@ namespace CentralControl.RobotControl
         }
 
         private void ApplySpeedAdjustmentModification(
-            List<ConnectionPoint> path,
+            List<Waypoint> path,
             List<float> newTimes,
             List<float> newSpeeds,
             string planId,
@@ -3176,7 +3245,7 @@ namespace CentralControl.RobotControl
         {
             // Update path and times — defensive copy to break shared reference with
             // result.path in ExecuteOrderCoroutine (which UpdateCurrentMovementInfo will Clear)
-            currentPath = new List<ConnectionPoint>(path);
+            currentPath = new List<Waypoint>(path);
             pathTimes = newTimes;
             dwaConsecutiveReplanCount = 0;
 
@@ -3194,7 +3263,7 @@ namespace CentralControl.RobotControl
 
                 for (int i = 0; i < path.Count; i++)
                 {
-                    CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(path[i], true);
+                    CellSpace cell = indoorSpace.GetCellSpaceFromId(path[i].PrimaryCellId);
                     if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
                     {
                         cellIds.Add(cell.Id);
@@ -3239,7 +3308,7 @@ namespace CentralControl.RobotControl
             CentralController.Instance?.FlushRobotLayer(Id);
         }
 
-        private void UpdatePathSegmentsWithSpeed(List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        private void UpdatePathSegmentsWithSpeed(List<Waypoint> path, List<float> times, List<float> speeds)
         {
             // Clear current movement segments
             currentMovement.Clear();
@@ -3358,7 +3427,7 @@ namespace CentralControl.RobotControl
             replanCountForCurrentOrder = 0;
 
             // Update path and times
-            currentPath = new List<ConnectionPoint>(e.Path);
+            currentPath = new List<Waypoint>(e.Path);
             pathTimes = new List<float>(e.Times);
 
             // Update current movement information
@@ -3371,10 +3440,10 @@ namespace CentralControl.RobotControl
                 var startTimes = new List<float>();
                 var endTimes = new List<float>();
 
-                // Map ConnectionPoint path to cell occupancies
+                // Map Waypoint path to cell occupancies
                 for (int i = 0; i < e.Path.Count; i++)
                 {
-                    CellSpace cell = indoorSpace.GetCellSpaceFromConnectionPoint(e.Path[i], true);
+                    CellSpace cell = indoorSpace.GetCellSpaceFromId(e.Path[i].PrimaryCellId);
                     if (cell != null && (cellIds.Count == 0 || cellIds[cellIds.Count - 1] != cell.Id))
                     {
                         cellIds.Add(cell.Id);
@@ -3520,8 +3589,8 @@ namespace CentralControl.RobotControl
                 // Draw the entire path
                 for (int i = 0; i < currentPath.Count - 1; i++)
                 {
-                    Vector3 start = GetConnectionPointPosition(currentPath[i]);
-                    Vector3 end = GetConnectionPointPosition(currentPath[i + 1]);
+                    Vector3 start = currentPath[i].Position;
+                    Vector3 end = currentPath[i + 1].Position;
                     
                     Gizmos.DrawLine(start, end);
                 }
@@ -3557,59 +3626,8 @@ namespace CentralControl.RobotControl
             );
         }
 
-        private Vector3 GetConnectionPointPosition(ConnectionPoint cp)
-        {
-            if (cp == null || cp.Point == null)
-                return transform.position;
-            
-            float x = (float)cp.Point.Coordinate.X;
-            float z = (float)cp.Point.Coordinate.Y;
-            float y = DetermineConnectionPointHeight(cp);
-            
-            return new Vector3(x, y, z);
-        }
-
-        private float DetermineConnectionPointHeight(ConnectionPoint cp)
-        {
-            if (cp == null)
-            {
-                return transform.position.y;
-            }
-
-            string floorLevel = cp.FloorLevel;
-
-            // Vertical CPs span multiple floors — FloorLevel is null.
-            // Resolve from associated CellSpaces (same logic as Graph.GetFloorLevelForConnectionPoint).
-            if (string.IsNullOrEmpty(floorLevel) && cp.IsVertical() && indoorSpace != null)
-            {
-                CellSpace sourceCell = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Source);
-                CellSpace targetCell = indoorSpace.GetCellSpaceFromId(cp.CellBoundary.Target);
-
-                if (sourceCell != null && targetCell != null)
-                {
-                    string sourceFloor = sourceCell.GetLocatedFloor();
-                    string targetFloor = targetCell.GetLocatedFloor();
-                    if (!string.IsNullOrEmpty(sourceFloor) && !string.IsNullOrEmpty(targetFloor))
-                    {
-                        int srcNum = ParseFloorLevel(sourceFloor);
-                        int tgtNum = ParseFloorLevel(targetFloor);
-                        floorLevel = srcNum <= tgtNum ? sourceFloor : targetFloor;
-                    }
-                    else
-                    {
-                        floorLevel = sourceFloor ?? targetFloor;
-                    }
-                }
-            }
-
-            // If still null after vertical resolution, use robot's current height
-            if (string.IsNullOrEmpty(floorLevel))
-            {
-                return transform.position.y;
-            }
-
-            return GetFloorHeight(floorLevel);
-        }
+        // GetConnectionPointPosition and DetermineConnectionPointHeight removed —
+        // replaced by Waypoint.Position which pre-computes floor-aware coordinates
         
         private int ParseFloorLevel(string floorLevel)
         {
@@ -3639,13 +3657,13 @@ namespace CentralControl.RobotControl
         
         public struct PathSegment
         {
-            public ConnectionPoint Point;
+            public Waypoint Waypoint;
             public float Time;
             public float Speed;
 
-            public PathSegment(ConnectionPoint point, float time, float speed)
+            public PathSegment(Waypoint waypoint, float time, float speed)
             {
-                Point = point;
+                Waypoint = waypoint;
                 Time = time;
                 Speed = speed;
             }
