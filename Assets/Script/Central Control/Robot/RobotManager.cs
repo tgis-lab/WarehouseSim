@@ -28,7 +28,10 @@ namespace CentralControl.RobotControl
         public float baseHeight = 0.05f;
 
         private IndoorSpace indoorSpace;
-        private Graph graph;
+        private NavigationGraph cpNavigationGraph;
+        private NavigationGraph cellSpaceNavigationGraph;
+        private NavigationQueryService cpQueryService;
+        private NavigationQueryService cellQueryService;
         private MapGrid mapGrid;
         private DynamicOccupancyLayer globalOccupancyLayer;
         private IntersectionAreaManager intersectionAreaManager;
@@ -45,14 +48,20 @@ namespace CentralControl.RobotControl
         }
 
         public void InitializeRobots(
-            IndoorSpace indoorSpace, 
-            Graph graph, 
-            MapGrid mapGrid, 
-            DynamicOccupancyLayer globalOccupancyLayer, 
+            IndoorSpace indoorSpace,
+            NavigationGraph cpNavGraph,
+            NavigationGraph cellNavGraph,
+            NavigationQueryService cpQueries,
+            NavigationQueryService cellQueries,
+            MapGrid mapGrid,
+            DynamicOccupancyLayer globalOccupancyLayer,
             IntersectionAreaManager intersectionAreaManager)
         {
             this.indoorSpace = indoorSpace;
-            this.graph = graph;
+            this.cpNavigationGraph = cpNavGraph;
+            this.cellSpaceNavigationGraph = cellNavGraph;
+            this.cpQueryService = cpQueries;
+            this.cellQueryService = cellQueries;
             this.mapGrid = mapGrid;
             this.globalOccupancyLayer = globalOccupancyLayer;
             this.intersectionAreaManager = intersectionAreaManager;
@@ -250,7 +259,10 @@ namespace CentralControl.RobotControl
             RobotController robot = robotObj.GetComponent<RobotController>();
             if (robot != null)
             {
-                robot.InitializeRobot(id, indoorSpace, graph, mapGrid, globalOccupancyLayer,
+                robot.InitializeRobot(id, indoorSpace,
+                    cpNavigationGraph, cellSpaceNavigationGraph,
+                    cpQueryService, cellQueryService,
+                    mapGrid, globalOccupancyLayer,
                     intersectionAreaManager);
 
                 Transform targetIndicatorInstance = Instantiate(targetIndicatorPrefab);

@@ -787,6 +787,79 @@ namespace Map
         }
         
         /// <summary>
+        /// Records path occupancy from a Waypoint path.
+        /// Handles both CP-backed and CellSpace-backed waypoints:
+        /// - CP waypoints: delegates to ConnectionPoint-based method
+        /// - CellSpace waypoints: records occupancy directly using PrimaryCellId
+        /// </summary>
+        public void RecordPathOccupancy(
+            List<Waypoint> waypointPath,
+            List<float> times,
+            string robotId,
+            string planId = null)
+        {
+            if (waypointPath == null || waypointPath.Count < 2 ||
+                times == null || times.Count < waypointPath.Count) return;
+
+            // Check if path is all CP-backed (can delegate to existing method)
+            bool allCpBacked = true;
+            foreach (var wp in waypointPath)
+            {
+                if (wp.ConnectionPointSource == null)
+                {
+                    allCpBacked = false;
+                    break;
+                }
+            }
+
+            if (allCpBacked)
+            {
+                var cpPath = new List<ConnectionPoint>();
+                foreach (var wp in waypointPath)
+                    cpPath.Add(wp.ConnectionPointSource);
+                RecordPathOccupancy(cpPath, times, robotId, planId);
+                return;
+            }
+
+            // Mixed or CellSpace-only path: record cell occupancies directly from Waypoint metadata
+            try
+            {
+                string lastCellId = null;
+                float cellEntryTime = times[0];
+
+                for (int i = 0; i < waypointPath.Count; i++)
+                {
+                    string cellId = waypointPath[i].PrimaryCellId;
+                    if (string.IsNullOrEmpty(cellId)) continue;
+
+                    if (cellId != lastCellId)
+                    {
+                        // Record occupancy for previous cell
+                        if (lastCellId != null)
+                        {
+                            bool isStart = (i == 1);
+                            SetDynamicOccupancyInternal(lastCellId, cellEntryTime, times[i], robotId, planId, isStart, false);
+                        }
+                        lastCellId = cellId;
+                        cellEntryTime = times[i];
+                    }
+                }
+
+                // Record last cell
+                if (lastCellId != null)
+                {
+                    SetDynamicOccupancyInternal(lastCellId, cellEntryTime, times[times.Count - 1], robotId, planId, false, true);
+                }
+
+                IncrementVersion();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"Error recording waypoint path occupancy: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Attempts to commit a path with optimistic locking.
         /// Returns true if commit succeeds (version unchanged), false if conflict detected.
         /// </summary>

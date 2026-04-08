@@ -28,11 +28,11 @@ namespace CentralControl
     {
         public string RobotId { get; private set; }
         public string PlanId { get; private set; }
-        public List<ConnectionPoint> Path { get; private set; }
+        public List<Waypoint> Path { get; private set; }
         public List<float> Times { get; private set; }
         public List<float> Speeds { get; set; }
-        
-        public RobotPathEventArgs(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+
+        public RobotPathEventArgs(string robotId, string planId, List<Waypoint> path, List<float> times, List<float> speeds)
         {
             RobotId = robotId;
             PlanId = planId;
@@ -46,11 +46,11 @@ namespace CentralControl
     {
         public string RobotId { get; private set; }
         public string PlanId { get; private set; }
-        public List<ConnectionPoint> Path { get; private set; }
+        public List<Waypoint> Path { get; private set; }
         public List<float> Times { get; private set; }
         public List<float> Speeds { get; set; }
-        
-        public RobotPathAcceptedEventArgs(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+
+        public RobotPathAcceptedEventArgs(string robotId, string planId, List<Waypoint> path, List<float> times, List<float> speeds)
         {
             RobotId = robotId;
             PlanId = planId;
@@ -64,14 +64,14 @@ namespace CentralControl
     {
         public string RobotId { get; private set; }
         public string PlanId { get; private set; }
-        public List<ConnectionPoint> Path { get; private set; }
+        public List<Waypoint> Path { get; private set; }
         public List<float> NewTimes { get; private set; }
         public string ModificationType { get; private set; }
         public float ModificationValue { get; private set; }
         public List<float> NewSpeeds { get; set; }
-        
+
         public RobotPathModificationEventArgs(
-            string robotId, string planId, List<ConnectionPoint> path, 
+            string robotId, string planId, List<Waypoint> path,
             List<float> newTimes, string modificationType, float modificationValue)
         {
             RobotId = robotId;
@@ -438,7 +438,7 @@ namespace CentralControl
         }
 
         // Path triggers
-        public void TriggerRobotPathPlanned(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        public void TriggerRobotPathPlanned(string robotId, string planId, List<Waypoint> path, List<float> times, List<float> speeds)
         {
             Debug.Log($"EventManager: Robot {robotId} planned a path with {path.Count} points");
             SafeEventInvoker.SafeInvoke(OnRobotPathPlanned, this, new RobotPathEventArgs(robotId, planId, path, times, speeds));
@@ -450,7 +450,7 @@ namespace CentralControl
             SafeEventInvoker.SafeInvoke(OnRobotPathModified, this, args);
         }
 
-        public void TriggerRobotPathAccepted(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        public void TriggerRobotPathAccepted(string robotId, string planId, List<Waypoint> path, List<float> times, List<float> speeds)
         {
             Debug.Log($"EventManager: Robot {robotId}'s path {planId} has been accepted, with {path.Count} points");
             SafeEventInvoker.SafeInvoke(OnRobotPathAccepted, this, new RobotPathAcceptedEventArgs(robotId, planId, path, times, speeds));

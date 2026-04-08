@@ -31,12 +31,32 @@ namespace CentralControl
         }
         
         /// <summary>
+        /// Waypoint overload: converts Waypoint → ConnectionPoint and delegates.
+        /// CellSpace waypoints (no ConnectionPointSource) are logged as warnings.
+        /// </summary>
+        public (bool success, List<float> newTimes, float appliedShift) ResolveConflictByTimeShift(
+            string robotId,
+            List<Waypoint> path,
+            List<float> times,
+            Dictionary<string, List<TimeOccupancy>> conflicts,
+            float maxAcceptableDelay = 10.0f)
+        {
+            var cpPath = path.Where(w => w.ConnectionPointSource != null).Select(w => w.ConnectionPointSource).ToList();
+            int dropped = path.Count - cpPath.Count;
+            if (dropped > 0)
+                Debug.LogWarning($"ConflictResolver.TimeShift: {dropped} CellSpace waypoints dropped from conflict resolution (not CP-backed)");
+            if (cpPath.Count < 2)
+                return (false, null, 0);
+            return ResolveConflictByTimeShift(robotId, cpPath, times, conflicts, maxAcceptableDelay);
+        }
+
+        /// <summary>
         /// Time Shift Strategy - Shifts the time dimension of the entire path to avoid conflicts
         /// </summary>
         /// <returns>Result tuple (success, new times list, time offset)</returns>
         public (bool success, List<float> newTimes, float appliedShift) ResolveConflictByTimeShift(
-            string robotId, 
-            List<ConnectionPoint> path, 
+            string robotId,
+            List<ConnectionPoint> path,
             List<float> times,
             Dictionary<string, List<TimeOccupancy>> conflicts,
             float maxAcceptableDelay = 10.0f)
@@ -153,7 +173,28 @@ namespace CentralControl
             return totalDuration;
         }
 
-        /// <summary> 
+        /// <summary>
+        /// Waypoint overload: converts Waypoint → ConnectionPoint and delegates.
+        /// </summary>
+        public (bool success, List<float> newTimes, List<float> newSpeeds, bool hasChanges) ResolveConflictBySpeedAdjustment(
+            string robotId,
+            List<Waypoint> path,
+            List<float> times,
+            Dictionary<string, List<TimeOccupancy>> conflicts,
+            float defaultSpeed = 1.0f,
+            float maxSpeedAdjustmentRatio = 1.5f,
+            float minSpeedAdjustmentRatio = 0.5f)
+        {
+            var cpPath = path.Where(w => w.ConnectionPointSource != null).Select(w => w.ConnectionPointSource).ToList();
+            int dropped = path.Count - cpPath.Count;
+            if (dropped > 0)
+                Debug.LogWarning($"ConflictResolver.SpeedAdjust: {dropped} CellSpace waypoints dropped from conflict resolution (not CP-backed)");
+            if (cpPath.Count < 2)
+                return (false, null, null, false);
+            return ResolveConflictBySpeedAdjustment(robotId, cpPath, times, conflicts, defaultSpeed, maxSpeedAdjustmentRatio, minSpeedAdjustmentRatio);
+        }
+
+        /// <summary>
         /// Speed Adjustment Strategy - Adjusts speed to avoid conflicts
         /// </summary>
         public (bool success, List<float> newTimes, List<float> newSpeeds, bool hasChanges) ResolveConflictBySpeedAdjustment(

@@ -70,6 +70,34 @@ namespace CentralControl
             return conflicts;
         }
         
+        /// <summary>
+        /// Waypoint overload: converts Waypoint → ConnectionPoint and delegates.
+        /// </summary>
+        public Dictionary<string, List<TimeOccupancy>> DetectConflicts(
+            DynamicOccupancyLayer layer,
+            IndoorSpace indoorSpace,
+            List<Waypoint> waypointPath,
+            List<float> times,
+            string robotId,
+            string source = "Unknown",
+            OccupancyType[] excludeTypes = null)
+        {
+            if (waypointPath == null || waypointPath.Count < 2)
+                return new Dictionary<string, List<TimeOccupancy>>();
+
+            var cpPath = new List<ConnectionPoint>();
+            foreach (var wp in waypointPath)
+            {
+                if (wp.ConnectionPointSource != null)
+                    cpPath.Add(wp.ConnectionPointSource);
+            }
+
+            if (cpPath.Count < 2)
+                return new Dictionary<string, List<TimeOccupancy>>();
+
+            return DetectConflicts(layer, indoorSpace, cpPath, times, robotId, source, excludeTypes);
+        }
+
         public List<CellSpaceOccupancy> MapConnectionPointPathToCellSpaceOccupancies(
             DynamicOccupancyLayer layer,
             IndoorSpace indoorSpace, 

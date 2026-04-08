@@ -295,7 +295,7 @@ namespace CentralControl
             var robots = CentralController.Instance.robotManager.GetAllRobots();
             if (robots == null) return;
 
-            var cellSpaceGraph = CentralController.Instance.GetCellSpaceGraph();
+            var cellSpaceNavGraph = CentralController.Instance.GetCellSpaceNavigationGraph();
 
             foreach (var robot in robots)
             {
@@ -311,9 +311,9 @@ namespace CentralControl
                     planner.SetAlgorithm(algorithm);
                     planner.SetDynamics(maxAcceleration, maxDeceleration);
 
-                    if (algorithm == SearchAlgorithm.CellSpaceAStar && cellSpaceGraph != null)
+                    if (algorithm == SearchAlgorithm.CellSpaceAStar && cellSpaceNavGraph != null)
                     {
-                        planner.SetCellSpaceGraph(cellSpaceGraph);
+                        planner.SetCellSpaceNavigationGraph(cellSpaceNavGraph);
                     }
                 }
             }

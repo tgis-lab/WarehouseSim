@@ -70,9 +70,7 @@ namespace CentralControl
         #region Private Fields
         private DynamicOccupancyLayer globalOccupancyLayer;
         private IndoorSpace indoorSpace;
-        private Graph graph;
         private MapGrid mapGrid;
-        private CellSpaceGraph cellSpaceGraph;
         private ConflictResolver conflictResolver;
         private CellSpaceConflictDetector cellSpaceConflictDetector;
         private float nextNavMeshRebuildTime = 0f;
@@ -224,22 +222,6 @@ namespace CentralControl
             // Initialize robot manager with elevator manager
             InitializeRobotManager();
 
-            // Pass CellSpaceGraph to robots using CellSpaceAStar algorithm
-            if (cellSpaceGraph != null)
-            {
-                var allRobots = robotManager.GetAllRobots();
-                if (allRobots != null)
-                {
-                    foreach (var robot in allRobots)
-                    {
-                        if (robot.selectedAlgorithm == SearchAlgorithm.CellSpaceAStar)
-                        {
-                            robot.GetPathPlanner().SetCellSpaceGraph(cellSpaceGraph);
-                        }
-                    }
-                }
-            }
-
             // Mount experiment metrics collector only if not already managed by ExperimentRunner
             if (GetComponentInParent<ExperimentRunner>() == null &&
                 FindObjectOfType<ExperimentRunner>() == null &&
@@ -354,11 +336,7 @@ namespace CentralControl
                 yield return new WaitUntil(() => mapLoader.IsMapLoaded);
                 
                 indoorSpace = mapLoader.indoorSpace;
-                graph = mapLoader.GetGraph();
                 mapGrid = mapLoader.GetMapGrid();
-
-                // Build CellSpace-level graph for baseline experiments
-                cellSpaceGraph = new CellSpaceGraph(indoorSpace);
 
                 Debug.Log($"[CentralControl] Map loaded with {indoorSpace.CellSpaces.Count} cell spaces and {indoorSpace.CellBoundaries.Count} cell boundaries");
                 Debug.Log($"[CentralControl] Floor levels: {string.Join(", ", indoorSpace.GetAllFloorLevels())}");
@@ -376,7 +354,15 @@ namespace CentralControl
             if (robotManager != null)
             {
                 // Pass the necessary components
-                robotManager.InitializeRobots(indoorSpace, graph, mapGrid, globalOccupancyLayer, intersectionAreaManager);
+                robotManager.InitializeRobots(
+                    indoorSpace,
+                    mapLoader.GetCpNavigationGraph(),
+                    mapLoader.GetCellSpaceNavigationGraph(),
+                    mapLoader.GetCpQueryService(),
+                    mapLoader.GetCellQueryService(),
+                    mapGrid,
+                    globalOccupancyLayer,
+                    intersectionAreaManager);
 
                 // Note: HandleRobotPathPlanned is subscribed via the global EventManager event
                 // in InitializeConflictDetector() to avoid double subscriptions.
@@ -448,7 +434,7 @@ namespace CentralControl
             
             if (intersectionAreaManager != null && indoorSpace != null)
             {
-                intersectionAreaManager.InitializeIntersectionAreas(indoorSpace);
+                intersectionAreaManager.InitializeIntersectionAreas(indoorSpace, floorHeight);
                 Debug.Log("[CentralControl] Intersection area manager initialized");
             }
             else
@@ -714,9 +700,9 @@ namespace CentralControl
             return globalOccupancyLayer;
         }
 
-        public CellSpaceGraph GetCellSpaceGraph()
+        public NavigationGraph GetCellSpaceNavigationGraph()
         {
-            return cellSpaceGraph;
+            return mapLoader?.GetCellSpaceNavigationGraph();
         }
         #endregion
         
@@ -860,7 +846,7 @@ namespace CentralControl
 
         
         // Detect path conflicts for a specific robot
-        private bool DetectPathConflicts(string robotId, List<ConnectionPoint> path, List<float> times, string planId)
+        private bool DetectPathConflicts(string robotId, List<Waypoint> path, List<float> times, string planId)
         {
             try
             {
@@ -1044,7 +1030,7 @@ namespace CentralControl
             }
         }
         
-        private void RecordCellSpaceConflict(string robotId, string planId, List<ConnectionPoint> path, List<float> times, Dictionary<string, List<TimeOccupancy>> conflicts)
+        private void RecordCellSpaceConflict(string robotId, string planId, List<Waypoint> path, List<float> times, Dictionary<string, List<TimeOccupancy>> conflicts)
         {
             Debug.LogWarning($"[CentralControl] Could not resolve conflicts for robot {robotId}, plan {planId}");
             
@@ -1123,7 +1109,7 @@ namespace CentralControl
             NotifyRobotPathAccepted(e.RobotId, e.PlanId, e.Path, e.Times, e.Speeds);
         }
         
-        private void NotifyRobotPathModified(string robotId, string planId, List<ConnectionPoint> path, List<float> newTimes, string modificationType, float modificationValue)
+        private void NotifyRobotPathModified(string robotId, string planId, List<Waypoint> path, List<float> newTimes, string modificationType, float modificationValue)
         {
             if (EventManager.Instance != null)
             {
@@ -1140,7 +1126,7 @@ namespace CentralControl
             }
         }
         
-        private void NotifyRobotPathModifiedWithSpeed(string robotId, string planId, List<ConnectionPoint> path, List<float> newTimes, List<float> newSpeeds, float modificationValue)
+        private void NotifyRobotPathModifiedWithSpeed(string robotId, string planId, List<Waypoint> path, List<float> newTimes, List<float> newSpeeds, float modificationValue)
         {
             if (EventManager.Instance != null)
             {
@@ -1160,7 +1146,7 @@ namespace CentralControl
         }
         
 
-        private void NotifyRobotPathAccepted(string robotId, string planId, List<ConnectionPoint> path, List<float> times, List<float> speeds)
+        private void NotifyRobotPathAccepted(string robotId, string planId, List<Waypoint> path, List<float> times, List<float> speeds)
         {
             if (EventManager.Instance != null)
             {
