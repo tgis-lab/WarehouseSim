@@ -202,7 +202,7 @@ Camera:
   m_Enabled: 1
   serializedVersion: 2
   m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_BackGroundColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
@@ -226,8 +226,8 @@ Camera:
   near clip plane: 0.3
   far clip plane: 1000
   field of view: 60
-  orthographic: 0
-  orthographic size: 5
+  orthographic: 1
+  orthographic size: 10
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -252,7 +252,7 @@ Transform:
   m_GameObject: {fileID: 196572561}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 10, y: 25, z: 10}
+  m_LocalPosition: {x: 12, y: 10, z: 10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -381,11 +381,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ee471ea0ea4664c34a5b6ccd49abe5cd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  configId: C4
-  scenarioId: 3
-  algorithm: 2
+  configId: C5
+  scenarioId: 1
+  algorithm: 3
   temporalEnabled: 1
-  robotsPerFloor: 10
+  robotsPerFloor: 15
   floorCount: 3
   defaultSpeed: 1.5
   maxAcceleration: 1
@@ -394,9 +394,9 @@ MonoBehaviour:
   trialDurationSeconds: 300
   breakdownThreshold: 0.8
   snapshotIntervalSeconds: 5
-  outputDirectory: /Users/knight9/Repository/WarehouseSim_private/WarehouseSim/local-docs/experiment_results
-  autoStart: 1
-  autoQuitOnComplete: 1
+  outputDirectory: 
+  autoStart: 0
+  autoQuitOnComplete: 0
 --- !u!4 &670930190
 Transform:
   m_ObjectHideFlags: 0
@@ -898,20 +898,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   robotPrefab: {fileID: 8841361260369869970, guid: eb24a2b82e9fe46a2b4f48fa3ce1987a, type: 3}
-  numberOfRobots: 15
+  numberOfRobots: 30
   targetIndicatorPrefab: {fileID: 1239929927}
   distributeEvenly: 1
   customRobotFloorDistributions:
   - floorLevel: 1F
-    ratio: 0.2
+    ratio: 0.333
   - floorLevel: 2F
-    ratio: 0.2
+    ratio: 0.333
   - floorLevel: 3F
-    ratio: 0.6
-  - floorLevel: 3F
-    ratio: 0.6
-  - floorLevel: 3F
-    ratio: 0.6
+    ratio: 0.333
   floorHeight: 3
   baseHeight: 0.05
 --- !u!4 &1545376426

@@ -33,6 +33,7 @@ namespace CameraSystem
         public event Action<int> OnCameraTargetChanged;
 
         private CinemachineVirtualCamera virtualCamera;
+        private CinemachineBrain cinemachineBrain;
         private RobotManager robotManager;
         private RobotController currentRobot;
         private List<RobotController> robotList = new List<RobotController>();
@@ -64,10 +65,12 @@ namespace CameraSystem
                 return;
             }
 
-            if (mainCamera.GetComponent<CinemachineBrain>() == null)
+            cinemachineBrain = mainCamera.GetComponent<CinemachineBrain>();
+            if (cinemachineBrain == null)
             {
-                mainCamera.gameObject.AddComponent<CinemachineBrain>();
+                cinemachineBrain = mainCamera.gameObject.AddComponent<CinemachineBrain>();
             }
+            cinemachineBrain.enabled = false;
         }
 
         private void CreateVirtualCamera()
@@ -157,6 +160,7 @@ namespace CameraSystem
 
             if (IsOnboardActive)
             {
+                if (cinemachineBrain != null) cinemachineBrain.enabled = true;
                 virtualCamera.Priority = PRIORITY_ACTIVE;
 
                 if (currentRobot == null)
@@ -171,6 +175,7 @@ namespace CameraSystem
                     {
                         IsOnboardActive = false;
                         virtualCamera.Priority = PRIORITY_INACTIVE;
+                        if (cinemachineBrain != null) cinemachineBrain.enabled = false;
                         Debug.LogWarning("[RobotCamera] No robots available.");
                     }
                 }
@@ -178,6 +183,7 @@ namespace CameraSystem
             else
             {
                 virtualCamera.Priority = PRIORITY_INACTIVE;
+                if (cinemachineBrain != null) cinemachineBrain.enabled = false;
             }
         }
 

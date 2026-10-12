@@ -14,9 +14,6 @@
 # MemoryCaptures folder (profiling data)
 /[Mm]emory[Cc]aptures/
 
-# Recordings (Video/Audio captures)
-/[Rr]ecordings/
-
 # Asset meta data - keep .meta files in version control
 # Uncomment the line below if you don't want to track .meta files
 # *.meta

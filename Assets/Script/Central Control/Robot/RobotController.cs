@@ -3573,28 +3573,35 @@ namespace CentralControl.RobotControl
         #endregion
 
         #region Visualization
+
+        private static readonly Color[] PathColors = new Color[]
+        {
+            new Color(0.89f, 0.10f, 0.11f), // Red
+            new Color(0.12f, 0.47f, 0.71f), // Blue
+            new Color(0.17f, 0.63f, 0.17f), // Green
+            new Color(1.00f, 0.50f, 0.00f), // Orange
+            new Color(0.58f, 0.40f, 0.74f), // Purple
+            new Color(0.09f, 0.75f, 0.81f), // Cyan
+            new Color(0.84f, 0.15f, 0.52f), // Magenta
+            new Color(0.55f, 0.34f, 0.02f), // Brown
+        };
+
         private void OnDrawGizmos()
         {
             if (!Application.isPlaying) return;
-            
-            // Visualize velocity
-            Gizmos.color = Color.blue;
-            Gizmos.DrawLine(transform.position, transform.position + currentVelocity * 0.5f);
-            
-            // Visualize path
-            if (currentPath != null && currentPath.Count > 0)
-            {
-                Gizmos.color = Color.cyan;
-                
-                // Draw the entire path
-                for (int i = 0; i < currentPath.Count - 1; i++)
-                {
-                    Vector3 start = currentPath[i].Position;
-                    Vector3 end = currentPath[i + 1].Position;
-                    
-                    Gizmos.DrawLine(start, end);
-                }
-            }
+
+            if (currentPath == null || currentPath.Count < 2) return;
+
+#if UNITY_EDITOR
+            Color pathColor = PathColors[(Id - 1) % PathColors.Length];
+            UnityEditor.Handles.color = pathColor;
+
+            Vector3[] points = new Vector3[currentPath.Count];
+            for (int i = 0; i < currentPath.Count; i++)
+                points[i] = currentPath[i].Position + Vector3.up * 0.1f;
+
+            UnityEditor.Handles.DrawAAPolyLine(6f, points);
+#endif
         }
         
         public void UpdateTargetIndicator()
