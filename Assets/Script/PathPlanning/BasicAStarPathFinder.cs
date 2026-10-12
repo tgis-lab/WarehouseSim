@@ -61,8 +61,10 @@ namespace PathPlanning
 
                     var current = graph.GetNode(currentId);
                     float distance = Vector3.Distance(current.Position, neighbor.Position);
-                    float currentSpeed = speed;
-                    float tentativeG = GetScore(gScore, currentId) + (distance / currentSpeed);
+                    // Use distance (not time) as g-score to match the Euclidean heuristic.
+                    // Previously used distance/speed, causing unit mismatch with heuristic
+                    // and making A* inadmissible (overestimate by speed factor).
+                    float tentativeG = GetScore(gScore, currentId) + distance;
 
                     if (!openSet.Contains(neighbor.Id))
                         openSet.Add(neighbor.Id);
@@ -70,7 +72,7 @@ namespace PathPlanning
                         continue;
 
                     previous[neighbor.Id] = currentId;
-                    speedTo[neighbor.Id] = currentSpeed;
+                    speedTo[neighbor.Id] = speed;
                     gScore[neighbor.Id] = tentativeG;
                     fScore[neighbor.Id] = tentativeG + Heuristic(neighbor, end);
                 }
