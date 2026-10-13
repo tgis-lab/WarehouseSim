@@ -13,6 +13,10 @@ WarehouseSim enables researchers and developers to:
 
 The core of this platform is a **robust spatial data model** that represents indoor spaces as navigable and non-navigable cells with connectivity, supporting complex multi-floor coordination scenarios.
 
+![Multi-robot trajectories over warehouse aisles, with elevator shafts on the left](figs/20261013-174836.jpeg)
+
+*Simulation view: colored robot paths across storage aisles and picking stations, with vertical elevator connections on the left.*
+
 ## System Architecture
 
 The system is organized into five core modules:
@@ -26,6 +30,10 @@ The map system models warehouse environments using a spatial data model inspired
 - **Multi-Floor Support**: Native support for multi-level warehouses with vertical connections (elevators, stairs)
 - **Dynamic Occupancy Layer**: Time-space representation tracking robot occupancy over time, enabling conflict-free path planning
 - **Spatial Indexing**: R-tree and interval tree structures for efficient spatial and temporal queries
+
+![Navigation graph overlaid on warehouse aisles and picking stations](figs/20261013-174847.jpeg)
+
+*Map view: the cyan navigation graph connects aisles and picking stations (green and yellow markers).*
 
 ### 2. Path Planning System
 
